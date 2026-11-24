@@ -6,7 +6,6 @@ import {
   DEFAULT_CAMERA_BOUNDS,
   DEFAULT_CONSTRUCTION_STAGES,
   DEFAULT_ISOMETRIC_PROJECTION,
-  type ConstructionPaletteSpec,
   type ConstructionStageSpec,
   type GroundMaterialSpec,
   type PackRoleLookSpec,
@@ -20,8 +19,6 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   ruler: {
     id: 'egypt-pharaoh',
     label: { en: 'Pharaoh', ru: 'Фараон' },
-    tunicColor: '#F6EFE0',
-    trimColor: '#F2C14E',
     prop: 'staff',
     headgear: 'crown',
     largeItem: true,
@@ -30,8 +27,6 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   head: {
     id: 'egypt-overseer',
     label: { en: 'Overseer', ru: 'Надсмотрщик' },
-    tunicColor: '#EFE3C8',
-    trimColor: '#D69A3A',
     prop: 'staff',
     headgear: 'circlet',
     largeItem: true,
@@ -40,8 +35,6 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   guard_captain: {
     id: 'egypt-guard-captain',
     label: { en: 'Captain of the Guard', ru: 'Начальник стражи' },
-    tunicColor: '#C9B18A',
-    trimColor: '#C44536',
     prop: 'staff',
     headgear: 'helm',
     largeItem: true,
@@ -50,8 +43,6 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   architect: {
     id: 'egypt-architect',
     label: { en: 'Master Architect', ru: 'Зодчий со свитком' },
-    tunicColor: '#F2E7CF',
-    trimColor: '#4888B5',
     prop: 'scroll',
     /* The approved tier 3 architect (hd-char-lvl05) wears a nemes; the hood is the engine's nearest headwear. */
     headgear: 'hood',
@@ -59,40 +50,30 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   checker: {
     id: 'egypt-inspector',
     label: { en: 'Stone Inspector', ru: 'Проверяющий со свитком' },
-    tunicColor: '#E4DFD2',
-    trimColor: '#3E7A9C',
     prop: 'scroll',
     headgear: 'cap',
   },
   builder: {
     id: 'egypt-mason',
     label: { en: 'Stone Mason', ru: 'Каменщик-строитель' },
-    tunicColor: '#DFC59B',
-    trimColor: '#9E7348',
     prop: 'stone',
     headgear: 'none',
   },
   scribe: {
     id: 'egypt-scribe',
     label: { en: 'Papyrus Scribe', ru: 'Писец с папирусом' },
-    tunicColor: '#F5EEDB',
-    trimColor: '#5B8A5B',
     prop: 'scroll',
     headgear: 'cap',
   },
   artisan: {
     id: 'egypt-relief-carver',
     label: { en: 'Relief Carver', ru: 'Резчик рельефов' },
-    tunicColor: '#E8D3B0',
-    trimColor: '#C25B7C',
     prop: 'chisel',
     headgear: 'cap',
   },
   patrol: {
     id: 'egypt-medjay',
     label: { en: 'Medjay Patrol', ru: 'Патрульный меджай' },
-    tunicColor: '#C8A97E',
-    trimColor: '#D97B29',
     prop: 'gong',
     headgear: 'helm',
     largeItem: true,
@@ -100,16 +81,12 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   inspector_scout: {
     id: 'egypt-scout',
     label: { en: 'Wall Scout', ru: 'Дозорный-следопыт' },
-    tunicColor: '#BDA782',
-    trimColor: '#D64933',
     prop: 'scroll',
     headgear: 'hood',
   },
   firefighter: {
     id: 'egypt-firefighter',
     label: { en: 'Water Bearer & Repairer', ru: 'Пожарный и ремонтник' },
-    tunicColor: '#D9C29C',
-    trimColor: '#2E8BC0',
     prop: 'water_jar',
     headgear: 'cap',
     largeItem: true,
@@ -117,8 +94,6 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   caravan_runner: {
     id: 'egypt-caravan-messenger',
     label: { en: 'Caravan Messenger', ru: 'Гонец и караванщик' },
-    tunicColor: '#E5CFA8',
-    trimColor: '#2F9E8F',
     prop: 'banner',
     headgear: 'hood',
     largeItem: true,
@@ -126,24 +101,18 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   keykeeper: {
     id: 'egypt-keykeeper',
     label: { en: 'Granary Keykeeper', ru: 'Ключник амбаров' },
-    tunicColor: '#E6D6B5',
-    trimColor: '#C79B3B',
     prop: 'key',
     headgear: 'cap',
   },
   machine_keeper: {
     id: 'egypt-machine-keeper',
     label: { en: 'Workshop Keeper', ru: 'Смотритель машин' },
-    tunicColor: '#CFC2AA',
-    trimColor: '#6D819C',
     prop: 'tool',
     headgear: 'cap',
   },
   gate_guard: {
     id: 'egypt-gate-guard',
     label: { en: 'Gate Sentinel', ru: 'Стражник у ворот' },
-    tunicColor: '#C9B38C',
-    trimColor: '#B84A39',
     prop: 'spear_shield',
     headgear: 'helm',
     largeItem: true,
@@ -151,8 +120,6 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   red_team: {
     id: 'egypt-skirmisher',
     label: { en: 'Wall Tester', ru: 'Лазутчик учений' },
-    tunicColor: '#7A5448',
-    trimColor: '#E05D44',
     prop: 'spear_shield',
     headgear: 'hood',
     largeItem: true,
@@ -160,8 +127,6 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   road_builder: {
     id: 'egypt-canal-builder',
     label: { en: 'Canal & Ramp Builder', ru: 'Строитель каналов и пандусов' },
-    tunicColor: '#D4BA8E',
-    trimColor: '#5C8D6B',
     prop: 'tool',
     headgear: 'none',
     /* Its tool is a hoe, a large item (order v3 4.4). */
@@ -170,8 +135,6 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   turnkey_specialist: {
     id: 'egypt-royal-master',
     label: { en: 'Royal Master Builder', ru: 'Мастер под ключ' },
-    tunicColor: '#2E5673',
-    trimColor: '#F2C14E',
     prop: 'banner',
     headgear: 'circlet',
     largeItem: true,
@@ -180,8 +143,6 @@ const EGYPT_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
   day_laborer: {
     id: 'egypt-day-laborer',
     label: { en: 'Day Laborer', ru: 'Поденщик' },
-    tunicColor: '#B39B76',
-    trimColor: '#7D6A4E',
     prop: 'stone',
     headgear: 'none',
   },
@@ -294,21 +255,6 @@ const EGYPT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = DEFAULT_CONS
   label: EGYPT_STAGE_LABELS[s.id] ?? s.label,
 }));
 
-const EGYPT_CONSTRUCTION_PALETTE: ConstructionPaletteSpec = {
-  scaffoldWood: '#BA8748',
-  rampEarth: '#D2B484',
-  dustColor: '#E8D8B4',
-  smokeColor: '#767880',
-  waterColor: '#4CC3EA',
-  awningPrimary: '#C96A4B',
-  awningSecondary: '#F7EBD0',
-  capstoneColor: '#FFE066',
-  celebrationPrimary: '#FFE474',
-  celebrationSecondary: '#4DA167',
-  statueBaseColor: '#D6C6A6',
-  statueFinishedColor: '#F0CA60',
-};
-
 export const EGYPT_WORLD_PACK: WorldPackManifest = {
   id: 'egypt',
   name: { en: 'Ancient Egypt', ru: 'Древний Египет' },
@@ -335,7 +281,6 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
   roleLooks: EGYPT_ROLE_LOOKS,
   classFallbackLooks: EGYPT_CLASS_FALLBACKS,
   constructionStages: EGYPT_CONSTRUCTION_STAGES,
-  constructionPalette: EGYPT_CONSTRUCTION_PALETTE,
   tiles: EGYPT_TILE_KINDS.map(k => ({
     id: k.id,
     fill: k.color,

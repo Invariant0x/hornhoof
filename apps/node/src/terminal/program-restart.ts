@@ -24,6 +24,19 @@ export function restartRefusal(a: RestartEvidence | null, jobId: string, now: nu
   return null;
 }
 
+const SESSION_FLAGS: Record<Exclude<TermProgram['kind'], 'codex'>, string> = {
+  claude: '--resume',
+  antigravity: '--conversation',
+  kimi: '-S',
+};
+
+function placeSessionFlag(command: string[], kind: Exclude<TermProgram['kind'], 'codex'>, flag: string, sessionId: string): void {
+  const at = command.findIndex(arg => arg === flag || (kind === 'claude' && arg === '--session-id'));
+  if (at >= 0) command.splice(at, 2, flag, sessionId);
+  else if (kind === 'antigravity') command.splice(1, 0, flag, sessionId);
+  else command.push(flag, sessionId);
+}
+
 /* Resume with every original flag, without adding an instructions file that the first launch did not have. */
 export function resumeCommand(kind: TermProgram['kind'], original: string[], sessionId: string): string[] {
   const command = [...original];
@@ -34,10 +47,7 @@ export function resumeCommand(kind: TermProgram['kind'], original: string[], ses
     command.splice(1, 0, 'resume', sessionId);
     return command;
   }
-  const flag = kind === 'claude' ? '--resume' : '-S';
-  const at = command.findIndex(arg => arg === flag || (kind === 'claude' && arg === '--session-id'));
-  if (at >= 0) command.splice(at, 2, flag, sessionId);
-  else command.push(flag, sessionId);
+  placeSessionFlag(command, kind, SESSION_FLAGS[kind], sessionId);
   return command;
 }
 

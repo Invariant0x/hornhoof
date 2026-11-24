@@ -21,8 +21,9 @@ import {
 import { hashSeed } from './prng';
 import type { ResidentEntity, ResidentPose } from './residents';
 
-export const ART_CONTRACT_VERSION = 2;
-export const ART_INDEX_FILE = 'art-index.json';
+import { ART_CONTRACT_VERSION, ART_INDEX_FILE } from './art-contract';
+
+export { ART_CONTRACT_VERSION, ART_INDEX_FILE };
 /* Two pixels of slack on master 4x geometry: one pixel of anti-aliasing on each side. */
 export const ART_GEOMETRY_TOLERANCE_PX = 2;
 export const PEOPLE_TIER_COUNT = 5;
@@ -60,6 +61,8 @@ export type BuildingPicturePassport = Readonly<{
   wallCutY?: number;
   flagAnchor?: ArtPoint;
   awningAnchor?: ArtPoint;
+  /* The building takes the awning loop sheet at its awningAnchor; without it, no awning loop (a painted awning, art order 24.11). */
+  awningLoop?: boolean;
   /* Top centre (apex, spire, chimney) where a capstone or a top loop attaches. */
   topAnchor?: ArtPoint;
   workSlots?: readonly ArtWorkSlotSpec[];
@@ -134,7 +137,9 @@ export type SheetPassport = Readonly<{
 
 export type ArtPassport = BuildingPicturePassport | AnchorPassport | SheetPassport;
 
-export type ArtIndexEntry = Readonly<{ w: number; h: number; passport?: ArtPassport }>;
+/* `bytes` and `hash` (16 hex of the SHA-256 of the file) let the browser keep one copy of each version of a file and
+   download only the files whose hash changed (art-files.ts, #1947); an index written before them has neither. */
+export type ArtIndexEntry = Readonly<{ w: number; h: number; bytes?: number; hash?: string; passport?: ArtPassport }>;
 
 export type ArtIndex = Readonly<{
   contract: number;
@@ -506,6 +511,11 @@ function checkPicture(
       errors.push(`${path}: ${name} lies outside the ${entry.w} x ${entry.h} picture`);
     }
   }
+  if (p.awningLoop !== undefined && typeof p.awningLoop !== 'boolean') {
+    errors.push(`${path}: awningLoop must be true or false`);
+  } else if (p.awningLoop === true && p.awningAnchor === undefined) {
+    errors.push(`${path}: awningLoop needs an awningAnchor, the point where the awning loop hangs`);
+  }
   for (const [name, y] of [['wallTopLine', p.wallTopLine], ['roofLine', p.roofLine], ['wallCutY', p.wallCutY]] as const) {
     if (y !== undefined && (!isFiniteNum(y) || y < 0 || y >= entry.h)) {
       errors.push(`${path}: ${name} lies outside the picture`);
@@ -626,6 +636,39 @@ function stepFootprints(buildings: WorldArtCatalog['buildings']): Map<string, Fo
   return out;
 }
 
+/* The files of an art folder the engine draws (#1947: the loading screen downloads these and leaves the rest): the
+   catalog's slots with the layers and cloth masks their passports name, and the ground, liquid, street and plant files
+   the pack's manifest names. It may name files the folder lacks. */
+export function drawnArtPaths(pack: WorldPackManifest, index: ArtIndex): ReadonlySet<string> {
+  const declared = new Set(declaredArtFiles(pack).map(d => d.path));
+  const out = new Set(declared);
+  for (const [path, entry] of Object.entries(index.files)) {
+    const layers = (entry.passport as BuildingPicturePassport | undefined)?.layers;
+    if (!declared.has(path) || !Array.isArray(layers)) continue;
+    for (const layer of layers) {
+      if (typeof layer?.file !== 'string') continue;
+      const lp = artLayerPath(path, layer.file);
+      out.add(lp);
+      out.add(clothMaskPath(lp));
+    }
+  }
+  const t = pack.terrainArt;
+  const named = [
+    ...Object.values(t?.ground ?? {}),
+    ...Object.values(t?.edges ?? {}),
+    ...Object.values(t?.roads ?? {}),
+    t?.defaultEdge,
+    t?.shoreEdge,
+    t?.liquid?.bed,
+    t?.liquid?.ripples,
+    t?.liquid?.surface,
+    t?.pathStrip,
+    ...(pack.plants ?? []).flatMap(k => (k.art ?? []).flatMap(a => [a.image, a.windMask])),
+  ];
+  for (const f of named) if (f) out.add(f);
+  return out;
+}
+
 export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtIndexReport {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -696,6 +739,39 @@ export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtI
     present: Object.keys(index.files).length,
     missingRequired,
   };
+}
+
+/* A file the art check leaves out of the index, with what is wrong with it. */
+export type HeldArtFile = Readonly<{ path: string; reasons: readonly string[] }>;
+
+/* The index the engine may draw from (Design, 24.11: one bad file never switches the whole index off): every file the
+   check rejects is held out with its reasons, and the rest stays in. Holding a file out can make another fail (a cloak
+   whose sheet is held), so it checks again until nothing more is held. An error of the index as a whole (another pack
+   or contract) holds nothing: report.ok is then false and nothing may be written. Every file error starts with the
+   file's own path, so the error is laid on the longest path of the index that it starts with. */
+export function acceptedArtIndex(pack: WorldPackManifest, index: ArtIndex): { index: ArtIndex; held: HeldArtFile[]; report: ArtIndexReport } {
+  const held: HeldArtFile[] = [];
+  const files: Record<string, ArtIndexEntry> = { ...index.files };
+  for (;;) {
+    const accepted: ArtIndex = { ...index, files: { ...files } };
+    const report = validateArtIndex(pack, accepted);
+    const paths = Object.keys(files).sort((a, b) => b.length - a.length);
+    const byFile = new Map<string, string[]>();
+    let whole = false;
+    for (const error of report.errors) {
+      const path = paths.find(p => error.startsWith(`${p}: `));
+      if (path === undefined) whole = true;
+      else byFile.set(path, [...(byFile.get(path) ?? []), error.slice(path.length + 2)]);
+    }
+    if (whole || byFile.size === 0) {
+      held.sort((a, b) => a.path.localeCompare(b.path));
+      return { index: accepted, held, report };
+    }
+    for (const [path, reasons] of byFile) {
+      held.push({ path, reasons });
+      delete files[path];
+    }
+  }
 }
 
 /* Structural checks of a pack's catalog, run by validateWorldPack. */
@@ -839,16 +915,39 @@ function passportLayers(files: ArtIndex['files'], path: string, main: BuildingPi
 }
 
 /* The variant to draw: the wanted one when its finished picture is in the folder, else the next delivered one going
-   round; undefined for a step without variants, null when none is delivered. */
-function deliveredVariant(files: ArtIndex['files'], kind: BuildingKind, step: ArtBuildingStep, wanted: number): number | null | undefined {
+   round; undefined for a step without variants, null when none is delivered. A building under construction first
+   goes round for a variant with every stage drawn (`built`), and takes the wanted one as above when none has. */
+function deliveredVariant(
+  files: ArtIndex['files'],
+  kind: BuildingKind,
+  step: ArtBuildingStep,
+  wanted: number,
+  built: ((at: number | undefined) => boolean) | null,
+): number | null | undefined {
   const count = step.variants;
   if (!count) return undefined;
+  const delivered: (number | undefined)[] = [];
   for (let k = 0; k < count; k++) {
     const at = variantFolder(files, kind, step, (((wanted + k) % count) + count) % count);
-    if (at !== null) return at;
+    if (at !== null) delivered.push(at);
   }
-  return null;
+  if (delivered.length === 0) return null;
+  /* findIndex, not find: the flat step folder is the variant undefined. */
+  const full = built ? delivered.findIndex(at => built(at)) : -1;
+  return delivered[Math.max(0, full)];
 }
+
+/* Whether a variant (undefined: the flat step folder) holds every picture the art check requires of its step: each
+   stage, as its own picture or its stage_NN, and the finished look. Design, 24.11 (company note #107): a variant with
+   stages not drawn yet stands only as a finished building; construction takes one with every stage. */
+function hasEveryStage(pack: WorldPackManifest, files: ArtIndex['files'], kind: BuildingKind, step: ArtBuildingStep, at: number | undefined): boolean {
+  return declaredStepFiles(pack, kind, picture => stepPicturePath(kind, step, picture, at))
+    .filter(file => file.required)
+    .every(file => [file.path, ...(file.alternatives ?? [])].some(path => files[path]));
+}
+
+/* Built in this session: a construction job under way or finished. A demolition keeps the look the building stood in. */
+const isBuildJob = (job: BuildingConstructionState | null): boolean => job?.phase === 'building' || job?.phase === 'complete';
 
 /* Where variant v of a step is delivered: its own folder, the step folder for v01 when the step came with no variant
    folders (order v3), or nowhere (null). */
@@ -859,14 +958,16 @@ function variantFolder(files: ArtIndex['files'], kind: BuildingKind, step: ArtBu
 
 /* The step a building shows and the paths of its pictures in the variant to draw; null without art for it. */
 function shownStep(
-  art: WorldArtCatalog,
+  pack: WorldPackManifest,
   files: ArtIndex['files'],
   building: CityBuilding,
+  job: BuildingConstructionState | null,
   wanted: number | undefined,
 ): { step: ArtBuildingStep; base: (picture: string) => string } | null {
-  const step = pickStep(art.buildings[building.kind], building, building.stage);
+  const step = pickStep(pack.art?.buildings[building.kind], building, building.stage);
   if (!step) return null;
-  const variant = deliveredVariant(files, building.kind, step, wanted ?? 0);
+  const built = isBuildJob(job) ? (at: number | undefined) => hasEveryStage(pack, files, building.kind, step, at) : null;
+  const variant = deliveredVariant(files, building.kind, step, wanted ?? 0, built);
   if (variant === null) return null;
   return { step, base: picture => stepPicturePath(building.kind, step, picture, variant) };
 }
@@ -912,6 +1013,9 @@ function pushFlag(
 
 /* Chooses the pictures for a building at its current growth or construction stage,
    or null when any picture it needs is missing so the placeholder draws instead. */
+/* The picture a building shows: the one its step, stage, fill or tier asks for, or, when that one is not drawn yet, the
+   nearest drawn picture of the same line (Design, 24.11, company note #107: no placeholder box in front of people).
+   Null only when the step has no picture at all. */
 export function resolveBuildingArt(
   pack: WorldPackManifest,
   index: ArtIndex | null,
@@ -919,13 +1023,100 @@ export function resolveBuildingArt(
   job: BuildingConstructionState | null,
   options: BuildingArtOptions = {},
 ): BuildingArt | null {
+  return exactBuildingArt(pack, index, building, job, options) ?? nearestDrawnArt(pack, index, building, job, options);
+}
+
+/* The fill level a supply building shows, 0 when it rests. */
+function supplyFill(building: CityBuilding): number {
+  const fullness = building.resting ? 0 : (building.fullness ?? 0.5);
+  return Math.max(0, Math.min(SUPPLY_FILL_LEVELS - 1, Math.round(fullness * (SUPPLY_FILL_LEVELS - 1))));
+}
+
+/* The tier a monument shows (1..the pack's tiers), and whether its goal is reached. */
+function monumentTier(pack: WorldPackManifest, building: CityBuilding, job: BuildingConstructionState | null): { tier: number; reached: boolean } {
+  const tiers = pack.stageCounts.monument;
+  const stage = job ? job.currentStage : building.stage;
+  const maxS = Math.max(1, job ? job.maxStage : building.maxStage);
+  const reached = job ? job.phase === 'complete' && stage >= maxS : Boolean(building.reached);
+  const progress = job ? stage / maxS : (building.progress ?? stage / maxS);
+  return { tier: reached ? tiers : Math.max(1, Math.min(tiers, Math.round(progress * tiers))), reached };
+}
+
+const numberedPictures = (prefix: string, from: number, to: number, pad = true): string[] =>
+  Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${pad ? pad2(from + i) : String(from + i)}`);
+
+/* A step's pictures in their order, and the place in that line the building asks for now: fill levels, tiers, carving
+   stages, or the construction stages followed by the finished look. */
+function pictureLine(pack: WorldPackManifest, building: CityBuilding, job: BuildingConstructionState | null): { names: string[]; wanted: number } {
+  if (building.kind === 'supply') {
+    return { names: numberedPictures('fill_', 0, SUPPLY_FILL_LEVELS - 1, false), wanted: job ? SUPPLY_FILL_LEVELS - 1 : supplyFill(building) };
+  }
+  if (building.kind === 'monument') {
+    return { names: numberedPictures('tier_', 1, pack.stageCounts.monument), wanted: monumentTier(pack, building, job).tier - 1 };
+  }
+  const stage = job ? job.currentStage : building.stage;
+  if (building.kind === 'statue') {
+    const last = pack.stageCounts.statue;
+    return { names: numberedPictures('stage_', 1, last), wanted: Math.max(1, Math.min(last, stage)) - 1 };
+  }
+  const own = pack.stageCounts.construction;
+  const names = [...numberedPictures('stage_', 1, own), 'complete'];
+  if (!job) return { names, wanted: own };
+  const stageNo = CONSTRUCTION_STAGE_IDS.indexOf(resolveStageSpecForBuilding(building, job, pack).id) + 1;
+  return { names, wanted: Math.max(0, Math.min(own, stageNo - 1)) };
+}
+
+/* The drawn place nearest to the wanted one; at the same distance the later one. */
+function nearestDrawnPlace(drawn: readonly boolean[], wanted: number): number | null {
+  for (let d = 0; d < drawn.length; d++) {
+    if (drawn[wanted + d]) return wanted + d;
+    if (d > 0 && drawn[wanted - d]) return wanted - d;
+  }
+  return null;
+}
+
+/* The nearest drawn picture of the building's line, without flag or capstone, which only its own picture carries. */
+function nearestDrawnArt(
+  pack: WorldPackManifest,
+  index: ArtIndex | null,
+  building: CityBuilding,
+  job: BuildingConstructionState | null,
+  options: BuildingArtOptions,
+): BuildingArt | null {
+  const art = pack.art;
+  if (!art || !index || (job && job.phase === 'cleared')) return null;
+  const files = index.files;
+  const shown = shownStep(pack, files, building, job, options.variant);
+  if (!shown) return null;
+  const { names, wanted } = pictureLine(pack, building, job);
+  const place = nearestDrawnPlace(names.map(name => hasPicturePassport(files[shown.base(name)])), wanted);
+  if (place === null) return null;
+  const path = shown.base(names[place]!);
+  const entry = files[path] as ArtIndexEntry & { passport: BuildingPicturePassport };
+  const own = building.kind === 'statue' || building.kind === 'monument' ? [] : passportLayers(files, path, entry.passport);
+  const main = entry.passport;
+  return {
+    layers: [pictureLayer(path, entry), ...own],
+    artPxPerTile: (main.corners.right.x - main.corners.left.x) / Math.max(1, building.spanCol),
+    passport: main,
+  };
+}
+
+/* The picture the building's step, stage, fill or tier asks for; null when that one is not drawn. */
+function exactBuildingArt(
+  pack: WorldPackManifest,
+  index: ArtIndex | null,
+  building: CityBuilding,
+  job: BuildingConstructionState | null,
+  options: BuildingArtOptions,
+): BuildingArt | null {
   const art = pack.art;
   if (!art || !index) return null;
   if (job && job.phase === 'cleared') return null;
   const files = index.files;
   const stage = job ? job.currentStage : building.stage;
   /* Growth steps follow the building's own stage or level; a construction job only walks pictures inside the step. */
-  const shown = shownStep(art, files, building, options.variant);
+  const shown = shownStep(pack, files, building, job, options.variant);
   if (!shown) return null;
   const { step, base } = shown;
 
@@ -944,11 +1135,7 @@ export function resolveBuildingArt(
   }
 
   if (building.kind === 'monument') {
-    const tiers = pack.stageCounts.monument;
-    const maxS = Math.max(1, job ? job.maxStage : building.maxStage);
-    const reached = job ? job.phase === 'complete' && stage >= maxS : Boolean(building.reached);
-    const progress = job ? stage / maxS : (building.progress ?? stage / maxS);
-    const tier = reached ? tiers : Math.max(1, Math.min(tiers, Math.round(progress * tiers)));
+    const { tier, reached } = monumentTier(pack, building, job);
     const path = base(`tier_${pad2(tier)}`);
     const entry = files[path];
     if (!hasPicturePassport(entry)) return null;
@@ -969,8 +1156,7 @@ export function resolveBuildingArt(
   if (!job) {
     let picture = 'complete';
     if (building.kind === 'supply') {
-      const fullness = building.resting ? 0 : (building.fullness ?? 0.5);
-      picture = `fill_${Math.max(0, Math.min(SUPPLY_FILL_LEVELS - 1, Math.round(fullness * (SUPPLY_FILL_LEVELS - 1))))}`;
+      picture = `fill_${supplyFill(building)}`;
     } else if (options.upgrading && files[base('annex')]) {
       picture = 'annex';
     } else if (building.stage >= building.maxStage && files[base('upgraded')]) {

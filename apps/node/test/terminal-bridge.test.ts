@@ -150,6 +150,13 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect(got.headers.get('x-file-name')).toBe('run.log');
     expect(file.up.seen).toEqual(['GET /api/attachments/file?task=12&file=run.log ', 'GET /api/attachments/file?task=12&file=run.log ']);
     expect(file.pauses).toEqual([1_000]);
+
+    const tunnel = await bridgeTo([404, 502]);
+    const inbox = await tunnel.post(toolCall('inbox'));
+    expect(inbox.status).toBe(200);
+    expect(await inbox.json()).toEqual({ jsonrpc: '2.0', id: 1, result: { ok: true } });
+    expect(tunnel.up.seen).toHaveLength(3);
+    expect(tunnel.pauses).toEqual([1_000, 2_000]);
   });
 
   it('gives an outage that lasts back after a few tries, and never asks again for a call that may have changed something', async () => {

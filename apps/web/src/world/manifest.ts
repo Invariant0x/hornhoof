@@ -27,8 +27,6 @@ export type RoleHeadgearKind = 'none' | 'cap' | 'hood' | 'helm' | 'crown' | 'cir
 export type PackRoleLookSpec = Readonly<{
   id: string;
   label: Readonly<{ en: string; ru: string }>;
-  tunicColor: string;
-  trimColor: string;
   prop: RolePropKind;
   headgear: RoleHeadgearKind;
   insignia?: boolean;
@@ -117,21 +115,6 @@ export type ConstructionStageSpec = Readonly<{
   hasFinishing: boolean;
   hasUpgrades: boolean;
   defaultLoops: readonly BuildingLoopKind[];
-}>;
-
-export type ConstructionPaletteSpec = Readonly<{
-  scaffoldWood: string;
-  rampEarth: string;
-  dustColor: string;
-  smokeColor: string;
-  waterColor: string;
-  awningPrimary: string;
-  awningSecondary: string;
-  capstoneColor: string;
-  celebrationPrimary: string;
-  celebrationSecondary: string;
-  statueBaseColor: string;
-  statueFinishedColor: string;
 }>;
 
 export type Direction8 = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
@@ -520,7 +503,6 @@ export type WorldPackManifest = Readonly<{
   classFallbackLooks?: Readonly<Record<ResidentRoleClass, PackRoleLookSpec>>;
   /* Pack-owned Stage 6 construction stage sequence (1..10) and visual loop palette. */
   constructionStages?: readonly ConstructionStageSpec[];
-  constructionPalette?: ConstructionPaletteSpec;
   materials?: readonly GroundMaterialSpec[];
   liquidLayer?: LiquidLayerSpec;
   terrainRecipe?: TerrainRecipeSpec;
@@ -587,8 +569,6 @@ const ENGINE_DEFAULT_CLASS_LOOKS: Readonly<Record<ResidentRoleClass, PackRoleLoo
   ruler: {
     id: 'default-ruler',
     label: { en: 'Ruler', ru: 'Правитель' },
-    tunicColor: '#EAE0C8',
-    trimColor: '#E8B948',
     prop: 'staff',
     headgear: 'crown',
     insignia: true,
@@ -596,8 +576,6 @@ const ENGINE_DEFAULT_CLASS_LOOKS: Readonly<Record<ResidentRoleClass, PackRoleLoo
   head: {
     id: 'default-head',
     label: { en: 'Department Head', ru: 'Глава отдела' },
-    tunicColor: '#D6C7A8',
-    trimColor: '#5CA6E6',
     prop: 'staff',
     headgear: 'circlet',
     insignia: true,
@@ -605,24 +583,18 @@ const ENGINE_DEFAULT_CLASS_LOOKS: Readonly<Record<ResidentRoleClass, PackRoleLoo
   checker: {
     id: 'default-checker',
     label: { en: 'Inspector', ru: 'Проверяющий' },
-    tunicColor: '#C5CFD9',
-    trimColor: '#6994C2',
     prop: 'scroll',
     headgear: 'cap',
   },
   executor: {
     id: 'default-executor',
     label: { en: 'Builder', ru: 'Исполнитель' },
-    tunicColor: '#D4BC94',
-    trimColor: '#A67C52',
     prop: 'tool',
     headgear: 'none',
   },
   turnkey: {
     id: 'default-turnkey',
     label: { en: 'Turnkey Specialist', ru: 'Универсал под ключ' },
-    tunicColor: '#48607A',
-    trimColor: '#E5B85C',
     prop: 'banner',
     headgear: 'hood',
     insignia: true,
@@ -630,8 +602,6 @@ const ENGINE_DEFAULT_CLASS_LOOKS: Readonly<Record<ResidentRoleClass, PackRoleLoo
   day_laborer: {
     id: 'default-day-laborer',
     label: { en: 'Day Laborer', ru: 'Поденщик' },
-    tunicColor: '#9C8D78',
-    trimColor: '#736553',
     prop: 'stone',
     headgear: 'none',
   },
@@ -780,30 +750,11 @@ export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
   },
 ];
 
-export const DEFAULT_CONSTRUCTION_PALETTE: ConstructionPaletteSpec = {
-  scaffoldWood: '#B9874A',
-  rampEarth: '#C9AD7F',
-  dustColor: '#DFCFAF',
-  smokeColor: '#6D717C',
-  waterColor: '#56BDE8',
-  awningPrimary: '#C96A4B',
-  awningSecondary: '#F2E5C4',
-  capstoneColor: '#FFDC62',
-  celebrationPrimary: '#FFE270',
-  celebrationSecondary: '#5FD1A8',
-  statueBaseColor: '#C5B89F',
-  statueFinishedColor: '#ECCB6C',
-};
-
 export function resolveConstructionStages(pack: WorldPackManifest): readonly ConstructionStageSpec[] {
   if (pack.constructionStages && pack.constructionStages.length > 0) {
     return pack.constructionStages;
   }
   return DEFAULT_CONSTRUCTION_STAGES;
-}
-
-export function resolveConstructionPalette(pack: WorldPackManifest): ConstructionPaletteSpec {
-  return pack.constructionPalette ?? DEFAULT_CONSTRUCTION_PALETTE;
 }
 
 /* Resolves a resident's visual look from the active world pack:
