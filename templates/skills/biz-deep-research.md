@@ -1,7 +1,5 @@
 ---
 id: biz-deep-research
-title: { en: "Deep research", ru: "Глубокое исследование" }
-description: { en: "Answers a research question from several independent sources and says how sure the answer is.", ru: "Отвечает на исследовательский вопрос по нескольким независимым источникам и говорит, насколько ответ надежен." }
 kind: procedure
 sources: [affaan-m/ECC skills/deep-research/SKILL.md]
 ---

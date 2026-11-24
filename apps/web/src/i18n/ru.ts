@@ -1223,7 +1223,7 @@ export const ru: Messages = {
         noCore: host => `здесь Hornhoof работает без Docker; сделайте ${host} полной машиной.`,
         scope: (person, departments) =>
           `данные компании хранятся только на машинах тех, кто видит всю компанию, а ${person} ${
-            departments === undefined ? 'видит не всю' : departments === 0 ? 'не видит ни одного отдела' : departments === 1 ? 'видит один отдел' : `видит ${departments} ${plural('ru', departments, { one: 'отдел', few: 'отдела', many: 'отделов', other: 'отдела' })}`
+            departments === undefined ? 'видит не всю' : departments === 0 ? 'не видит ни одного отдела' : departments < 2 ? 'видит один отдел' : `видит ${departments} ${plural('ru', departments, { one: 'отдел', few: 'отдела', many: 'отделов', other: 'отдела' })}`
           }.`,
         noLink: 'скрытое имя компании на hornhoof.org еще не создано; Hornhoof создаст его, как только hornhoof.org ответит.',
       },
@@ -1934,7 +1934,7 @@ export const ru: Messages = {
   companyTemplates: {
     heading: 'Начните с шаблона',
     hint: 'Шаблон сразу создает свои отделы и их сотрудников. Они начнут работать, как только вы подключите подписку. Все можно изменить позже. Выберите шаблон или начните с пустой компании.',
-    employees: n => `${n} ${n % 100 >= 11 && n % 100 <= 14 ? 'сотрудников' : n % 10 === 1 ? 'сотрудник' : n % 10 >= 2 && n % 10 <= 4 ? 'сотрудника' : 'сотрудников'}`,
+    employees: n => `${n} ${plural('ru', n, { one: 'сотрудник', few: 'сотрудника', many: 'сотрудников', other: 'сотрудника' })}`,
     departments: list => `Отделы: ${list}.`,
     empty: { name: 'Начать с пустой', description: 'Отделов пока нет. Оркестратор расспросит о компании и соберет их вместе с вами.' },
     project: { name: 'Проектная команда', description: 'Несколько человек делают один продукт.' },
@@ -2003,7 +2003,7 @@ export const ru: Messages = {
     riskClasses: { money: 'деньги', access: 'доступ', security: 'безопасность', data: 'данные', none: 'нет' },
     riskLine: (risk: string) => `риск: ${risk}`,
     keep: 'Оставить',
-    words: n => (n === 1 ? 'Исходный текст' : `Исходный текст, ${n} ${plural('ru', n, { one: 'сообщение', few: 'сообщения', many: 'сообщений', other: 'сообщения' })}`),
+    words: n => (n > 1 ? `Исходный текст, ${n} ${plural('ru', n, { one: 'сообщение', few: 'сообщения', many: 'сообщений', other: 'сообщения' })}` : 'Исходный текст'),
     table: {
       task: 'Задача',
     },
@@ -3232,3 +3232,5 @@ export const ru: Messages = {
     telegram_person_taken: 'Этот Telegram уже указан у другого человека.',
   },
 };
+
+export default ru;

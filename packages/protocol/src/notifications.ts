@@ -18,6 +18,7 @@ export const NotificationSourceSchema = z.enum(Object.keys(NOTIFICATION_NAMES) a
 export const NotificationSchema = z.object({
   source: NotificationSourceSchema,
   tasks: z.array(z.object({ id: z.string(), number: z.number().int().positive() })),
-  detail: z.object({ en: z.string(), ru: z.string() }).optional(),
+  /* The line beside a notice's source in every language it was written in; English always. */
+  detail: z.object({ en: z.string() }).catchall(z.string().optional()).optional(),
 });
 export type Notification = z.infer<typeof NotificationSchema>;

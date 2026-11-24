@@ -26,7 +26,7 @@ describe('Stage 9 second test pack: an orbital station on the same engine', () =
     expect(SPACE_WORLD_PACK.terrainRecipe?.id).toBe('space-station');
     expect(SPACE_WORLD_PACK.outerWallMode).toBe('none');
     expect(SPACE_WORLD_PACK.art?.baseUrl).toBe('/world-art/space/');
-    expect(SPACE_WORLD_PACK.roleLooks?.ruler?.label.en).toBe('Fleet Admiral');
+    expect(SPACE_WORLD_PACK.roleLooks?.ruler?.label).toBe('Fleet Admiral');
   });
 
   it('generates the same station for the same seed and different stations for different seeds', () => {

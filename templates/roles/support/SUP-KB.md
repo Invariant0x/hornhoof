@@ -2,8 +2,6 @@
 id: SUP-KB
 department: support
 kind: member
-title: { en: "Knowledge base editor", ru: "Редактор базы знаний" }
-description: { en: "Editor of support knowledge and customer guidance.", ru: "Редактор базы знаний поддержки и руководств для клиентов." }
 tier: standard
 effort: medium
 perProduct: false

@@ -2,8 +2,6 @@
 id: VID-COLOR
 department: video_production
 kind: member
-title: { en: "Colorist", ru: "Колорист" }
-description: { en: "Makes color, contrast and grain consistent across the whole video.", ru: "Следит, чтобы цвет, контраст и зерно были согласованы во всем видео." }
 tier: standard
 effort: high
 perProduct: false

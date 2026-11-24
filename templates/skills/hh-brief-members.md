@@ -1,7 +1,5 @@
 ---
 id: hh-brief-members
-title: { en: "Brief members", ru: "Ставить задачи сотрудникам" }
-description: { en: "Gives each member a self-contained brief and the right model for the job.", ru: "Дает каждому сотруднику самодостаточное задание и подходящую модель." }
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/SKILL.md]
 ---

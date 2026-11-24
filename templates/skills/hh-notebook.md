@@ -1,7 +1,5 @@
 ---
 id: hh-notebook
-title: { en: "Keep the notebook", ru: "Вести блокнот" }
-description: { en: "Writes down at once what people decide and keeps the notebook true, one fact per note.", ru: "Сразу записывает, что решили люди, и держит блокнот верным, по одному факту в записи." }
 kind: core
 ---
 You can keep durable decisions in an authorized notebook without duplicating the task tracker.

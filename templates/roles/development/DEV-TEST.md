@@ -2,8 +2,6 @@
 id: DEV-TEST
 department: development
 kind: member
-title: { en: "Test engineer", ru: "Инженер по тестированию" }
-description: { en: "Engineer of software behavior verification and test coverage gaps.", ru: "Инженер проверки поведения программ и поиска пробелов в тестах." }
 tier: standard
 effort: high
 perProduct: false

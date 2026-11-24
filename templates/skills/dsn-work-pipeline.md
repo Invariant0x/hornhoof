@@ -1,7 +1,5 @@
 ---
 id: dsn-work-pipeline
-title: { en: "Design pipeline", ru: "Конвейер дизайна" }
-description: { en: "Where design checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check.", ru: "Где дизайн проверяют по штуке, пакетом, выборкой и кодом; читай, когда раздаешь работу или меняешь проверку." }
 kind: procedure
 sources: []
 ---

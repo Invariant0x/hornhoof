@@ -1,7 +1,5 @@
 ---
 id: dsn-design-direction
-title: { en: "Design direction", ru: "Визуальное направление" }
-description: { en: "Sets a clear, deliberate character for a product's screens inside the system before details are drawn.", ru: "Задает экранам продукта ясный и продуманный характер в рамках системы до проработки деталей." }
 kind: procedure
 sources: [anthropics/skills skills/frontend-design/SKILL.md]
 ---

@@ -1,7 +1,5 @@
 ---
 id: dsn-handoff
-title: { en: "Handoff to development", ru: "Передача в разработку" }
-description: { en: "Gives development HTML mockups and a spec complete enough to build the screens without guessing.", ru: "Передает разработке HTML-макеты и описание, по которым экраны можно сделать без догадок." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins design/skills/design-handoff/SKILL.md]
 ---

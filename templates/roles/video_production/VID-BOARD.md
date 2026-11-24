@@ -2,8 +2,6 @@
 id: VID-BOARD
 department: video_production
 kind: member
-title: { en: "Storyboard artist and set builder", ru: "Автор раскадровки и плана сцены" }
-description: { en: "Plans shots with the crew, draws boards and designs the spaces in the video.", ru: "Планирует кадры с командой, рисует раскадровку и оформляет места действия." }
 tier: standard
 effort: high
 perProduct: false

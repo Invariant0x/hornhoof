@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, LOCALES, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
@@ -434,11 +434,11 @@ describe('templates', () => {
     expect(templates.roles.get('DEV-ENG')!.schema).toBeNull();
   });
 
-  it('has English and Russian titles and descriptions', () => {
+  it('has a title and a description in every language of the registry, from its locale file', () => {
     for (const x of [...roles, ...skills]) {
-      for (const lang of ['en', 'ru'] as const) {
-        expect(x.title[lang].length, `${x.id} title ${lang}`).toBeGreaterThan(1);
-        expect(x.description[lang].length, `${x.id} description ${lang}`).toBeGreaterThan(5);
+      for (const { id: lang } of LOCALES) {
+        expect(x.title[lang]?.length, `${x.id} title ${lang}`).toBeGreaterThan(1);
+        expect(x.description[lang]?.length, `${x.id} description ${lang}`).toBeGreaterThan(5);
       }
       expect(x.title.ru, x.id).toMatch(/[а-я]/i);
     }
@@ -664,7 +664,7 @@ describe('templates', () => {
       for (const doc of [agentsDoc, contributingDoc]) {
         expect(doc).toContain('templates/skills/dev-frontend-ui.md');
         expect(doc).toContain('(docs/style-book.md)');
-        expect(doc).toContain('apps/web/src/i18n/index.tsx');
+        expect(doc).toContain('packages/protocol/src/locales.ts');
         expect(doc).toMatch(/longest[\s\S]*shortest|shortest[\s\S]*longest/i);
         expect(doc).toMatch(/whole group|one group/i);
         expect(doc).toMatch(/explicit[\s\S]*browser default/i);
@@ -1763,9 +1763,9 @@ describe('identity, defaults and shared instruction delivery', () => {
     const skill = templates.skills.get('hh-tables');
     expect(skill).toBeDefined();
     expect(skill!.title.en.length).toBeGreaterThan(3);
-    expect(skill!.title.ru.length).toBeGreaterThan(3);
+    expect(skill!.title.ru?.length).toBeGreaterThan(3);
     expect(skill!.description.en.length).toBeGreaterThan(10);
-    expect(skill!.description.ru.length).toBeGreaterThan(10);
+    expect(skill!.description.ru?.length).toBeGreaterThan(10);
     expect(skill!.body).toContain('hh-xlsx');
     expect(skill!.body).toContain('hh-attach');
     expect(skill!.body).toContain('send_telegram_file');

@@ -1,7 +1,5 @@
 ---
 id: dev-tdd
-title: { en: "Test-driven development", ru: "Разработка через тесты" }
-description: { en: "Writes the failing test first, watches it fail, then writes the code that passes it, in the cycle of the task's kind.", ru: "Сначала пишет падающий тест, видит, как он падает, затем пишет код, который его проходит, по циклу вида задачи." }
 kind: procedure
 sources: [obra/superpowers skills/test-driven-development/SKILL.md, obra/superpowers skills/test-driven-development/writing-good-tests.md]
 ---

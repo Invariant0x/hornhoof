@@ -1,7 +1,5 @@
 ---
 id: hh-head
-title: { en: "Coordinate department communication", ru: "Вести связь от имени отдела" }
-description: { en: "Communicates a department's proved results, blockers and decisions beyond its authority.", ru: "Передает проверенные результаты отдела, препятствия и решения за пределами его полномочий." }
 kind: core
 ---
 You can communicate a department's decisions and needs to its company coordinator.

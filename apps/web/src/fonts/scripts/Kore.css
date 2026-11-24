@@ -1,0 +1,9 @@
+/* The glyphs of Korean (Hangul) for the product's families. A skin names the same families whatever the language, so each takes the
+   glyphs of the script from the fonts the system has for it, by unicode-range, and the rest stay as they were. A file of
+   the font itself goes in the same rule (src: url(...)) when a release ships one; this file is brought only when a
+   language written in this script is on, and the page names the script on its root as data-script. */
+@font-face { font-family: 'Onest'; font-weight: 100 900; src: local('Apple SD Gothic Neo'), local('Noto Sans KR'), local('Noto Sans CJK KR'), local('Malgun Gothic'); unicode-range: U+1100-11FF, U+3130-318F, U+A960-A97F, U+AC00-D7AF, U+D7B0-D7FF; }
+@font-face { font-family: 'Tektur'; font-weight: 100 900; src: local('Apple SD Gothic Neo'), local('Noto Sans KR'), local('Noto Sans CJK KR'), local('Malgun Gothic'); unicode-range: U+1100-11FF, U+3130-318F, U+A960-A97F, U+AC00-D7AF, U+D7B0-D7FF; }
+@font-face { font-family: 'Handjet'; font-weight: 100 900; src: local('Apple SD Gothic Neo'), local('Noto Sans KR'), local('Noto Sans CJK KR'), local('Malgun Gothic'); unicode-range: U+1100-11FF, U+3130-318F, U+A960-A97F, U+AC00-D7AF, U+D7B0-D7FF; }
+@font-face { font-family: 'Alegreya'; font-weight: 100 900; src: local('Apple SD Gothic Neo'), local('Noto Sans KR'), local('Noto Sans CJK KR'), local('Malgun Gothic'); unicode-range: U+1100-11FF, U+3130-318F, U+A960-A97F, U+AC00-D7AF, U+D7B0-D7FF; }
+@font-face { font-family: 'Golos Text'; font-weight: 100 900; src: local('Apple SD Gothic Neo'), local('Noto Sans KR'), local('Noto Sans CJK KR'), local('Malgun Gothic'); unicode-range: U+1100-11FF, U+3130-318F, U+A960-A97F, U+AC00-D7AF, U+D7B0-D7FF; }

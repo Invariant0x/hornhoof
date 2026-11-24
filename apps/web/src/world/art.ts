@@ -154,7 +154,8 @@ export type ArtBuildingStep = Readonly<{
   /* The step applies from this building stage or agent level on (houses grow by level). */
   fromStage?: number;
   fromLevel?: number;
-  label: Readonly<{ en: string; ru: string }>;
+  /* English; the words of another language are in world/pack-locales/ by this text. */
+  label: string;
   /* Drawn variants of the step, each a full set in its own folder v01, v02, ...; v01 is required, the rest optional. */
   variants?: number;
 }>;

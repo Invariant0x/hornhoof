@@ -100,7 +100,7 @@ describe('the safety check of a skin file', () => {
     expect(refused(file(raw => (fonts(raw).size = ['serif'])))).toEqual({ code: 'layout_locked', key: 'fonts.size' });
     expect(refused(file(raw => (raw.decor = 'none')))).toEqual({ code: 'unknown_key', key: 'decor' });
     expect(refused(file(raw => (colors(raw).background = '#000000')))).toEqual({ code: 'unknown_key', key: 'colors.background' });
-    expect(refused(file(raw => (names(raw).de = 'Nachtschicht')))).toEqual({ code: 'unknown_key', key: 'name.de' });
+    expect(refused(file(raw => (names(raw).xx = 'Nachtschicht')))).toEqual({ code: 'unknown_key', key: 'name.xx' });
   });
 
   it.each([
@@ -178,7 +178,8 @@ describe('the safety check of a skin file', () => {
     for (const key of ['base', 'name', 'color_scheme', 'colors', 'fonts', 'cut']) expect(refused(file(raw => delete raw[key])), key).toEqual({ code: 'missing', key });
     expect(refused(file(raw => delete colors(raw).scrim))).toEqual({ code: 'missing', key: 'colors.scrim' });
     expect(refused(file(raw => delete fonts(raw).mono))).toEqual({ code: 'missing', key: 'fonts.mono' });
-    expect(refused(file(raw => delete names(raw).ru))).toEqual({ code: 'missing', key: 'name.ru' });
+    expect(refused(file(raw => delete names(raw).en))).toEqual({ code: 'missing', key: 'name.en' });
+    expect(refused(file(raw => delete names(raw).ru))).toBeNull();
     expect(refused(file(raw => (raw.colors = ['#000000'])))).toEqual({ code: 'not_object', key: 'colors' });
     expect(refused(file(raw => (raw.fonts = 'sans-serif')))).toEqual({ code: 'not_object', key: 'fonts' });
   });

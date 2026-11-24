@@ -1,7 +1,5 @@
 ---
 id: dev-engineering-rules
-title: { en: "Engineering rules (ub-mode)", ru: "Инженерные правила (ub-mode)" }
-description: { en: "Uncle Bob's ub-mode word for word: first make it work, then make it right, then follow practice. Where it differs from your company's rules, those rules win.", ru: "ub-mode Дяди Боба дословно: сначала чтобы работало, потом чтобы было правильно, затем практика. Где он расходится с правилами компании, действуют правила компании." }
 kind: checklist
 sources: [unclebob/ub-mode SKILL.md]
 ---

@@ -2,8 +2,6 @@
 id: MKT-EDIT
 department: marketing
 kind: member
-title: { en: "Editor", ru: "Редактор" }
-description: { en: "Specialist in checking marketing texts against their brief, their sources and the brand rules.", ru: "Специалист по проверке маркетинговых текстов по заданию, источникам и правилам бренда." }
 tier: deep
 effort: high
 perProduct: false

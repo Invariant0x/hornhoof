@@ -1,7 +1,5 @@
 ---
 id: orch-plan-turn
-title: { en: "Give out the work", ru: "Раздавать работу" }
-description: { en: "Gives each of the CEO's goals to one department as one whole task a head can start at once, with a check that shows it is done; the work flows into each department's next release.", ru: "Отдает каждую цель CEO одному отделу одной целой задачей, которую руководитель может начать сразу, с проверкой, что она готова; работа идет потоком в следующий выпуск отдела." }
 kind: procedure
 sources: [obra/superpowers skills/writing-plans/SKILL.md]
 ---

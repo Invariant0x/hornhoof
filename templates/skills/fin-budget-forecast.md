@@ -1,7 +1,5 @@
 ---
 id: fin-budget-forecast
-title: { en: "Budget and forecast", ru: "Бюджет и прогноз" }
-description: { en: "Sets the yearly budget with each department and updates the forecast from actuals every month.", ru: "Составляет годовой бюджет с каждым отделом и каждый месяц обновляет прогноз по фактическим данным." }
 kind: procedure
 sources: [msitarzewski/agency-agents finance/finance-fpa-analyst.md]
 ---

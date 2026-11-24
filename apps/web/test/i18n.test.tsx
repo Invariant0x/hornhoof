@@ -2,7 +2,8 @@ import { render } from '@testing-library/react';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { api, ApiFailure } from '../src/api';
 import { ECHELON_STAGES } from '@hornhoof/protocol/echelons';
-import { detectLanguage, DICTIONARIES, errorText, LanguageProvider, LANGUAGES, plural, type Language } from '../src/i18n';
+import { detectLanguage, errorText, LanguageProvider, LANGUAGES, plural, type ShippedLanguage } from '../src/i18n';
+import { DICTIONARIES } from '../src/i18n/dictionaries';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { mockApi } from './api-mock';
@@ -71,7 +72,7 @@ describe('Russian vocabulary', () => {
 
 describe('Stage names', () => {
   /* A stage whose word a language truly spells as English does; none so far. */
-  const SAME_AS_ENGLISH: Partial<Record<Language, readonly string[]>> = {};
+  const SAME_AS_ENGLISH: Partial<Record<ShippedLanguage, readonly string[]>> = {};
 
   it('are in the own words of every shipped language, as call frames and task workflows show them', () => {
     const stages = (t: typeof en) => ({ ...Object.fromEntries(ECHELON_STAGES.map(s => [s, t.tasks.echelons.stages[s]])), ...Object.fromEntries(Object.entries(t.tasks.echelons.documentStages).map(([s, w]) => [`document.${s}`, w])) });
