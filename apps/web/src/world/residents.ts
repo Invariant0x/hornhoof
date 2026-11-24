@@ -375,11 +375,16 @@ function baseTileOf(sim: Pick<ResidentSimulation, 'harbour'>, r: ResidentEntity)
   return usesYard(sim, r) ? r.yardTile! : r.homeTile;
 }
 
+/* True when the resident stands at its yard spot. */
+function atYardSpot(r: ResidentEntity): boolean {
+  const at = r.yardSpot;
+  return Boolean(at && r.yardTile && Math.hypot(r.col - at.col, r.row - at.row) < 0.5);
+}
+
 /* The road tile a walk to work starts from: the yard's when the resident stands at its yard spot, else home's, so a
    harbour that starts or stops showing mid-walk never sends it across the city in a straight line. */
 function restTileOf(r: ResidentEntity): TileCoord {
-  const at = r.yardSpot;
-  return at && r.yardTile && Math.hypot(r.col - at.col, r.row - at.row) < 0.5 ? r.yardTile : r.homeTile;
+  return atYardSpot(r) ? r.yardTile! : r.homeTile;
 }
 
 function harbourOf(pack: WorldPackManifest, plan: HarbourPlan, snapshot: WorldLiveSnapshot, shown: boolean): ResidentHarbour {
@@ -1077,7 +1082,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
         r.carrying = 'none';
         r.pose = 'directing';
       } else {
-        carrierPose(r, usesYard(sim, r));
+        carrierPose(r, usesYard(sim, r) && atYardSpot(r));
       }
       continue;
     }
@@ -1108,7 +1113,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
       r.path = toWorkSpot(route, r.leg === 'outbound' ? r.workSpot : yard ? r.yardSpot : null);
       r.pathIndex = 0;
       r.actionTimer = r.roleClass === 'head' ? 1.4 : r.roleClass === 'checker' ? 1.3 : yard && r.leg === 'outbound' ? YARD_DRESS_SEC : 0.9;
-      applyStaticStatePose(r, yard);
+      applyStaticStatePose(r, yard && atYardSpot(r));
       continue;
     }
 

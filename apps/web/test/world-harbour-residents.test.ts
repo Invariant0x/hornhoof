@@ -124,6 +124,10 @@ describe('Residents take the stones at the harbour yard (#2006)', () => {
       }
       stepResidentSimulation(sim, 0.1);
       for (const r of sim.residents) {
+        /* A stone is dressed at the yard only: nowhere else does a carrier stand over a stone it holds. */
+        if (carriers.has(r.id) && r.pose === 'building' && r.carrying === 'stone') {
+          expect(onYard(plan.yard, r.col, r.row), `${r.name} dresses a stone at ${r.col},${r.row}`).toBe(true);
+        }
         const was = leg.get(r.id);
         leg.set(r.id, r.leg);
         if (!switched || !carriers.has(r.id) || was !== 'inbound' || r.leg !== 'outbound') continue;
