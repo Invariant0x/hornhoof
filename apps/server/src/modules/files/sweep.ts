@@ -20,7 +20,7 @@ const NAMED = sql`(EXISTS (SELECT 1 FROM public.attachments a WHERE a.sha256 = f
 
 /* A database a restore set aside, or one made of what a machine uploaded, may be merged back: the files its rows name
    stay while it is there, for at most the 30 days it is kept. */
-const SET_ASIDE = sql`EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname LIKE 'hornhoof_before_%' OR datname LIKE 'hornhoof_upload_%')`;
+export const SET_ASIDE = sql`EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname LIKE 'hornhoof_before_%' OR datname LIKE 'hornhoof_upload_%')`;
 
 /* Marks the contents no row names since now, and those named again as in use, and gives the ones unused for a day their
    time to go, unless a database set aside is there. Says how many are to go now. */

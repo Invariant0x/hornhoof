@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { describe, expect, it, onTestFinished } from 'vitest';
@@ -12,7 +13,7 @@ import * as schema from '../src/db/schema.js';
 import { Files, type FilesDb } from '../src/modules/files/files.js';
 import { moveOldFiles } from '../src/modules/files/mover.js';
 import { dropDue, markUnused, UNUSED_MS } from '../src/modules/files/sweep.js';
-import { fileBytes } from '../src/modules/tasks/attachments.js';
+import { dropOldFiles, fileBytes } from '../src/modules/tasks/attachments.js';
 import { TEST_SECRET } from './helpers-basic.js';
 import { createTestDb, freshPglite, ownDatabases } from './helpers-db.js';
 import { migrate, migrationsUpTo } from './migrations-fixture.js';
@@ -195,6 +196,48 @@ describe('the mover', () => {
     for (const file of [one!, two!]) expect((await fileBytes(ctx, file.id)).equals(file.bytes)).toBe(true);
   });
 
+  it('clears no row whose stored copy does not open to its bytes, and goes on with the rows after it', async () => {
+    const filesDir = folder();
+    const [swapped, broken, fine]: Old[] = [0, 1, 2].map(n => ({ id: randomUUID(), bytes: randomBytes(3000 + n) }));
+    const { db } = await upgraded([swapped!, broken!, fine!], filesDir);
+    const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
+    /* By the time the mover opens it again, one copy on the disk is the sealed file of other bytes, and one has a byte
+       changed, as a fault of the disk or a hand may leave them. */
+    class Spoiling extends Files {
+      override async put(...args: Parameters<Files['put']>): ReturnType<Files['put']> {
+        const kept = await super.put(...args);
+        const store = this.store();
+        if (kept.sha256 === sha(swapped!.bytes)) {
+          const other = await store.put(Readable.from([Buffer.from('other bytes')]), await this.key(args[0]));
+          copyFileSync(store.path(other.sha256), store.path(kept.sha256));
+        }
+        if (kept.sha256 === sha(broken!.bytes)) {
+          const sealed = readFileSync(store.path(kept.sha256));
+          sealed[sealed.length - 1] ^= 1;
+          writeFileSync(store.path(kept.sha256), sealed);
+        }
+        return kept;
+      }
+    }
+    expect(await moveOldFiles({ db, config, files: new Spoiling(config) })).toEqual({ moved: 1, waiting: 0, finished: false });
+    expect([await nameOf(db, swapped!.id), await nameOf(db, broken!.id), await nameOf(db, fine!.id), await withBytes(db)]).toEqual([null, null, sha(fine!.bytes), 2]);
+    for (const file of [swapped!, broken!]) expect((await fileBytes({ db, config, files: new Files(config) }, file.id)).equals(file.bytes)).toBe(true);
+  });
+
+  it('moves no file from the disk that is not as long as its row says, and moves it once it is whole', async () => {
+    const filesDir = folder();
+    const big: Old = { id: randomUUID(), bytes: randomBytes(9000), disk: true };
+    const { db } = await upgraded([big], filesDir);
+    writeFileSync(join(filesDir, big.id), big.bytes.subarray(0, 4000));
+    const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
+    const ctx = { db, config, files: new Files(config) };
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 0, finished: true });
+    expect([await nameOf(db, big.id), existsSync(join(filesDir, big.id))]).toEqual([null, true]);
+    writeFileSync(join(filesDir, big.id), big.bytes);
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 1, waiting: 0, finished: true });
+    expect([await nameOf(db, big.id), existsSync(join(filesDir, big.id))]).toEqual([sha(big.bytes), false]);
+  });
+
   it('keeps what it stored for a second machine that is away for more than a day, and moves it once that machine has it', async () => {
     const filesDir = folder();
     const file: Old = { id: randomUUID(), bytes: randomBytes(6000) };
@@ -246,6 +289,30 @@ describe('the mover', () => {
     expect(await dropDue(ctx, new Date(start + UNUSED_MS + 120_000))).toBe(0);
     expect(ctx.files.store().has(kept.sha256)).toBe(true);
     expect(rowsOf<{ drop_at: string | null; unused_since: string | null }>(await db.execute(sql`SELECT drop_at, unused_since FROM net.files WHERE sha256 = ${kept.sha256}`))).toEqual([{ drop_at: null, unused_since: null }]);
+  });
+});
+
+describe('the big files of 0.43 on the disk', () => {
+  it('go once their rows are gone and they are 30 days old, and those still to move, the store and any other file stay', async () => {
+    const filesDir = folder();
+    const [goes, young, stays]: Old[] = [3000, 3500, 4000].map(size => ({ id: randomUUID(), bytes: randomBytes(size), disk: true }));
+    const { client, db } = await upgraded([goes!, young!, stays!], filesDir);
+    const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
+    const ctx = { db, config, files: new Files(config) };
+    const kept = await ctx.files.putBytes(db, Buffer.from('a file of the store'));
+    writeFileSync(join(filesDir, 'notes.txt'), 'no file of a row');
+    const monthAgo = new Date(Date.now() - 31 * 86_400_000);
+    for (const name of [goes!.id, stays!.id, 'notes.txt']) utimesSync(join(filesDir, name), monthAgo, monthAgo);
+    /* Their tasks went, and their rows with them, before the mover came to them. */
+    await db.execute(sql`DELETE FROM attachments WHERE id IN (${goes!.id}, ${young!.id})`);
+    /* A database a restore set aside may be merged back, with the rows that name them: while it is there, all stay. */
+    await client.exec('CREATE DATABASE hornhoof_before_20261124_090000');
+    await dropOldFiles(ctx, new Date());
+    expect(existsSync(join(filesDir, goes!.id))).toBe(true);
+    await client.exec('DROP DATABASE hornhoof_before_20261124_090000');
+    await dropOldFiles(ctx, new Date());
+    expect([goes!.id, young!.id, stays!.id, 'notes.txt'].map(name => existsSync(join(filesDir, name)))).toEqual([false, true, true, true]);
+    expect(ctx.files.store().has(kept.sha256)).toBe(true);
   });
 });
 

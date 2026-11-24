@@ -6,6 +6,7 @@ import { sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { hasCode } from '../../db/errors.js';
 import { hasOldBytes, oldBytesGone, oldPieces } from './legacy.js';
+import { SealRefused } from './seal.js';
 
 /* Moves the bytes an older Hornhoof kept in Postgres, and the big files it kept on the disk of the machine that took
    them, into the store, while the app leads and the server goes on serving. The state is in the rows alone: a row that
@@ -59,10 +60,17 @@ async function sourceOf(ctx: Mover, row: Row): Promise<{ input: Readable; disk: 
   return file ? { input: file.createReadStream(), disk: true } : null;
 }
 
-/* The store's copy opens to bytes of the hash it was stored under. */
+/* The store's copy opens to bytes of the hash it was stored under. One that does not open is no copy: its row keeps its
+   bytes, and the round goes on with the next row. */
 async function opensTo(ctx: Mover, sha256: string): Promise<boolean> {
+  const key = await ctx.files.key(ctx.db);
   const hash = createHash('sha256');
-  for await (const chunk of ctx.files.store().open(sha256, await ctx.files.key(ctx.db))) hash.update(chunk as Buffer);
+  try {
+    for await (const chunk of ctx.files.store().open(sha256, key)) hash.update(chunk as Buffer);
+  } catch (err) {
+    if (err instanceof SealRefused) return false;
+    throw err;
+  }
   return hash.digest('hex') === sha256;
 }
 

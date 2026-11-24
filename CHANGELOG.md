@@ -5,6 +5,15 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Changed
+
+- Before you update: a server installed by hand rather than from `compose.yaml` needs `FILES_DIR` set to a folder that stays, as `compose.yaml` sets `/files`. A server in production with no `FILES_DIR` no longer starts, and says why in English and in Russian, as it would keep its files in a folder that the next restart loses; development and tests keep that folder.
+- Files leave Postgres: the database keeps only a file's name, size and sha256, and its bytes live sealed with AES-256-GCM in the company's file store on its machines, with a copy on a second machine where the company has one. After the update the leading server moves the files of earlier versions into the store a few at a time while it serves, checks each by its hash, clears a row's bytes only once the store, and a second machine where there is one, keeps them, then drops the old column and gives the table's room back; a server with no `FILES_DIR` leaves them in Postgres. A file over 50 MB is no longer kept on the disk of one machine only. Going back to 0.43 after the move leaves the moved files unread there, as 0.43 reads them from Postgres: the dump made before the update holds every one of them. Migration `file_store` adds the column `attachments.sha256` and the tables `net.files`, `net.file_copies`, `net.file_holders` and `net.file_key`.
+- Backups of the database no longer hold the bytes of files: a file whose row and content were removed comes back from no backup, and the dump made before the update is the only copy of such a file until it is pruned. A company with one machine keeps one copy of each file. An upload is answered after at most 10 seconds even when no second machine keeps the file yet.
+- Files on a task of no turn go 30 days after the task closed, and a test or work run's logs and files 30 days after the run ended, also on a task still open; a file an agent or a person put on a task under a name like a run's, such as `test-3-plan.md`, is no run's and stays. Migration `run_files` names its run on each run's file, and finds the files of earlier runs by their task, name, the turn that started the run and their time.
+
 ## [0.43.0] - 2026-11-23
 
 ### Fixed

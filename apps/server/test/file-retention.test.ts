@@ -31,9 +31,14 @@ async function company() {
     return (await db.insert(attachments).values({ companyId, jobId: job!.id, agentId: bruno!.id, taskId, name, mediaType: 'application/octet-stream', sha256: kept.sha256, size: kept.size }).returning())[0]!;
   };
   const run = async (taskId: string, runNumber: number, finishedAt: Date) =>
-    db.insert(testRuns).values({ companyId, number: runNumber, taskId, agentId: bruno!.id, jobId: job!.id, kind: 'tests', command: 'npm test', timeoutMs: 1000, status: 'passed', finishedAt });
+    (await db.insert(testRuns).values({ companyId, number: runNumber, taskId, agentId: bruno!.id, jobId: job!.id, kind: 'tests', command: 'npm test', timeoutMs: 1000, status: 'passed', finishedAt }).returning())[0]!;
+  /* A log or a file a part of the run made, which names its run as the run puts it on the task. */
+  const runFile = async (testRun: { id: string; taskId: string }, name: string, bytes: Buffer) => {
+    const kept = await app.ctx.files.putBytes(db, bytes);
+    return (await db.insert(attachments).values({ companyId, jobId: job!.id, agentId: bruno!.id, taskId: testRun.taskId, testRunId: testRun.id, name, mediaType: 'application/octet-stream', sha256: kept.sha256, size: kept.size }).returning())[0]!;
+  };
   const ids = async () => (await db.select(idOnly(attachments)).from(attachments)).map(row => row.id).sort();
-  return { app, db, task, turn, file, run, ids };
+  return { app, db, task, turn, file, run, runFile, ids };
 }
 
 describe('the store lets go of files by itself', () => {
@@ -49,15 +54,17 @@ describe('the store lets go of files by itself', () => {
       outsideClosedLongAgo: await c.file((await c.task({ status: 'done', closedAt: ago(31) })).id, 'b.bin', randomBytes(1000)),
     };
     const open = await c.task();
-    await c.run(open.id, 5, ago(31));
-    await c.run(open.id, 6, ago(29));
-    const goneOfRun = [await c.file(open.id, 'tests-5-1.log', randomBytes(100)), await c.file(open.id, 'test-5-1-shot.png', randomBytes(100))];
+    const [ended, recent] = [await c.run(open.id, 5, ago(31)), await c.run(open.id, 6, ago(29))];
+    const goneOfRun = [await c.runFile(ended, 'tests-5-1.log', randomBytes(100)), await c.runFile(ended, 'test-5-1-shot.png', randomBytes(100))];
     const kept = [
       await c.file((await c.task({ turnId: recentTurn.id })).id, 'shared.bin', shared),
       await c.file((await c.task({ status: 'done', closedAt: ago(29) })).id, 'c.bin', randomBytes(1000)),
       await c.file(open.id, 'd.bin', randomBytes(1000)),
-      await c.file(open.id, 'tests-6-1.log', randomBytes(100)),
+      await c.runFile(recent, 'tests-6-1.log', randomBytes(100)),
       await c.file(open.id, 'tests-55-1.log', randomBytes(100)),
+      /* An agent's own files on the open task, named as a run's would be, are no run's: they stay (#2036). */
+      await c.file(open.id, 'test-5-plan.md', randomBytes(100)),
+      await c.file(open.id, 'tests-5-2.log', randomBytes(100)),
     ];
 
     expect(await dropOldFiles(c.app.ctx, now)).toBe(5);
@@ -87,6 +94,34 @@ describe('the store lets go of files by itself', () => {
     expect(await markUnused(c.db, new Date(now.getTime() + 2 * DAY))).toBe(0);
     await dropDue(c.app.ctx, new Date(now.getTime() + 2 * DAY));
     expect((await c.app.ctx.files.bytes(c.db, first.sha256!)).equals(bytes)).toBe(true);
+  });
+});
+
+describe('the store keeps what a refused merge still holds', () => {
+  it('keeps the content of a file row a merge refused while nobody picked a side, and lets it go a day after', async () => {
+    const c = await company();
+    const now = new Date();
+    const at = (days: number) => new Date(now.getTime() + days * DAY);
+    const store = c.app.ctx.files.store();
+    const kept = await c.app.ctx.files.putBytes(c.db, randomBytes(2000));
+    const [merge] = rowsOf<{ id: string }>(await c.db.execute(sql`INSERT INTO net.merges (source, label, status) VALUES ('machine:another', 'a copy', 'merged') RETURNING id`));
+    const [conflict] = rowsOf<{ id: string }>(
+      await c.db.execute(sql`INSERT INTO net.merge_conflicts (merge, tbl, key, op, kind, topic, here, there, why)
+        VALUES (${merge!.id}, 'attachments', '{"id": "00000000-0000-4000-8000-0000000000aa"}', 'insert', 'refused', 'work', NULL, ${JSON.stringify({ sha256: kept.sha256 })}::jsonb, 'refused') RETURNING id`),
+    );
+    for (const day of [0, 2]) {
+      await markUnused(c.db, at(day));
+      await dropDue(c.app.ctx, at(day));
+    }
+    expect(store.has(kept.sha256)).toBe(true);
+    /* A side picked, the row is gone with the conflict, and its content waits its day. */
+    await c.db.execute(sql`UPDATE net.merge_conflicts SET picked = 'here' WHERE id = ${conflict!.id}`);
+    await markUnused(c.db, at(2));
+    await dropDue(c.app.ctx, at(2));
+    expect(store.has(kept.sha256)).toBe(true);
+    await markUnused(c.db, at(3.1));
+    await dropDue(c.app.ctx, at(3.1));
+    expect(store.has(kept.sha256)).toBe(false);
   });
 });
 

@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, statSync } from 'node:fs';
+import { closeSync, createReadStream, fstatSync, openSync, readSync, statSync } from 'node:fs';
 import { link, mkdir, open, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable, Transform, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { openSealed, seal } from './seal.js';
+import { checkEnds, lastChunkOf, openSealed, SEAL_HEAD, SealRefused, seal } from './seal.js';
 
 /* A file's name in the store: the sha256 of its plain bytes, and nothing else. */
 export const SHA256 = /^[0-9a-f]{64}$/;
@@ -83,6 +83,28 @@ function guard(room: StoreRoom | undefined, idleMs: number): Transform {
   return out;
 }
 
+/* A file of the store opened to read; one gone since it was seen is missing. */
+function openOrMissing(path: string): number {
+  try {
+    return openSync(path, 'r');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') throw new StoreRefused('missing');
+    throw err;
+  }
+}
+
+/* The sealed file opens under its name: its head and its last chunk, read before the rest. */
+function checkOpens(fd: number, key: Buffer, sha256: string): void {
+  const size = fstatSync(fd).size;
+  const last = lastChunkOf(size);
+  if (!last) throw new SealRefused();
+  const head = Buffer.alloc(SEAL_HEAD);
+  const tail = Buffer.alloc(size - last.at);
+  readSync(fd, head, 0, head.length, 0);
+  readSync(fd, tail, 0, tail.length, last.at);
+  checkEnds(key, head, tail, last.n, sha256);
+}
+
 /* Writes what comes into a file of its own, made safe on the disk before it ends. */
 async function intoFile(path: string): Promise<Writable> {
   const handle = await open(path, 'wx', 0o600);
@@ -130,12 +152,20 @@ export class FileStore {
     return { length: found.size, stream: () => createReadStream(this.path(sha256)) };
   }
 
-  /* A file's plain bytes as they go out, opened with the store key a piece at a time. A file changed on the disk fails
-     the stream where it stops opening. */
+  /* A file's plain bytes as they go out, opened with the store key a piece at a time. A copy that does not open under its
+     name, as one laid under another name, is refused before a byte goes out; one changed on the disk elsewhere fails the
+     stream where it stops opening. */
   open(sha256: string, key: Buffer): Readable {
     if (!this.has(sha256)) throw new StoreRefused('missing');
-    const out = openSealed(key);
-    const file = createReadStream(this.path(sha256));
+    const fd = openOrMissing(this.path(sha256));
+    try {
+      checkOpens(fd, key, sha256);
+    } catch (err) {
+      closeSync(fd);
+      throw err;
+    }
+    const out = openSealed(key, sha256);
+    const file = createReadStream('', { fd, start: 0 });
     file.on('error', err => out.destroy(err));
     return file.pipe(out);
   }
@@ -176,7 +206,7 @@ export class FileStore {
     const { name, fresh } = await this.publish(async part => {
       /* A stream goes in as it is: one wrapped again could not be closed while it waits for bytes that never come. */
       const source = input instanceof Readable ? input : Readable.from(input);
-      await pipeline(source, guard(room, this.idleMs), plain, seal(key), sealedCount, await intoFile(part));
+      await pipeline(source, guard(room, this.idleMs), plain, seal(key, () => plain.digest()), sealedCount, await intoFile(part));
       return plain.digest();
     });
     const facts = fresh ? { sealedSha256: sealedCount.digest(), sealedSize: sealedCount.bytes } : await this.sealedFacts(name);
@@ -214,7 +244,7 @@ export class FileStore {
     const { fresh } = await this.publish(async part => {
       await pipeline(input, guard(room, this.idleMs), await intoFile(part));
       const plain = counter();
-      await pipeline(createReadStream(part), openSealed(key), plain, new Writable({ write: (_chunk, _encoding, done) => done() })).catch(() => {
+      await pipeline(createReadStream(part), openSealed(key, sha256), plain, new Writable({ write: (_chunk, _encoding, done) => done() })).catch(() => {
         throw new StoreRefused('hash');
       });
       if (plain.digest() !== sha256) throw new StoreRefused('hash');

@@ -23,7 +23,7 @@ import { seesTask } from './visibility.js';
 import { taskByRef } from './lookup.js';
 import { attachmentJobOf, checkAttachmentTask } from './attachment-token.js';
 import type { Kept } from '../files/files.js';
-import { oldFileStream } from '../files/legacy.js';
+import { dropLeftOnDisk, oldFileStream } from '../files/legacy.js';
 const PER_TURN = 30;
 const NAME_LENGTH = 200;
 /* The files of a turn go this long after it closed. */
@@ -66,7 +66,8 @@ export function pictureType(b: Buffer): 'image/png' | 'image/jpeg' | 'image/webp
 
 /* Removes the files on the tasks of turns closed 30 days or more before now, on tasks of no turn closed as long ago, the
    logs and files of test and work runs that ended as long ago, and people's pictures sent as long ago or never sent, and
-   says how many went. Their bytes go from the store a day after no row names them (modules/files/sweep). */
+   says how many went. Their bytes go from the store a day after no row names them (modules/files/sweep), and a big file
+   of 0.43 still on this machine's disk goes with its row. */
 export async function dropOldFiles(ctx: Pick<Ctx, 'db' | 'config'>, now: Date): Promise<number> {
   const { db } = ctx;
   const cutoff = new Date(now.getTime() - KEEP_FILES_MS);
@@ -82,9 +83,9 @@ export async function dropOldFiles(ctx: Pick<Ctx, 'db' | 'config'>, now: Date): 
   const ofTurns = await db.delete(attachments).where(inArray(attachments.taskId, old)).returning({ id: attachments.id });
   const closed = db.select(idOnly(tasks)).from(tasks).where(and(isNull(tasks.turnId), lt(tasks.closedAt, cutoff)));
   const outside = await db.delete(attachments).where(inArray(attachments.taskId, closed)).returning({ id: attachments.id });
-  /* A run's files are named by its kind or what it made, its number and its part, as its run's state lists them. */
-  const ofRuns = await db.execute(sql`DELETE FROM attachments a USING test_runs r WHERE a.task_id = r.task_id AND r.finished_at < ${cutoff.toISOString()}::timestamptz
-    AND (a.name LIKE r.kind || '-' || r.number || '-%' OR a.name LIKE (CASE WHEN r.kind = 'work' THEN 'work' ELSE 'test' END) || '-' || r.number || '-%') RETURNING a.id`);
+  /* A run's files name their run; a file named like one, which an agent or a person put on the task, is no run's. */
+  const ofRuns = await db.execute(sql`DELETE FROM attachments a USING test_runs r WHERE a.test_run_id = r.id AND r.finished_at < ${cutoff.toISOString()}::timestamptz RETURNING a.id`);
+  await dropLeftOnDisk(ctx, cutoff);
   return loose.length + ofTurns.length + outside.length + (Array.isArray(ofRuns) ? ofRuns : (ofRuns as { rows: unknown[] }).rows).length;
 }
 

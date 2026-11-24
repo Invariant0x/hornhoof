@@ -1,20 +1,24 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import { pipeline } from 'node:stream/promises';
 import { describe, expect, it } from 'vitest';
 import { SEAL_CHUNK, SEAL_HEAD, SealRefused, openSealed, seal } from '../src/modules/files/seal.js';
+import { sealV1 } from './seal-v1.js';
 
 const key = randomBytes(32);
-const sealed = async (plain: Buffer, k = key): Promise<Buffer> => buffer(Readable.from([plain]).pipe(seal(k)));
-const opened = async (bytes: Buffer, k = key): Promise<Buffer> => {
+const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+/* A file is sealed under its name, the sha256 of its plain bytes, as the store names it. */
+const NAME = sha(Buffer.from('a file'));
+const sealed = async (plain: Buffer, k = key, name = NAME): Promise<Buffer> => buffer(Readable.from([plain]).pipe(seal(k, () => name)));
+const opened = async (bytes: Buffer, k = key, name = NAME): Promise<Buffer> => {
   const out: Buffer[] = [];
-  await pipeline(Readable.from([bytes]), openSealed(k), async function* (source) {
+  await pipeline(Readable.from([bytes]), openSealed(k, name), async function* (source) {
     for await (const chunk of source) out.push(chunk as Buffer);
   });
   return Buffer.concat(out);
 };
-const refused = (bytes: Buffer, k = key) => opened(bytes, k).then(() => 'opened', (err: unknown) => (err instanceof SealRefused ? 'refused' : `failed otherwise: ${String(err)}`));
+const refused = (bytes: Buffer, k = key, name = NAME) => opened(bytes, k, name).then(() => 'opened', (err: unknown) => (err instanceof SealRefused ? 'refused' : `failed otherwise: ${String(err)}`));
 const SEALED_CHUNK = SEAL_CHUNK + 16;
 
 describe('a file sealed for the store', () => {
@@ -65,8 +69,20 @@ describe('a file sealed for the store', () => {
     expect((await opened(one)).equals(plain)).toBe(true);
   });
 
+  it('opens only under the name it was sealed with, and a file sealed before names were bound under any', async () => {
+    for (const length of [0, 100, SEAL_CHUNK, 2 * SEAL_CHUNK + 9]) {
+      const plain = randomBytes(length);
+      const one = await sealed(plain, key, sha(plain));
+      expect((await opened(one, key, sha(plain))).equals(plain), `length ${length}`).toBe(true);
+      expect(await refused(one, key, sha(randomBytes(8))), `length ${length}`).toBe('refused');
+      const old = sealV1(key, plain);
+      expect((await opened(old, key, sha(randomBytes(8)))).equals(plain), `length ${length}`).toBe(true);
+      expect(await refused(old, randomBytes(32), sha(plain)), `length ${length}`).toBe('refused');
+    }
+  });
+
   it('refuses a key that is not 32 bytes', () => {
-    expect(() => seal(randomBytes(16))).toThrow();
-    expect(() => openSealed(randomBytes(31))).toThrow();
+    expect(() => seal(randomBytes(16), () => NAME)).toThrow();
+    expect(() => openSealed(randomBytes(31), NAME)).toThrow();
   });
 });

@@ -1,11 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import { describe, expect, it } from 'vitest';
+import { SealRefused } from '../src/modules/files/seal.js';
 import { FileStore, StoreRefused } from '../src/modules/files/store.js';
+import { sealV1 } from './seal-v1.js';
 
 const key = randomBytes(32);
 const folder = () => mkdtempSync(join(tmpdir(), 'hh-files-'));
@@ -61,6 +63,25 @@ describe('the file store of one machine', () => {
     expect((await buffer(two.open(kept.sha256, key))).equals(bytes)).toBe(true);
     expect(await two.take(kept.sha256, sealed(), said)).toBe(false);
     expect(two.sealed('x'.repeat(64))).toBeNull();
+  });
+
+  it('opens no copy under another name than its own, and takes no sealed file that opens to other bytes than its name', async () => {
+    const store = new FileStore(folder());
+    const [a, b] = [randomBytes(100_000), randomBytes(5000)];
+    const [keptA, keptB] = [await store.put(Readable.from([a]), key), await store.put(Readable.from([b]), key)];
+    /* The copy of one file laid under the name of another, as a hand on the disk could: refused before a byte goes out. */
+    copyFileSync(store.path(keptA.sha256), store.path(keptB.sha256));
+    expect(() => store.open(keptB.sha256, key)).toThrow(SealRefused);
+    expect((await buffer(store.open(keptA.sha256, key))).equals(a)).toBe(true);
+    /* A sealed file that opens with the key, but to other bytes than its name, of either format, is not kept. */
+    const other = new FileStore(folder());
+    const sealedA = readFileSync(store.path(keptA.sha256));
+    expect(await reasonOf(other.takeOpened(sha(b), Readable.from([sealedA]), key, 10_000_000))).toBe('hash');
+    expect(await reasonOf(other.takeOpened(sha(b), Readable.from([sealV1(key, a)]), key, 10_000_000))).toBe('hash');
+    expect(everything(other.dir)).toEqual([]);
+    /* One of the format before, under its own name, is kept and opens. */
+    expect(await other.takeOpened(sha(a), Readable.from([sealV1(key, a)]), key, 10_000_000)).toBe(true);
+    expect((await buffer(other.open(sha(a), key))).equals(a)).toBe(true);
   });
 
   it('removes a file, and tidies only temporary files left an hour ago', async () => {

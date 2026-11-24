@@ -1593,10 +1593,13 @@ export const attachments = pgTable(
        from before whose big file was lost with its machine, or on one still waiting to be moved. */
     sha256: text('sha256'),
     size: integer('size').notNull(),
+    /* The test or work run whose log this is, or whose part made it; none on any other file, named as it may be. */
+    testRunId: uuid('test_run_id').references((): AnyPgColumn => testRuns.id),
     createdAt: createdAt(),
   },
   t => [
     index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_person_id').on(t.personId), index('attachments_operator_case_id').on(t.operatorCaseId),
+    index('attachments_test_run_id').on(t.testRunId),
     check('attachments_sha256', sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
   ],
 );
