@@ -190,7 +190,7 @@ describe('renderInstructions', () => {
     const packet = renderInstructions(T, saved, PLACE);
     expect(packet.parts.find(p => p.kind === 'base')?.text).toBe(ROLE.body);
     expect(packet.parts.find(p => p.kind === 'base')?.overridden).toBe(false);
-    expect(packet.parts[2]).toEqual({ kind: 'assignment', id: null, title: { en: 'Assignment', ru: 'Назначение' }, text: assignmentBlock(assignment), overridden: true, templateChanged: false });
+    expect(packet.parts[2]).toEqual({ kind: 'assignment', id: null, title: expect.objectContaining({ en: 'Assignment', ru: 'Назначение' }), text: assignmentBlock(assignment), overridden: true, templateChanged: false });
     expect(packet.parts.slice(0, 3).map(p => p.kind)).toEqual(['header', 'base', 'assignment']);
     expect(packet.text).toContain(ROLE.body);
     expect(packet.text).toContain(assignment);
@@ -202,7 +202,7 @@ describe('renderInstructions', () => {
 
   it.each([{ overrides: {}, overridden: false }, { overrides: { base: '' }, overridden: true }])('always includes an empty assignment part with overridden=$overridden', ({ overrides, overridden }) => {
     const packet = renderInstructions(T, agent({ overrides }), PLACE);
-    expect(packet.parts[2]).toEqual({ kind: 'assignment', id: null, title: { en: 'Assignment', ru: 'Назначение' }, text: assignmentBlock(''), overridden, templateChanged: false });
+    expect(packet.parts[2]).toEqual({ kind: 'assignment', id: null, title: expect.objectContaining({ en: 'Assignment', ru: 'Назначение' }), text: assignmentBlock(''), overridden, templateChanged: false });
     for (const text of [packet.text, packet.raw]) expect(text).toContain(assignmentBlock(''));
   });
 

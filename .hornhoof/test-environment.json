@@ -736,6 +736,7 @@
           "apps/server/test/development-shape-move.test.ts",
           "apps/server/test/development-template-shape.test.ts",
           "apps/server/test/instructions.test.ts",
+          "apps/server/test/language-rule.test.ts",
           "apps/server/test/long-text-storage.test.ts",
           "apps/server/test/notebook.test.ts",
           "apps/server/test/notification-actions.test.ts",

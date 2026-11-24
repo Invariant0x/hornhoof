@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { loadTemplates } from '../src/modules/templates/load.js';
+import { inEveryLanguage } from './registry-languages.js';
 
 /* Every department has a product manager who keeps its goals, pipelines and task texts clear in the tracker. These tests
    read the templates; they show what each product manager is hired with, not what a model does with it. */
@@ -18,7 +19,7 @@ describe('the product manager of every department', () => {
     expect(found.map(role => role.id)).toEqual([`${code}-PM`]);
     const pm = found[0]!;
     expect(pm).toMatchObject({ department: key, kind: 'member', tier: 'fast', inDefault: true, perProduct: false });
-    expect(pm.title).toEqual({ en: 'Product manager', ru: 'Продакт-менеджер' });
+    expect(pm.title).toMatchObject({ en: 'Product manager', ru: 'Продакт-менеджер' });
     expect(pm.timer?.minutes).toBe(240);
     expect(pm.timer?.forWork).toBe(true);
     expect(pm.skills.find(skill => skill.id === 'hh-keep-tracker')).toMatchObject({ on: true });
@@ -52,8 +53,8 @@ describe('the skill that keeps the tracker', () => {
     expect(skill?.body).toMatch(/ask the head/i);
   });
 
-  it('follows the copy rules: no em dashes, and no "\u0451" in Russian', () => {
-    for (const text of [skill!.body, skill!.title.en, skill!.title.ru, skill!.description.en, skill!.description.ru]) expect(text).not.toContain('\u2014');
+  it('follows the copy rules: no em dash in any language, and no "\u0451" in Russian', () => {
+    for (const text of [skill!.body, inEveryLanguage(skill!.title, skill!.description)]) expect(text).not.toContain('\u2014');
     for (const text of [skill!.title.ru, skill!.description.ru]) expect(text).not.toMatch(/[\u0451\u0401]/);
   });
 });

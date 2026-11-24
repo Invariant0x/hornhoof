@@ -18,6 +18,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - A skin file of your own may name the skin in any language of the registry, with the English name required and the others optional, and the names of a world's employees can be taken in any language of the registry.
 - The Development template gives a new company the code pipeline as a tree (Development first, then Review, Security, Tests and the release, Architecture on request beside it), one Hotfix unit for urgent work in place of the turnkey team, and one Security read of the whole turn branch instead of one for each task; a function moves existing departments to it for the update, keeping what was changed by hand.
+- The rule that every screen ships in English and Russian is gone from the contributor documents, the pull request template, the style book and the design map: English is the source of every text and every other language the registry lists follows it. A test keeps that pair rule out of those documents and the templates, and the checks of the template words and of the translators' key list now go over every language of the registry, not two.
 
 ## [0.43.0] - 2026-11-23
 

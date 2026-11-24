@@ -98,7 +98,7 @@ export async function whoAmI(ctx: Ctx, me: Person) {
   };
 }
 
-/* An agent as the assistant reads it: its kind, role and department in both languages. */
+/* An agent as the assistant reads it: its kind, role and department in each language of the registry. */
 async function agentView(ctx: Ctx, agent: AgentRow, depts: Map<string, typeof departments.$inferSelect>) {
   const dept = agent.departmentId ? depts.get(agent.departmentId) : undefined;
   return { id: agent.id, name: agent.name, kind: agent.kind, role: agentRole(ctx, agent), department: dept ? departmentParty(dept) : null };

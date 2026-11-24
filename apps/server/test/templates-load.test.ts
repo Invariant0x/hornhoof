@@ -2,7 +2,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { say, TEMPLATE_KEYS } from '@hornhoof/protocol';
+import { LOCALES, say, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { copyTemplates, loadTemplates } from '../src/modules/templates/load.js';
 
@@ -34,7 +34,7 @@ describe('the template loader', () => {
     it('read every role, skill and team in English and in each other language that has a file', () => {
       for (const item of [...roles, ...skills, ...templates.teams.values()]) {
         expect(item.title.en, item.id).toBeTruthy();
-        expect(item.title.ru, item.id).toBeTruthy();
+        for (const { id } of LOCALES) expect(item.title[id], `${item.id} ${id}`).toBeTruthy();
         expect(Object.keys(item.title).sort(), item.id).toEqual(Object.keys(item.description).sort());
       }
     });

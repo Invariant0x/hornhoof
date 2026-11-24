@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { loadTemplates } from '../src/modules/templates/load.js';
+import { inEveryLanguage } from './registry-languages.js';
 
 const templates = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
 
@@ -31,13 +32,13 @@ describe('standalone employee abilities', () => {
   it('has no generalist role or catch-all skill that replaces a skill selection', () => {
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     for (const item of [...templates.roles.values(), ...templates.skills.values()]) {
-      expect(`${item.title.en}\n${item.title.ru}`, item.id).not.toMatch(/\b(?:generalist|universal)\b|универсал/i);
+      expect(inEveryLanguage(item.title), item.id).not.toMatch(/\b(?:generalist|universal)\b|универсал/i);
     }
   });
 
   it('keeps unconditional turn workflows out of role descriptions as well as their bodies', () => {
     const route = /\b(?:each turn|whole turn|before a new or large feature|at once)\b|всего хода|работу хода один раз|до того, как строят|частями одновременно/i;
-    const violations = [...templates.roles.values()].filter(role => route.test(`${role.description.en}\n${role.description.ru}`));
+    const violations = [...templates.roles.values()].filter(role => route.test(inEveryLanguage(role.description)));
     expect(violations.map(role => role.id)).toEqual([]);
   });
 
@@ -66,7 +67,7 @@ describe('standalone employee abilities', () => {
       expect(ability.description, id).not.toMatch(/each turn through four gates|review and testing run once per turn/i);
     }
     expect(templates.skills.get('dev-lead')!.description.en).not.toMatch(/generalist/i);
-    expect(templates.skills.get('dev-lead')!.description.ru).not.toMatch(/универсал/i);
+    expect(inEveryLanguage(templates.skills.get('dev-lead')!.description)).not.toMatch(/универсал/i);
   });
 
   it('applies only the assigned commit rule to the exact checked candidate', () => {

@@ -13,7 +13,7 @@ import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '
 export type { MaterialManifest, MaterialView } from '@hornhoof/protocol';
 export type { FailureKind, Limits, ModelOption, ProgramRetry, ProviderId, TemplateKey, TurnAlarm, TurnRetry, WorkLine };
 
-/* Template text that comes in both languages. */
+/* Template text in each language of the registry, English always. */
 export type Lang = Texts;
 
 /* company: the whole company; listed: the departments and teams ticked for the person. */

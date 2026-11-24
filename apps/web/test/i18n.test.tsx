@@ -20,7 +20,7 @@ describe('detectLanguage', () => {
 /* The Head of Design's word for #1489 (#1539, N4): the page names its language, so a browser breaks its words by that
    language's syllables, with a hyphen. */
 describe('the language of the page', () => {
-  it.each(['en', 'ru'] as const)("names the chosen language on the page's root from the start: %s", language => {
+  it.each(LANGUAGES.map(({ id }) => id))("names the chosen language on the page's root from the start: %s", language => {
     localStorage.setItem('hh-lang', language);
     document.documentElement.lang = '';
     onTestFinished(() => {
@@ -191,8 +191,8 @@ describe('request sending state', () => {
 });
 
 describe('work tree words', () => {
-  it('uses the actual turn, branch and times in both languages', () => {
-    for (const L of [en.dept.tree, ru.dept.tree]) {
+  it('uses the actual turn, branch and times in every language of the registry', () => {
+    for (const L of LANGUAGES.map(({ id }) => DICTIONARIES[id].dept.tree)) {
       expect(L.treeAria(7)).toContain('7');
       expect(L.reviewH(7)).toContain('7');
       expect(L.mergeH(49, 'turn-7')).toContain('turn-7');
@@ -271,8 +271,8 @@ describe('work tree words', () => {
     expect(ru.failures.model_access_denied).toBe('этот тариф не дает доступ к выбранной модели');
   });
 
-  it('formats plural and duration helpers consistently across numeric ranges in English and Russian', () => {
-    for (const dict of [en, ru]) {
+  it('formats plural and duration helpers consistently across numeric ranges in every language of the registry', () => {
+    for (const dict of LANGUAGES.map(({ id }) => DICTIONARIES[id])) {
       for (const count of [0, 1, 2, 5, 11, 21]) {
         expect(dict.companyTemplates.employees(count)).toContain(String(count));
         expect(dict.map.decisionsOf('Ivan', count)).toContain('Ivan');

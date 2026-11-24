@@ -1,9 +1,10 @@
+import { LOCALES, SOURCE_LOCALE } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { keyList } from '../scripts/i18n-keys';
 import { CONTEXT, SAMPLES } from '../src/i18n/context';
 import { en } from '../src/i18n/en';
 import { keyPaths } from '../src/i18n/fallback';
-import ru from '../src/i18n/ru';
+import { DICTIONARIES } from '../src/i18n/dictionaries';
 
 /* The key list a translator is handed: every text of the screens by a path that stays, a note where the meaning is
    ambiguous, and the words a language has so far. */
@@ -34,10 +35,12 @@ describe('the key list for a translator', () => {
     expect(list.filter(entry => entry.context).length).toBe(Object.keys(CONTEXT).length);
   });
 
-  it('carries the words of a language beside the English, empty where it has none', () => {
-    const russian = keyList(ru);
-    expect(russian.length).toBe(list.length);
-    expect(russian.filter(entry => entry.translation === '').map(entry => entry.key)).toEqual([]);
+  it('carries the words of each language of the registry beside the English, empty where it has none', () => {
+    for (const { id } of LOCALES.filter(({ id }) => id !== SOURCE_LOCALE)) {
+      const words = keyList(DICTIONARIES[id]);
+      expect(words.length, id).toBe(list.length);
+      expect(words.filter(entry => entry.translation === '').map(entry => `${id} ${entry.key}`), id).toEqual([]);
+    }
     expect(keyList({}).every(entry => entry.translation === '')).toBe(true);
   });
 });

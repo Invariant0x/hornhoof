@@ -100,7 +100,7 @@ Never make the version tag or its GitHub release by hand: the workflow makes bot
 These are the same rules everyone follows, people and agents alike. [AGENTS.md](AGENTS.md) has them in short.
 
 - Code, comments, commit messages and the README are in English.
-- Every screen ships in every language the product ships (today English and Russian). A new string goes into `apps/web/src/i18n/en.ts` and into the file of each shipped language next to it (`ru.ts`), in plain words a person outside IT reads without effort. Never write a text, a plural rule or a date format into a screen: texts live in the language files, plurals go through `plural()`, dates and numbers through `Intl`, and code never names a language (`lang === 'ru'`): the registry says what a language is.
+- English is the source of every text. A new string goes into `apps/web/src/i18n/en.ts` first, in plain words a person outside IT reads without effort, and then into the file of every other language the registry lists (`LOCALES` in [`packages/protocol/src/locales.ts`](packages/protocol/src/locales.ts)): each file has every text of the English one, and a test fails for a missing or an extra one. How a language is added is in [Adding a language](#adding-a-language). Never write a text, a plural rule or a date format into a screen: texts live in the language files, plurals go through `plural()`, dates and numbers through `Intl`, and code never names a language (`lang === 'ru'`): the registry says what a language is.
 - No em dashes anywhere, in code, texts or translations. In Russian write "е" instead of "ё".
 - Match the code around you: its naming, how much it comments and how it does things.
 - Do not reformat files you did not change, and do not run a formatter over the whole repository.

@@ -385,7 +385,7 @@ Result of the screen inventory at `5c67fb00`, not recomputed here: 1124 shared k
 
 Not every physical side needs to change: `left: 0` on a full-width layer stays correct. The count is the list to review, not the amount of work.
 
-**Writing.** From `AGENTS.md` and `CONTRIBUTING.md`, mandatory for every text: every screen ships in English and Russian; plain words a person outside IT reads without effort; no em dashes; in Russian write "е" instead of the letter with two dots. Repository text is in English.
+**Writing.** From `AGENTS.md` and `CONTRIBUTING.md`, mandatory for every text: English is the source of every text and every other language of the registry follows it; plain words a person outside IT reads without effort; no em dashes; in Russian write "е" instead of the letter with two dots. Repository text is in English.
 
 ## 6. Text wrap and action groups
 

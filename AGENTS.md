@@ -5,7 +5,7 @@ These rules are for anyone who changes this repository, people and agents alike.
 ## Language
 
 * Code, comments, commit messages, README and other repository text are in English.
-* Every screen ships in every language the product ships (today English and Russian). A new string goes into `apps/web/src/i18n/en.ts` and into the file of each shipped language next to it (`ru.ts`), in plain words a person outside IT reads without effort. Texts live in language files only; plurals go through `plural()`, dates and numbers through `Intl`; code never names a language. See "Adding a language" in [`CONTRIBUTING.md`](CONTRIBUTING.md#adding-a-language).
+* English is the source of every text. A new string goes into `apps/web/src/i18n/en.ts` first, in plain words a person outside IT reads without effort, and then into the file of every other language the registry lists (`LOCALES` in [`packages/protocol/src/locales.ts`](packages/protocol/src/locales.ts)): each file has every text of the English one, and a test fails for a missing or an extra one. Texts live in language files only; plurals go through `plural()`, dates and numbers through `Intl`; code never names a language. See "Adding a language" in [`CONTRIBUTING.md`](CONTRIBUTING.md#adding-a-language).
 * No em dashes anywhere, in code, texts or translations. In Russian write "е" instead of "ё".
 
 ## Code

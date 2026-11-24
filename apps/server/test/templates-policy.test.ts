@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { LOCALES } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { copyTemplates, loadTemplates, type Role, type Skill, type Templates } from '../src/modules/templates/load.js';
 
@@ -62,9 +63,9 @@ describe('the product policy over every skill and role Hornhoof ships', () => {
     expect(said(rule, pattern)(problems, 'DEV-ENG'), String(problems)).toBe(true);
   });
 
-  it.each(['title', 'description'] as const)('reads the English and Russian %s of a skill too', field => {
+  it.each(['title', 'description'] as const)('reads the %s of a skill in every language of the registry too', field => {
     const [{ rule, pattern, example }] = examples;
-    for (const lang of ['en', 'ru'] as const) {
+    for (const { id: lang } of LOCALES) {
       const copy = copyTemplates(shipped);
       const skill = copy.skills.get('hh-mail')!;
       copy.skills.set(skill.id, { ...skill, [field]: { ...skill[field], [lang]: example } });

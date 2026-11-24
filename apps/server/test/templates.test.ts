@@ -8,6 +8,7 @@ import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js
 import { IssueInput } from '../src/modules/tasks/review-findings.js';
 import { FIND, USE } from '../src/modules/tools/shelf.js';
 import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
+import { inEveryLanguage, TRANSLATIONS, writtenIn } from './registry-languages.js';
 
 const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
 const templates = loadTemplates(DIR);
@@ -440,7 +441,7 @@ describe('templates', () => {
         expect(x.title[lang]?.length, `${x.id} title ${lang}`).toBeGreaterThan(1);
         expect(x.description[lang]?.length, `${x.id} description ${lang}`).toBeGreaterThan(5);
       }
-      expect(x.title.ru, x.id).toMatch(/[а-я]/i);
+      for (const language of TRANSLATIONS) expect(writtenIn(x.title[language.id], language), `${x.id} title ${language.id} is written in ${language.script}`).toBe(true);
     }
   });
 
@@ -456,7 +457,7 @@ describe('templates', () => {
 
   it('follows the copy rules: no em dashes and no \u0451', () => {
     for (const x of [...roles, ...skills]) {
-      const text = [x.body, x.title.en, x.title.ru, x.description.en, x.description.ru].join('\n');
+      const text = [x.body, inEveryLanguage(x.title, x.description)].join('\n');
       expect(text, x.id).not.toMatch(/[\u2014\u0451\u0401]/);
     }
   });
@@ -487,7 +488,7 @@ describe('templates', () => {
     expect(skill.body).toMatch(/duplicate[\s\S]*Ask the head of its department; never close it blind\. Never touch paused work on your own/);
     expect(skill.body).toMatch(/settle_task[\s\S]*head of that department is told/);
     expect(templates.roles.get('OPS-WATCH')!.timer?.order).toMatch(/Close the tasks whose work is done by the rule for their kind of result/);
-    for (const text of [skill.description, templates.roles.get('OPS-WATCH')!.description]) expect(text.ru).toMatch(/[а-я]/i);
+    for (const text of [skill.description, templates.roles.get('OPS-WATCH')!.description]) for (const language of TRANSLATIONS) expect(writtenIn(text[language.id], language), language.id).toBe(true);
     expect(skill.description.en).toMatch(/closes the tasks whose work is done/);
   });
 
@@ -552,7 +553,7 @@ describe('templates', () => {
       /* Every department's team does its tasks whole, but the video team, which is on the checked route, and Development's, which takes only urgent work. */
       expect(team.turnkey, team.id).toBe(team.department !== 'video_production' && team.department !== 'development');
       expect(templates.teamsOf(team.department), team.id).toEqual([team]);
-      expect(team.title.ru, team.id).toMatch(/[а-я]/i);
+      for (const language of TRANSLATIONS) expect(writtenIn(team.title[language.id], language), `${team.id} ${language.id}`).toBe(true);
       expect(team.description.en.length, team.id).toBeGreaterThan(20);
       expect(team.members.length, team.id).toBeGreaterThan(0);
       for (const member of team.members) {
@@ -572,8 +573,8 @@ describe('templates', () => {
     /* The default roster has someone for every echelon: Architecture, Development, Review, Security and Tests. */
     expect(ids).toEqual(['DEV-HEAD', 'DEV-ARCH', 'DEV-ENG', 'DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-PM']);
     expect(dev.filter(r => !r.inDefault).map(r => r.id)).toEqual(['DEV-BE', 'DEV-FE', 'DEV-OPS', 'DEV-RED', 'DEV-QA', 'DEV-DOCS', 'DEV-PERF']);
-    expect(templates.roles.get('DEV-FE')!.title).toEqual({ en: 'Interface developer', ru: 'Разработчик интерфейсов' });
-    expect(templates.roles.get('DEV-BE')!.title).toEqual({ en: 'Backend engineer', ru: 'Бэкенд-разработчик' });
+    expect(templates.roles.get('DEV-FE')!.title).toMatchObject({ en: 'Interface developer', ru: 'Разработчик интерфейсов' });
+    expect(templates.roles.get('DEV-BE')!.title).toMatchObject({ en: 'Backend engineer', ru: 'Бэкенд-разработчик' });
     expect(templates.roles.get('DSN-UI')!.perProduct).toBe(true);
     for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
     for (const id of ['DEV-ARCH', 'DEV-REV']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules'), id).toBeUndefined();
@@ -1444,7 +1445,7 @@ describe('writing to people outside', () => {
 
   it('uses the assigned mailbox for threads, attachments and verified delivery', () => {
     expect(mail().kind).toBe('procedure');
-    const text = [mail().body, mail().title.en, mail().title.ru, mail().description.en, mail().description.ru].join('\n');
+    const text = [mail().body, inEveryLanguage(mail().title, mail().description)].join('\n');
     expect(text).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
     expect(text).not.toMatch(INCIDENT_ATTRIBUTION_RE);
     expect(mail().body).toMatch(/assigned company mailbox[\s\S]*thread[\s\S]*recipients, contents and attachments/i);
@@ -1703,10 +1704,11 @@ describe('identity, defaults and shared instruction delivery', () => {
   const WAYS = 'hh-ways-of-working';
   const ways = () => templates.skills.get(WAYS)!;
 
-  it('tells in English and Russian which way of working fits, each way with how it starts and what not to do with it', () => {
+  it('tells in every language of the registry which way of working fits, each way with how it starts and what not to do with it', () => {
     const skill = ways();
     expect(skill.kind).toBe('procedure');
-    expect(skill.title).toEqual({ en: 'Ways of working', ru: 'Способы работы' });
+    expect(skill.title).toMatchObject({ en: 'Ways of working', ru: 'Способы работы' });
+    for (const language of TRANSLATIONS) for (const text of [skill.title, skill.description]) expect(writtenIn(text[language.id], language), language.id).toBe(true);
     expect(skill.description.en).toMatch(/standing employees[\s\S]*turnkey[\s\S]*route[\s\S]*one-shot calls[\s\S]*chain[\s\S]*assistant[\s\S]*program operator/i);
     expect(skill.description.ru).toMatch(/постоянн[\s\S]*под ключ[\s\S]*маршрут[\s\S]*разов[\s\S]*цепоч[\s\S]*помощник[\s\S]*оператор/i);
     const body = skill.body;
@@ -1752,7 +1754,7 @@ describe('identity, defaults and shared instruction delivery', () => {
   });
 
   it('names no company, product or programming language in the ways of working, with no long dash, curly quote or ё', () => {
-    const text = [ways().body, ways().title.en, ways().title.ru, ways().description.en, ways().description.ru].join('\n');
+    const text = [ways().body, inEveryLanguage(ways().title, ways().description)].join('\n');
     expect(text).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
     expect(text).not.toMatch(INCIDENT_ATTRIBUTION_RE);
     expect(text).not.toMatch(/\b(?:anthropic|openai|gemini|avaclone|openclaw|hermes|telegram|google|acme)\b/i);
@@ -1765,9 +1767,9 @@ describe('identity, defaults and shared instruction delivery', () => {
     const skill = templates.skills.get('hh-tables');
     expect(skill).toBeDefined();
     expect(skill!.title.en.length).toBeGreaterThan(3);
-    expect(skill!.title.ru?.length).toBeGreaterThan(3);
+    for (const { id } of LOCALES) expect(skill!.title[id]?.length, `title ${id}`).toBeGreaterThan(3);
     expect(skill!.description.en.length).toBeGreaterThan(10);
-    expect(skill!.description.ru?.length).toBeGreaterThan(10);
+    for (const { id } of LOCALES) expect(skill!.description[id]?.length, `description ${id}`).toBeGreaterThan(10);
     expect(skill!.body).toContain('hh-xlsx');
     expect(skill!.body).toContain('hh-attach');
     expect(skill!.body).toContain('send_telegram_file');
@@ -1777,8 +1779,8 @@ describe('identity, defaults and shared instruction delivery', () => {
     expect(skill!.body).not.toMatch(/(?:^|\s)#\d+\b|\b202\d-\d{2}-\d{2}\b|@\S+\.\S+|\/(?:Users|home)\/\w+/i);
     expect(skill!.body).not.toMatch(/(?<=[a-z,;:]\s)(?!Markdown\b|Telegram\b|Google\b|Sheets\b|Company\b)[A-Z][a-z]+/);
     expect(skill!.body).not.toContain('\u2014');
-    expect(`${skill!.title.ru} ${skill!.description.ru}`).not.toContain('\u0451');
-    expect(`${skill!.title.ru} ${skill!.description.ru}`).not.toContain('\u2014');
+    expect(inEveryLanguage(skill!.title, skill!.description)).not.toContain('\u0451');
+    expect(inEveryLanguage(skill!.title, skill!.description)).not.toContain('\u2014');
 
     const withMarkers = render(templates.roles.get('DEV-HEAD')!, [], { name: 'AgentMarker', company: 'TenantMarker', department: 'DeptMarker' });
     const tablesPart = withMarkers.parts.find(part => part.kind === 'skill' && part.id === 'hh-tables');
