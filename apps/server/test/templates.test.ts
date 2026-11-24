@@ -471,7 +471,7 @@ describe('templates', () => {
     expect([watch.timer?.forWork, bugs.timer?.forWork]).toEqual([true, true]);
     expect(watch.skills.find(s => s.id === 'ops-task-watch')?.on).toBe(true);
     expect(bugs.skills.find(s => s.id === 'ops-failure-review')?.on).toBe(true);
-    expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee', 'restart_program', 'settle']);
+    expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'hangs', 'message_employee', 'restart_program', 'settle']);
     expect(templates.skills.get('ops-failure-review')!.grants).toEqual(['failures', 'agents', 'message_employee', 'improvements']);
     expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-PM', 'HOM-PM', 'MKT-PM', 'OPS-BUGS', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SUP-PM', 'VID-PM']);
   });
@@ -487,6 +487,11 @@ describe('templates', () => {
     expect(skill.body).toMatch(/duplicate[\s\S]*Ask the head of its department; never close it blind\. Never touch paused work on your own/);
     expect(skill.body).toMatch(/settle_task[\s\S]*head of that department is told/);
     expect(templates.roles.get('OPS-WATCH')!.timer?.order).toMatch(/Close the tasks whose work is done by the rule for their kind of result/);
+    /* #2066: the stuck check reads one list only, and nothing closes a turn on silence alone. */
+    expect(skill.body).toMatch(/Find the agents that may be stuck from one list only: call suspected_hangs\./);
+    expect(skill.body).toMatch(/Never walk every agent to look for stuck ones: an agent that is not listed is not looked at\./);
+    expect(skill.body).toMatch(/Nothing closes a turn on silence alone: you decide\./);
+    expect(templates.roles.get('OPS-WATCH')!.timer?.order).toMatch(/^Call suspected_hangs and check only the agents it lists/);
     for (const text of [skill.description, templates.roles.get('OPS-WATCH')!.description]) expect(text.ru).toMatch(/[а-я]/i);
     expect(skill.description.en).toMatch(/closes the tasks whose work is done/);
   });
