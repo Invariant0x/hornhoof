@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle
 import type { Ctx } from '../../app.js';
 import { agents, autonomousReleases, companies, departments, people, taskEvents, taskRoutes, tasks, testParts, testRuns, turnReleases, turns, type ReleasedTask } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
-import { loggable } from '../../errors.js';
+import { ApiError, loggable } from '../../errors.js';
 import { note } from './events.js';
 import { refuse, type Task, type Tx } from './state.js';
 import { taskByRef } from './lookup.js';
@@ -18,6 +18,8 @@ import { newerVersion, versionsNewestFirst } from './turn-tags.js';
 import { openTurnOf } from './turn-department.js';
 import { repoAt } from '../departments/repository.js';
 import { heldLineage } from '../testruns/compare.js';
+import { GitHubRateLimited } from '../testruns/github-limit.js';
+import { readGitHubRun } from '../testruns/github-runs.js';
 import { keptEverything, ofItsRelease } from '../testruns/reuse.js';
 import { wholeProductRun } from './autonomous-release.js';
 
@@ -31,15 +33,66 @@ import { wholeProductRun } from './autonomous-release.js';
 
 type Turn = typeof turns.$inferSelect;
 type Release = typeof turnReleases.$inferSelect;
-type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readTags' | 'readBranches' | 'createBranch' | 'log'>>;
+type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readGitHubRun' | 'readTags' | 'readBranches' | 'createBranch' | 'log'>>;
 type Repo = IntegrationTarget['repo'];
+
+type ReleaseProof =
+  | { kind: 'test_run'; runId: string }
+  | { kind: 'github_run'; repo: Repo; githubRunId: number; attempt?: number };
+type VerifiedProof =
+  | { kind: 'test_run'; runId: string }
+  | { kind: 'github_run'; githubRunId: number; attempt: number; commit: string };
+
+class GitHubProofTransient extends ApiError {
+  constructor(message: string) {
+    super(409, 'conflict', message, 'repo_invalid');
+  }
+}
 
 const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).from(companies).where(eq(companies.id, companyId)).for('no key update');
 
-/* A whole run of R's release: of the turn branch at R, asked for by an agent of the department or the orchestrator, of the product's
-   tests in the full profile its manifest names, with no one suite, every part passed with its receipt on R, taking only what its
-   release proved, and no newer run of R failed since. A run of a command of its own proves no release. */
-async function requireFullRun(db: Ctx['db'] | Tx, turn: Turn, branch: string, departmentId: string, runId: string, commit: string): Promise<void> {
+function proofFromInput(repo: Repo, input: ReleaseInput): ReleaseProof {
+  if ((input.runId !== undefined) === (input.githubRunId !== undefined)) {
+    throw refuse(400, 'task_invalid', 'Give either runId or githubRunId to record a release, not both.');
+  }
+  if (input.runId !== undefined) return { kind: 'test_run', runId: input.runId };
+  if (!Number.isSafeInteger(input.githubRunId) || input.githubRunId! <= 0) {
+    throw refuse(400, 'task_invalid', 'githubRunId must be a positive integer.');
+  }
+  return { kind: 'github_run', repo, githubRunId: input.githubRunId! };
+}
+
+function proofOfRecord(repo: Repo, record: Release): ReleaseProof | null {
+  if (record.runId && record.githubRunId === null && record.githubRunAttempt === null && record.githubRunCommit === null) {
+    return { kind: 'test_run', runId: record.runId };
+  }
+  if (!record.runId && record.githubRunId !== null && record.githubRunAttempt !== null && record.githubRunCommit === record.commit) {
+    return { kind: 'github_run', repo, githubRunId: record.githubRunId, attempt: record.githubRunAttempt };
+  }
+  return null;
+}
+
+async function prefetchGitHubProof(ctx: Reader, proof: ReleaseProof | null, commit: string): Promise<Reader> {
+  if (proof?.kind !== 'github_run') return ctx;
+  const reader = ctx.readGitHubRun ?? readGitHubRun;
+  const answer = await reader(proof.repo, { runId: proof.githubRunId, commit, attempt: proof.attempt });
+  return { ...ctx, readGitHubRun: async () => answer };
+}
+
+async function requireGitHubFullRun(ctx: Reader, branch: string, proof: Extract<ReleaseProof, { kind: 'github_run' }>, commit: string): Promise<VerifiedProof> {
+  const reader = ctx.readGitHubRun ?? readGitHubRun;
+  const checked = await reader(proof.repo, { runId: proof.githubRunId, commit, attempt: proof.attempt });
+  if (checked.ok) return { kind: 'github_run', githubRunId: checked.id, attempt: checked.attempt, commit: checked.commit };
+  if (checked.kind === 'rate-limit') throw new GitHubProofTransient(new GitHubRateLimited(checked.rateLimit).message);
+  if (checked.kind === 'unavailable') throw new GitHubProofTransient(checked.why);
+  throw refuse(409, 'task_invalid', `GitHub run ${proof.githubRunId} is no whole run of ${commit} on ${branch}: ${checked.why}. A release needs a passed Images workflow run on its exact commit, with every test job and the passed job succeeded.`);
+}
+
+/* A whole run of R's release: either a passed GitHub Actions run of the repository's Images workflow on R, or a run_tests run
+   of the turn branch at R, asked for by an agent of the department or the orchestrator, of the product's tests in the full
+   profile its manifest names, with no one suite, every part passed with its receipt on R, taking only what its release proved,
+   and no newer run of R failed since. A run of a command of its own proves no release. */
+async function requireTestRun(db: Ctx['db'] | Tx, turn: Turn, branch: string, departmentId: string, runId: string, commit: string): Promise<VerifiedProof> {
   const notFull = (why: string) => refuse(409, 'task_invalid', `Run ${runId} is no whole run of ${commit} on ${branch}: ${why}. A release needs a whole run of its own on its exact commit: the first run of its release, or a later one that took only what its release proved.`);
   const [run] = await db.select().from(testRuns).where(and(eq(testRuns.id, runId), eq(testRuns.companyId, turn.companyId)));
   if (!run) throw notFull('there is no such run');
@@ -51,6 +104,13 @@ async function requireFullRun(db: Ctx['db'] | Tx, turn: Turn, branch: string, de
   if (!(await wholeProductRun(db, run, turn.companyId, departmentId, commit))) throw notFull("it is no run of the product's full profile with a passed receipt of every part on this commit");
   const [newer] = await db.select(idOnly(testRuns)).from(testRuns).where(and(eq(testRuns.companyId, turn.companyId), eq(testRuns.commitSha, commit), eq(testRuns.status, 'failed'), gt(testRuns.createdAt, run.createdAt))).limit(1);
   if (newer) throw notFull(`a newer run of the same commit failed, ${newer.id}`);
+  return { kind: 'test_run', runId };
+}
+
+async function requireFullRun(ctx: Reader, db: Ctx['db'] | Tx, turn: Turn, branch: string, departmentId: string, proof: ReleaseProof, commit: string): Promise<VerifiedProof> {
+  return proof.kind === 'github_run'
+    ? requireGitHubFullRun(ctx, branch, proof, commit)
+    : requireTestRun(db, turn, branch, departmentId, proof.runId, commit);
 }
 
 type ReleaseRun = typeof testRuns.$inferSelect;
@@ -104,18 +164,24 @@ async function liveCheckers(db: Ctx['db'] | Tx, released: ReleasedTask[]): Promi
   return rows.map(row => ({ id: row.agentId, name: row.name, stage: row.kind === 'report' ? 'turnkey' : row.stage }));
 }
 
+async function autonomousRunOf(tx: Tx, verified: VerifiedProof): Promise<{ testRunId: string | null; testRunNumber: number } | null> {
+  if (verified.kind === 'github_run') return { testRunId: null, testRunNumber: verified.githubRunId };
+  const [run] = await tx.select(only(testRuns, 'number')).from(testRuns).where(eq(testRuns.id, verified.runId));
+  return run ? { testRunId: verified.runId, testRunNumber: run.number } : null;
+}
+
 /* The entry of the autonomous release log that approves R: the release task, its holder, R and main under it, the full run, and
    the checkers that passed what R brings, the holders of its turnkey work among them. */
-async function logAutonomous(tx: Tx, turn: Turn, task: Task, agentId: string, commit: string, base: string, runId: string, released: ReleasedTask[]): Promise<string | null> {
+async function logAutonomous(tx: Tx, turn: Turn, task: Task, agentId: string, commit: string, base: string, verified: VerifiedProof, released: ReleasedTask[]): Promise<string | null> {
   const checkers = await liveCheckers(tx, released);
-  const [run] = await tx.select(only(testRuns, 'number')).from(testRuns).where(eq(testRuns.id, runId));
+  const run = await autonomousRunOf(tx, verified);
   const [holder] = await tx.select(only(agents, 'name')).from(agents).where(eq(agents.id, agentId));
   if (!checkers || !run || !holder) return null;
   const unique = <T,>(items: T[]) => [...new Set(items)];
   const ids = unique(checkers.map(c => c.id));
   const [entry] = await tx.insert(autonomousReleases).values({
     companyId: turn.companyId, departmentId: turn.departmentId, taskId: task.id, taskNumber: task.number, agentId, agentName: holder.name, commitSha: commit, baseCommitSha: base,
-    testRunId: runId, testRunNumber: run.number, reviewerAgentId: ids.length === 1 ? ids[0]! : null, reviewerName: unique(checkers.map(c => c.name)).join(', '), verdictStage: unique(checkers.map(c => c.stage)).join(', '),
+    ...run, reviewerAgentId: ids.length === 1 ? ids[0]! : null, reviewerName: unique(checkers.map(c => c.name)).join(', '), verdictStage: unique(checkers.map(c => c.stage)).join(', '),
   }).returning({ id: autonomousReleases.id });
   return entry!.id;
 }
@@ -124,8 +190,10 @@ async function logAutonomous(tx: Tx, turn: Turn, task: Task, agentId: string, co
 async function commitsBetween(ctx: Reader, repo: Repo, base: string, head: string) {
   try {
     const compared = await ctx.readCompare?.(repo, { base, head }, 10_000);
+    if (compared && !compared.complete && compared.rateLimit) throw new GitHubProofTransient(new GitHubRateLimited(compared.rateLimit).message);
     return (compared && heldLineage(compared, base, head)?.commits) ?? null;
-  } catch {
+  } catch (error) {
+    if (error instanceof GitHubProofTransient) throw error;
     return null;
   }
 }
@@ -321,7 +389,12 @@ function heldWithin(at: Map<string, Compared>, from: string[]): Set<string> {
   return held;
 }
 
-export type ReleaseInput = { task: number; commit: string; runId: string };
+export type ReleaseInput = { task: number; commit: string; runId?: string; githubRunId?: number };
+
+const releaseProofColumns = (verified: VerifiedProof) =>
+  verified.kind === 'github_run'
+    ? { runId: null, githubRunId: verified.githubRunId, githubRunAttempt: verified.attempt, githubRunCommit: verified.commit }
+    : { runId: verified.runId, githubRunId: null, githubRunAttempt: null, githubRunCommit: null };
 
 /* The record of a release, asked by the holder of its release task in the turn's department before main moves. */
 export async function recordRelease(ctx: Reader, agentId: string, companyId: string, input: ReleaseInput) {
@@ -335,6 +408,7 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   const turn = target?.turn;
   if (!target || !turn) throw refuse(409, 'repo_invalid', `#${task.number} is of no department that releases turns: its results go to their main line straight.`);
   if (!agent || agent.departmentId !== turn.departmentId) throw refuse(403, 'task_not_yours', 'Only the department whose turn it is records its release.');
+  const proof = proofFromInput(target.repo, input);
   const head = await headOf(ctx, target.repo, target.branch);
   if (!head || !(await branchHolds(ctx, target.repo, head, input.commit))) throw refuse(409, 'task_changed', `${target.branch} does not hold ${input.commit}${head ? `: it is at ${head}` : ', or it could not be read'}. A release is a commit of the turn branch.`);
   const base = await headOf(ctx, target.repo, target.repo.branch);
@@ -342,7 +416,8 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   if (base === input.commit || await branchHolds(ctx, target.repo, base, input.commit)) throw refuse(409, 'task_invalid', `${target.repo.branch} already holds ${input.commit}: a release is recorded before main moves.`);
   if (!(await branchHolds(ctx, target.repo, input.commit, base))) throw refuse(409, 'task_invalid', `${input.commit} does not hold ${target.repo.branch} at ${base}, so main cannot go to it by fast-forward. Take ${target.repo.branch} into ${target.branch} first.`);
   const [owner] = await ctx.db.select(idOnly(departments)).from(departments).where(eq(departments.id, turn.departmentId!));
-  await requireFullRun(ctx.db, turn, target.branch, owner!.id, input.runId, input.commit);
+  const checkedCtx = await prefetchGitHubProof(ctx, proof, input.commit);
+  await requireFullRun(checkedCtx, ctx.db, turn, target.branch, owner!.id, proof, input.commit);
   const { results, held, uncovered } = await broughtBy(ctx, turn, target.repo, base, input.commit);
   const released: ReleasedTask[] = held.map(r => ({ taskId: r.task.id, number: r.task.number, commit: r.commit, verdicts: r.verdicts, ...(r.turnkey ? { report: r.turnkey.report } : {}) }));
   const left = results.filter(r => !held.includes(r)).map(r => r.task.number);
@@ -354,11 +429,11 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
     if (!open) throw refuse(409, 'task_changed', `Turn ${turn.number} was released meanwhile.`);
     const still = await tx.select(idOnly(tasks)).from(tasks).where(eq(tasks.turnId, turn.id));
     if (still.length !== results.length || still.some(row => !results.some(r => r.task.id === row.id))) throw refuse(409, 'task_changed', `A result joined turn ${turn.number} meanwhile. Record the release again.`);
-    await requireFullRun(tx, turn, target.branch, owner!.id, input.runId, input.commit);
+    const verified = await requireFullRun(checkedCtx, tx, turn, target.branch, owner!.id, proof, input.commit);
     const { approvalRequestId, canLog } = await releaseApproval(tx, at, true);
-    const autonomousReleaseId = canLog ? await logAutonomous(tx, turn, task, agentId, input.commit, base, input.runId, released) : null;
+    const autonomousReleaseId = canLog ? await logAutonomous(tx, turn, task, agentId, input.commit, base, verified, released) : null;
     if (canLog && !autonomousReleaseId) throw needsPerson(task, input.commit, ' A checker of what it brings is no longer at work.');
-    const [row] = await tx.insert(turnReleases).values({ companyId, turnId: turn.id, commit: input.commit, baseCommitSha: base, runId: input.runId, tasks: released, taskId: task.id, approvalRequestId, autonomousReleaseId, requestedByAgentId: agentId, covered: uncovered.length === 0, uncovered: uncheckedLines(uncovered) }).returning();
+    const [row] = await tx.insert(turnReleases).values({ companyId, turnId: turn.id, commit: input.commit, baseCommitSha: base, ...releaseProofColumns(verified), tasks: released, taskId: task.id, approvalRequestId, autonomousReleaseId, requestedByAgentId: agentId, covered: uncovered.length === 0, uncovered: uncheckedLines(uncovered) }).returning();
     const by = autonomousReleaseId ? ', approved by autonomous release' : '';
     await note(tx, task, { kind: 'comment', actor: { agentId }, text: `Recorded the release of Turn ${turn.number}: main ${base} goes to ${input.commit}${by}.`, data: { release: row!.id } });
     return row!;
@@ -383,7 +458,9 @@ const nextTag = (line: Line): string =>
       : 'the first version tag of this repository, which has none yet';
 
 const releaseView = (turn: Turn, record: Release, released: ReleasedTask[], left: number[], line: Line) => ({
-  release: record.id, turn: turn.number, commit: record.commit, baseCommit: record.baseCommitSha, runId: record.runId, approvalRequestId: record.approvalRequestId, autonomousReleaseId: record.autonomousReleaseId,
+  release: record.id, turn: turn.number, commit: record.commit, baseCommit: record.baseCommitSha,
+  runId: record.runId, githubRunId: record.githubRunId, githubRunAttempt: record.githubRunAttempt,
+  approvalRequestId: record.approvalRequestId, autonomousReleaseId: record.autonomousReleaseId,
   tasks: released.map(({ number, commit, verdicts }) => ({ number, commit, verdicts })), covered: record.covered, uncovered: record.uncovered, left,
   next: `Fast-forward main to ${record.commit} and tag it vX.Y.Z, ${nextTag(line)}: the tag closes Turn ${turn.number}${left.length ? `, and what it leaves out goes into the next release` : ''}.`,
 });
@@ -452,12 +529,18 @@ const approvalStands = (tx: Tx, turn: Turn, record: Release, taskId: string, req
   ? exactCommitApproval(tx, turn.companyId, taskId, record.commit, requestId)
   : commitApprovalNaming(tx, turn.companyId, taskId, record.commit, record.uncovered, requestId);
 
+function rethrowTransient(error: unknown): false {
+  if (error instanceof GitHubProofTransient) throw error;
+  return false;
+}
+
 /* The full run and the approval the record relied on still stand. A release recorded without approval still follows the
    department's commit rule. */
-async function recordStands(tx: Tx, turn: Turn, record: Release): Promise<boolean> {
-  if (!record.runId) return false;
-  try { await requireFullRun(tx, turn, `turn-${turn.number}`, turn.departmentId!, record.runId, record.commit); }
-  catch { return false; }
+async function recordStands(ctx: Reader, tx: Tx, turn: Turn, repo: Repo, record: Release): Promise<boolean> {
+  const proof = proofOfRecord(repo, record);
+  if (!proof) return false;
+  try { await requireFullRun(ctx, tx, turn, `turn-${turn.number}`, turn.departmentId!, proof, record.commit); }
+  catch (error) { return rethrowTransient(error); }
   if (record.approvalRequestId) return Boolean(record.taskId && await approvalStands(tx, turn, record, record.taskId, record.approvalRequestId));
   if (!record.autonomousReleaseId) return !(await commitApprovalRequired(tx, turn.companyId, turn.departmentId, true));
   if (!record.covered) return false;
@@ -466,30 +549,40 @@ async function recordStands(tx: Tx, turn: Turn, record: Release): Promise<boolea
   return !!department?.on && !!entry && (await liveCheckers(tx, record.tasks)) !== null;
 }
 
+async function closeTurnRecords(ctx: Reader, repo: Repo, turn: Turn, record: Release, version: string, head: string, before: string[]): Promise<{ done: Turn; next: Turn } | 'later' | 'stale'> {
+  try {
+    return await ctx.db.transaction(async tx => {
+      await lockCompany(tx, turn.companyId);
+      const rows = await tx.select().from(tasks).where(eq(tasks.turnId, turn.id)).orderBy(asc(tasks.number)).for('no key update');
+      if (rows.map(row => row.id).sort().join() !== before.join()) return 'later' as const;
+      const [open] = await tx.select().from(turns).where(and(eq(turns.id, turn.id), eq(turns.status, 'open')));
+      if (!open) return 'later' as const;
+      if (!(await recordStands(ctx, tx, turn, repo, record))) return 'stale' as const;
+      const [done] = await tx.update(turns).set({ status: 'closed', version, commit: record.commit, closedAt: new Date() }).where(eq(turns.id, turn.id)).returning();
+      await keepSnapshot(tx, done!, ctx.log);
+      await recordTurnSummary(tx, done!);
+      const number = (await lastTurnNumber(tx, turn.companyId)) + 1;
+      const [next] = await tx.insert(turns).values({ companyId: turn.companyId, departmentId: turn.departmentId, number, goal: 'The next release.', status: 'open', openedAt: new Date(), baseVersion: version, baseCommit: record.commit, startCommit: head }).returning();
+      const released = new Set(record.tasks.map(t => t.taskId));
+      const left = rows.filter(row => !released.has(row.id));
+      if (left.length) await tx.update(tasks).set({ turnId: next!.id }).where(inArray(tasks.id, left.map(row => row.id)));
+      const by = record.requestedByAgentId;
+      if (by) for (const row of left) await note(tx, row, { kind: 'updated', actor: { agentId: by }, text: `${version} was released without it, so it goes into Turn ${next!.number}.`, data: { fields: ['turn'], from: turn.number, to: next!.number } });
+      return { done: done!, next: next! };
+    });
+  } catch (error) {
+    if (error instanceof GitHubProofTransient) return 'later';
+    throw error;
+  }
+}
+
 /* The tag closes the turn: it keeps the version and commit, the results of its record stay in it, and every other result of it,
    one accepted while the repository was read too, goes into the next turn, which starts from the head of this one, and its
    branch is made there. Anything that joined the turn after it was first read puts the close off to the next minute, so the
    head read holds it. */
 async function closeTurn(ctx: Reader, repo: Repo, turn: Turn, record: Release, version: string, head: string, before: string[]): Promise<'closed' | 'later' | 'stale'> {
-  const closed = await ctx.db.transaction(async tx => {
-    await lockCompany(tx, turn.companyId);
-    const rows = await tx.select().from(tasks).where(eq(tasks.turnId, turn.id)).orderBy(asc(tasks.number)).for('no key update');
-    if (rows.map(row => row.id).sort().join() !== before.join()) return 'later' as const;
-    const [open] = await tx.select().from(turns).where(and(eq(turns.id, turn.id), eq(turns.status, 'open')));
-    if (!open) return 'later' as const;
-    if (!(await recordStands(tx, turn, record))) return 'stale' as const;
-    const [done] = await tx.update(turns).set({ status: 'closed', version, commit: record.commit, closedAt: new Date() }).where(eq(turns.id, turn.id)).returning();
-    await keepSnapshot(tx, done!, ctx.log);
-    await recordTurnSummary(tx, done!);
-    const number = (await lastTurnNumber(tx, turn.companyId)) + 1;
-    const [next] = await tx.insert(turns).values({ companyId: turn.companyId, departmentId: turn.departmentId, number, goal: 'The next release.', status: 'open', openedAt: new Date(), baseVersion: version, baseCommit: record.commit, startCommit: head }).returning();
-    const released = new Set(record.tasks.map(t => t.taskId));
-    const left = rows.filter(row => !released.has(row.id));
-    if (left.length) await tx.update(tasks).set({ turnId: next!.id }).where(inArray(tasks.id, left.map(row => row.id)));
-    const by = record.requestedByAgentId;
-    if (by) for (const row of left) await note(tx, row, { kind: 'updated', actor: { agentId: by }, text: `${version} was released without it, so it goes into Turn ${next!.number}.`, data: { fields: ['turn'], from: turn.number, to: next!.number } });
-    return { done: done!, next: next! };
-  });
+  const checkedCtx = await prefetchGitHubProof(ctx, proofOfRecord(repo, record), record.commit);
+  const closed = await closeTurnRecords(checkedCtx, repo, turn, record, version, head, before);
   if (typeof closed === 'string') return closed;
   ctx.bus.publish(turn.companyId, { type: 'org' });
   ctx.log?.info({ companyId: turn.companyId, turn: turn.number, version, next: closed.next.number, startCommit: head }, `Turn ${turn.number} was released as ${version}; turn-${closed.next.number} starts from ${head}.`);

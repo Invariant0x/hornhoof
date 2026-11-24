@@ -1,0 +1,5 @@
+ALTER TABLE "autonomous_releases" ALTER COLUMN "test_run_number" SET DATA TYPE bigint;--> statement-breakpoint
+ALTER TABLE "turn_releases" ADD COLUMN "github_run_id" bigint;--> statement-breakpoint
+ALTER TABLE "turn_releases" ADD COLUMN "github_run_attempt" integer;--> statement-breakpoint
+ALTER TABLE "turn_releases" ADD COLUMN "github_run_commit" text;--> statement-breakpoint
+ALTER TABLE "turn_releases" ADD CONSTRAINT "turn_releases_github_run" CHECK (("turn_releases"."github_run_id" IS NULL AND "turn_releases"."github_run_attempt" IS NULL AND "turn_releases"."github_run_commit" IS NULL) OR ("turn_releases"."run_id" IS NULL AND "turn_releases"."github_run_id" IS NOT NULL AND "turn_releases"."github_run_id" > 0 AND "turn_releases"."github_run_attempt" IS NOT NULL AND "turn_releases"."github_run_attempt" > 0 AND "turn_releases"."github_run_commit" IS NOT NULL AND "turn_releases"."github_run_commit" = "turn_releases"."commit"));

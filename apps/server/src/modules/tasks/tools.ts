@@ -694,14 +694,24 @@ class TaskTools {
       'release_turn',
       {
         description:
-          "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own. The department's commit rule says whether the task needs approval of that exact commit. An unset rule needs no approval, but a release that brings what no check covers is recorded only once a person approved a card naming exactly that, whatever the rule, and autonomous release never approves it. When required, ask_person with commit asks the person responsible, or the orchestrator can answer for the owner. With autonomous release on, proof of each change can satisfy the approval rule and is recorded in its log. It uses an independent checker or, for turnkey work, the holder's own review, security check and tests, which cover only the first-parent line from the commit its holder named down to where its branch started. " +
+          "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own, or githubRunId a passed GitHub Actions run of the repository's Images workflow on that exact commit, verified by the server through the GitHub API. The department's commit rule says whether the task needs approval of that exact commit. An unset rule needs no approval, but a release that brings what no check covers is recorded only once a person approved a card naming exactly that, whatever the rule, and autonomous release never approves it. When required, ask_person with commit asks the person responsible, or the orchestrator can answer for the owner. With autonomous release on, proof of each change can satisfy the approval rule and is recorded in its log. It uses an independent checker or, for turnkey work, the holder's own review, security check and tests, which cover only the first-parent line from the commit its holder named down to where its branch started. " +
           'It says what the release brings, whether each of its commits was checked, and which results of the turn it leaves out because they joined the branch after the commit. The turn branch never stops for a release: keep taking finished work into it. Then fast-forward main to the commit and tag it vX.Y.Z, the next version of your department\'s repository after its own last version tag, which the answer names, or its first version tag where it has none: the tag closes the turn, and what the release left out goes into the next turn, whose branch you create from the head of this one.',
-        inputSchema: { task: Ref, commit: z.string().regex(/^[a-f0-9]{40}$/).describe('The exact commit of the turn branch that the whole run checked.'), runId: z.uuid().describe('A passed whole run of that commit.') },
+        inputSchema: {
+          task: Ref,
+          commit: z.string().regex(/^[a-f0-9]{40}$/).describe('The exact commit of the turn branch that the whole run checked.'),
+          runId: z.uuid().optional().describe('A passed whole run of that commit.'),
+          githubRunId: z.number().int().positive().optional().describe("A passed GitHub Actions run of the repository's Images workflow on that commit."),
+        },
       },
       async input =>
         this.run(async () => {
           const ref = typeof input.task === 'number' ? input.task : Number(String(input.task).replace(/^#/, ''));
-          const recorded = await recordRelease(this.ctx, this.job.agentId, this.job.companyId, { task: ref, commit: input.commit, runId: input.runId });
+          const recorded = await recordRelease(this.ctx, this.job.agentId, this.job.companyId, {
+            task: ref,
+            commit: input.commit,
+            ...(input.runId !== undefined ? { runId: input.runId } : {}),
+            ...(input.githubRunId !== undefined ? { githubRunId: input.githubRunId } : {}),
+          });
           return { text: JSON.stringify(recorded) };
         }),
     );

@@ -1139,6 +1139,9 @@ export const turnReleases = pgTable(
     commit: text('commit').notNull(),
     baseCommitSha: text('base_commit_sha').notNull(),
     runId: uuid('run_id').references((): AnyPgColumn => testRuns.id),
+    githubRunId: bigint('github_run_id', { mode: 'number' }),
+    githubRunAttempt: integer('github_run_attempt'),
+    githubRunCommit: text('github_run_commit'),
     tasks: jsonb('tasks').$type<ReleasedTask[]>().notNull().default([]),
     /* The release task and, where it relied on approval, the request or the autonomous release log entry. */
     taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
@@ -1154,6 +1157,10 @@ export const turnReleases = pgTable(
     index('turn_releases_turn_id').on(t.turnId),
     check('turn_releases_commit', sql`${t.commit} ~ '^[0-9a-f]{40}$' AND ${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
     check('turn_releases_approved_once', sql`${t.approvalRequestId} IS NULL OR ${t.autonomousReleaseId} IS NULL`),
+    check(
+      'turn_releases_github_run',
+      sql`(${t.githubRunId} IS NULL AND ${t.githubRunAttempt} IS NULL AND ${t.githubRunCommit} IS NULL) OR (${t.runId} IS NULL AND ${t.githubRunId} IS NOT NULL AND ${t.githubRunId} > 0 AND ${t.githubRunAttempt} IS NOT NULL AND ${t.githubRunAttempt} > 0 AND ${t.githubRunCommit} IS NOT NULL AND ${t.githubRunCommit} = ${t.commit})`,
+    ),
   ],
 );
 
@@ -2468,7 +2475,7 @@ export const autonomousReleases = pgTable('autonomous_releases', {
   commitSha: text('commit_sha').notNull(),
   baseCommitSha: text('base_commit_sha').notNull(),
   testRunId: uuid('test_run_id').references(() => testRuns.id, { onDelete: 'set null' }),
-  testRunNumber: integer('test_run_number').notNull(),
+  testRunNumber: bigint('test_run_number', { mode: 'number' }).notNull(),
   reviewerAgentId: uuid('reviewer_agent_id').references(() => agents.id, { onDelete: 'set null' }),
   reviewerName: text('reviewer_name').notNull(),
   verdictEventId: bigint('verdict_event_id', { mode: 'number' }).references(() => taskEvents.id, { onDelete: 'set null' }),
