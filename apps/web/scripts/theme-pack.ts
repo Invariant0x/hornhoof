@@ -11,7 +11,7 @@
    the font files it names and their *-OFL.txt licences; the fonts head the look's display and body stacks. --id and the
    names pack a second theme of the same look, such as a second kit of it. */
 
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync, type Stats } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { crc32, deflateRawSync } from 'node:zlib';
@@ -44,6 +44,20 @@ export async function shippedVoice(id: string): Promise<ThemeVoice | null> {
   return pack && voice ? { label: pack.label, address: voice.samples, salutations: voice.salutations, names: pack.names } : null;
 }
 
+/* A file or folder of a pack folder, refused when it is a link: a pack folder may come from someone else, and a link
+   would put a file of this machine into the archive with nothing in the archive to show it. */
+function ownEntry(path: string): Stats {
+  const entry = lstatSync(path);
+  if (entry.isSymbolicLink()) throw new Error(`${path} is a link to another place; a pack folder must hold its own files`);
+  return entry;
+}
+
+/* The bytes of a pack folder's own file. */
+function ownFile(path: string): Buffer {
+  ownEntry(path);
+  return readFileSync(path);
+}
+
 /* A file of an art folder an installed theme carries: a picture, or a picture's passport, the .json of the same name
    beside it. The art index Hornhoof writes itself, and an artist's loose notes or data the server refuses. */
 function carriedArt(dir: string, name: string): boolean {
@@ -58,8 +72,8 @@ function artFiles(folder: string): [string, Buffer][] {
   const walk = (dir: string) => {
     for (const name of readdirSync(dir).sort()) {
       const path = join(dir, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else if (carriedArt(dir, name)) found.push([`world/art/${relative(folder, path).split(sep).join('/')}`, readFileSync(path)]);
+      if (ownEntry(path).isDirectory()) walk(path);
+      else if (carriedArt(dir, name)) found.push([`world/art/${relative(folder, path).split(sep).join('/')}`, ownFile(path)]);
     }
   };
   walk(folder);
@@ -79,26 +93,26 @@ function flatNames(names: readonly string[], form: RegExp, what: string): readon
 
 /* A kit's pack folder: its kit.json as ui/kit.json, each picture a slot names under ui/kit/, and its licence. */
 function kitFiles(folder: string): { files: [string, Buffer][]; licence: Buffer | null } {
-  const manifest = readFileSync(join(folder, 'kit.json'));
+  const manifest = ownFile(join(folder, 'kit.json'));
   const kit = JSON.parse(manifest.toString('utf8')) as { slots?: Record<string, { file?: string }> };
   const named = [...new Set(Object.values(kit.slots ?? {}).map(slot => slot.file).filter((file): file is string => typeof file === 'string'))];
   const pictures = flatNames(named, THEME_KIT_VALUES.file, "The kit's kit.json");
   const missing = pictures.filter(file => !existsSync(join(folder, file)));
   if (missing.length) throw new Error(`The kit's kit.json names pictures its folder does not have: ${missing.join(', ')}`);
   const licence = ['LICENSE.md', 'LICENSE', 'LICENSE.txt'].map(name => join(folder, name)).find(path => existsSync(path));
-  return { files: [['ui/kit.json', manifest], ...[...pictures].sort().map((file): [string, Buffer] => [`ui/kit/${file}`, readFileSync(join(folder, file))])], licence: licence ? readFileSync(licence) : null };
+  return { files: [['ui/kit.json', manifest], ...[...pictures].sort().map((file): [string, Buffer] => [`ui/kit/${file}`, ownFile(join(folder, file))])], licence: licence ? ownFile(licence) : null };
 }
 
 /* A fonts folder: fonts.json as ui/fonts.json, each file a face names, and the fonts' OFL texts beside them. */
 function fontFiles(folder: string): { files: [string, Buffer][]; families: Set<string> } {
-  const manifest = readFileSync(join(folder, 'fonts.json'));
+  const manifest = ownFile(join(folder, 'fonts.json'));
   const { faces } = JSON.parse(manifest.toString('utf8')) as { faces: { family: string; file: string }[] };
   const named = flatNames([...new Set(faces.map(face => face.file))].sort(), FONT_FILE, 'fonts.json');
   const missing = named.filter(file => !existsSync(join(folder, file)));
   if (missing.length) throw new Error(`fonts.json names fonts its folder does not have: ${missing.join(', ')}`);
   const licences = readdirSync(folder).filter(name => name.endsWith('-OFL.txt')).sort();
   return {
-    files: [['ui/fonts.json', manifest], ...[...named, ...licences].map((file): [string, Buffer] => [`ui/fonts/${file}`, readFileSync(join(folder, file))])],
+    files: [['ui/fonts.json', manifest], ...[...named, ...licences].map((file): [string, Buffer] => [`ui/fonts/${file}`, ownFile(join(folder, file))])],
     families: new Set(faces.map(face => face.family)),
   };
 }
