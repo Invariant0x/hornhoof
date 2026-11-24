@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { and, asc, desc, eq, gt, isNotNull, isNull, like, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
@@ -7,11 +7,9 @@ import { authority, certificates, companies, machines, peerSecrets, people, revo
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { issueCertificate, makeAuthority, type Authority, type Issued } from './authority.js';
+import { claimJoinedServerHost, retireOtherServerRows } from './server-machine.js';
 import { SERVER_KEY } from '../nodes/nodes.js';
 
-/* The row of the machine the app itself runs on is no computer anyone joined: its key says so, and the screens and the
-   test pool leave such rows out. */
-const serverRow = like(machines.machineKey, `${SERVER_KEY}%`);
 const live = isNull(machines.revokedAt);
 
 /* The company's authority with its key opened; null when it has none yet. */
@@ -49,14 +47,17 @@ export async function thisMachine(db: Db, config: Config, companyId: string): Pr
   if (!networkId) throw noMachineId();
   return db.transaction(async tx => {
     await tx.execute(sql`SELECT 1 FROM ${companies} WHERE ${companies.id} = ${companyId} FOR UPDATE`);
-    const values = { companyId, personId: await ownerOf(tx, companyId), machineKey: `${SERVER_KEY}${networkId}`, networkId, role: 'data' as const };
+    const ownerId = await ownerOf(tx, companyId);
     const [found] = await tx.select(idOnly(machines)).from(machines).where(and(eq(machines.networkId, networkId), live));
+    if (!found) {
+      const claimed = await claimJoinedServerHost(tx, config, companyId, ownerId, networkId);
+      if (claimed) return claimed;
+    }
+    const values = { companyId, personId: ownerId, machineKey: `${SERVER_KEY}${networkId}`, networkId, role: 'data' as const };
     /* An identity retired earlier that this install comes back to is this machine again. */
     await tx.insert(machines).values(values).onConflictDoUpdate({ target: machines.networkId, set: { revokedAt: null, role: 'data' } });
     const [mine] = await tx.select(idOnly(machines)).from(machines).where(and(eq(machines.networkId, networkId), live));
-    if (found) return mine!;
-    const older = await tx.update(machines).set({ revokedAt: new Date() }).where(and(serverRow, live, ne(machines.id, mine!.id))).returning({ id: machines.id });
-    for (const { id } of older) await tx.update(certificates).set({ revokedAt: new Date() }).where(and(eq(certificates.machineId, id), isNull(certificates.revokedAt)));
+    if (!found) await retireOtherServerRows(tx, mine!.id);
     return mine!;
   });
 }
