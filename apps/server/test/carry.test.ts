@@ -165,7 +165,12 @@ describe('the carry of a restore', () => {
     expect([await now(none!.id), await now(some!.id), await now(plain!.id)]).toEqual([0, 5 * 1024 ** 3, null]);
     /* The carry of an updater from before the areas names none, and leaves each as the restored database has it. */
     await db.update(machines).set({ fileStoreLimitBytes: 7 }).where(eq(machines.id, none!.id));
-    await applyCarry(app.ctx, { ...carry, machines: carry.machines.map(({ fileStoreLimitBytes: _gone, ...rest }) => rest) });
+    const before = carry.machines.map(machine => {
+      const old = { ...machine };
+      delete old.fileStoreLimitBytes;
+      return old;
+    });
+    await applyCarry(app.ctx, { ...carry, machines: before });
     expect(await now(none!.id)).toBe(7);
   });
 });

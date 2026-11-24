@@ -270,7 +270,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const live = and(eq(machines.companyId, me.companyId), isNull(machines.revokedAt), shownMachine(config));
     const rows = await db
-      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, networkId: machines.networkId, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups, role: machines.role, uploadState: machines.uploadState, ...STORE_COLUMNS })
+      .select({ ...STORE_COLUMNS, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups, role: machines.role, uploadState: machines.uploadState })
       .from(machines)
       .innerJoin(people, eq(people.id, machines.personId))
       .where(me.scopeKind === 'company' ? live : and(live, eq(machines.personId, me.id)))
@@ -472,7 +472,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     const machine = await ownMachine(me, id);
     if (limit !== undefined) {
-      if (!machine.networkId) throw new ApiError(400, 'invalid', "This machine has no keeper, so it keeps none of the company's files.");
+      if (!machine.networkId) throw new ApiError(400, 'validation', "This machine has no keeper, so it keeps none of the company's files.");
       /* More room on another person's machine is the CEO's to give; less, anyone who may change the machine gives. */
       if (areaOf(limit) > areaOf(machine.fileStoreLimitBytes) && machine.personId !== me.id && !me.isOwner) throw notCeo();
     }

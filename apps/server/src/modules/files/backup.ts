@@ -6,12 +6,8 @@ import type { FilesDb } from './files.js';
 
 /* Whether a machine keeps the store's backup, so the leading keeper gives it a file (sha256, when one is named) and
    takes one back from it in a restore. */
-export async function backsUpStore(_db: FilesDb, _machineId: string, _sha256?: string): Promise<boolean> {
-  return false;
-}
+export const backsUpStore: (db: FilesDb, machineId: string, sha256?: string) => Promise<boolean> = () => Promise.resolve(false);
 
 /* The machines that keep the store's backup: the last ones picked for live copies, and none of them while the other
    machines that keep files are as many as the copies asked for. */
-export async function storeBackupMachines(_db: FilesDb): Promise<string[]> {
-  return [];
-}
+export const storeBackupMachines: (db: FilesDb) => Promise<string[]> = () => Promise.resolve([]);

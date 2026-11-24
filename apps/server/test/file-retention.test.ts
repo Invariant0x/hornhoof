@@ -96,7 +96,7 @@ describe('the store lets go of files by itself', () => {
     /* An installation of 0.43 in the middle of the move: the old column is there until the CEO's yes clears it. A database
        of its own has not seen the column gone, as the app's saw it when it started. */
     await c.db.execute(sql`ALTER TABLE attachments ADD COLUMN bytes bytea`);
-    const ctx = { ...c.app.ctx, db: drizzle(c.db.$client as unknown as PGlite, { schema }) as unknown as Db };
+    const ctx = { ...c.app.ctx, db: drizzle((c.db as unknown as { $client: PGlite }).$client, { schema }) as unknown as Db };
     const now = new Date();
     const ago = (days: number) => new Date(now.getTime() - days * DAY);
     const ofOldTurn = await c.file((await c.task({ turnId: (await c.turn(ago(31))).id })).id, 'a.bin', randomBytes(1000));

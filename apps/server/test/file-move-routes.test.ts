@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
-import { agents, people } from '../src/db/schema.js';
+import { agents, departments, people } from '../src/db/schema.js';
 import { as, invitePerson, ownDatabases, setUpCompany, testApp } from './helpers.js';
 
 ownDatabases();
@@ -24,9 +24,11 @@ describe("the CEO's yes to clearing the moved files", () => {
     const read = (who: object) => app.inject({ url: '/api/files/move', ...who });
     const approve = (digest: string, who: object) => app.inject({ method: 'POST', url: '/api/files/move/approve', payload: { digest }, ...who });
     const inside = { headers: orchestratorHeaders(owner!.id, orchestrator!.id) };
+    const [sales] = await db.insert(departments).values({ companyId: owner!.companyId, name: 'Sales', roleCode: 'SAL' }).returning();
+    const [head] = await db.insert(agents).values({ companyId: owner!.companyId, departmentId: sales!.id, kind: 'head', name: 'Sales head', model: 'claude-opus-5-5' }).returning();
 
-    /* A person of the whole company, and nobody at all. */
-    for (const [who, status] of [[as(zed), 403], [{}, 401]] as const) {
+    /* A person of the whole company, a head acting for the CEO, and nobody at all. */
+    for (const [who, status] of [[as(zed), 403], [{ headers: orchestratorHeaders(owner!.id, head!.id) }, 403], [{}, 401]] as const) {
       expect([(await read(who)).statusCode, (await approve(DIGEST, who)).statusCode]).toEqual([status, status]);
     }
     const shown = await read(as(ceo));
