@@ -27,7 +27,7 @@ import { PersonMark, PriorityWord } from './TrackerMarks';
 import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
 
 /* What waits for the person in this task. */
-type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void };
+type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void; viewerId?: string };
 /* Where the card leads in the tracker: a goal's own card, and the graph grown from this task. */
 type Leads = { onOpenGoal?: (id: string) => void; onGraph?: (root: { task: string }) => void };
 
@@ -50,6 +50,7 @@ function TaskWaitingSection({ waiting, org, onOpen, onChanged, inline }: { waiti
       <Requests
         requests={requests}
         inline={inline}
+        viewerId={waiting.viewerId}
         onChanged={() => {
           waiting.onRequestsChanged();
           onChanged();

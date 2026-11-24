@@ -37,7 +37,25 @@ That key then goes to the machines of the department's agents, as any repository
 
 Each agent's turn carries it to the machine that runs the agent. So it lands on the machines of whoever's subscriptions serve the department. Give it a fine-grained token for this one repository.
 
-Test runs take it along too. [Tests and heavy work on free machines](free-machines.md#where-does-the-repository-token-go-during-a-test-run) says where. The server uses it as well, to read from the repository which commit a branch is at.
+Test runs take it along too. [Tests and heavy work on free machines](free-machines.md#where-does-the-repository-token-go-during-a-test-run) says where. The server uses it as well, to read from the repository which commit a branch is at, and to read and start the repository's CI for a release.
+
+## What does a release need from the repository's CI?
+
+A release rests on the repository's GitHub Actions runs of its exact commit, which Hornhoof reads with the repository's token. Every job of every counted run must have finished with success, and a test job (named `test` or `tests`, with or without its matrix, as `test (1)`) that was skipped makes the run red: a skipped test proved nothing. A commit status or the check of another app proves nothing, as anyone who can write to the repository can post one. A repository with no workflow file and no check at all releases with no run. A repository on another host than github.com cannot be released, because Hornhoof reads no CI there.
+
+Only the **full runs of the release workflow** count; a run of any other workflow on the commit is neither proof nor a blocker. A person names the release workflow, by the path of its file, in the repository's settings (**Release workflow**, for example `.github/workflows/release.yml`). Hornhoof never works it out, not from the repository's releases or tags and not from which workflow went green, because anyone who can write to the repository can publish a release or start a workflow. With none named, `release_turn` refuses and says: name the release workflow in the repository settings. The orchestrator names it with `set_repository` and `releaseWorkflow`.
+
+A **full run** is one that ran every test, with nothing narrowing it. The release workflow keeps this contract:
+
+- it starts on `workflow_dispatch` with a yes-or-no input named `full`, which Hornhoof sets when it starts the workflow;
+- with `full` set, it runs every test: no status that says tests passed spares them, and no earlier commit's passed tests narrow what runs;
+- with `full` set, the title of its run ends with `(full run)`, which a `run-name` writes: `run-name: ${{ github.event_name == 'workflow_dispatch' && format('{0}{1}', github.workflow, inputs.full && ' (full run)' || '') || '' }}`.
+
+A run counts only if it was started by hand and its title ends so: a run of a push or of a pull request, or one by hand without `full`, may have run only the tests a change reached, and proves less. GitHub gives no run's inputs, so the title is what says it.
+
+Pushing a turn branch starts no workflow. Where no full run of the release workflow is on the commit of a release, `release_turn` starts it on the turn branch itself with `full` set, once for each commit. The minute round then records the release when CI is green on that exact commit and tells the head.
+
+The token needs **Actions: Read and write** and **Contents: Read** on a fine-grained token, `repo` on a classic one. Without the right to write Actions, the release is refused and says so.
 
 ## Whose name goes on the commits?
 
@@ -51,7 +69,7 @@ Not after Hornhoof has. Name the repository's full test command, the one that ru
 
 When a test run of exactly this command ends, Hornhoof puts a commit status called `hornhoof/tests` on the commit that run pinned: `success` when it passed, `failure` when it did not. It stays on that commit even when the branch has moved on. A run of one file, or of any other command, marks nothing.
 
-A GitHub workflow can read this status and skip its own tests on a commit that has `success`. Hornhoof's own image build does.
+A GitHub workflow can read this status and skip its own tests on a commit that has `success`. Hornhoof's own image build does. A release does not rest on such a run: a skipped test job makes its run red, so a commit that already carries the status needs a new commit before a release can be recorded.
 
 The token needs the right to write commit statuses: **Commit statuses: Read and write** on a fine-grained token, `repo:status` on a classic one. Without it, or when GitHub does not answer, the task's log and the run's result say so and what to give the token. The run stays passed, and GitHub tests that commit itself.
 

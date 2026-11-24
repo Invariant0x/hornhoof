@@ -1814,7 +1814,7 @@ const CATEGORY_WORDS: Readonly<Partial<Record<Category, string>>> = {
 
 export function refusalText(denial: CommandDenial): string {
   const why = CATEGORY_WORDS[denial.category as Category] ?? 'This check cannot run here.';
-  return `${REFUSAL}\nHornhoof stopped this command before it started. ${why} A whole test suite runs through run_tests once per release, on its release branch. Name the test files of your change to run them here. A refusal is not a result.`;
+  return `${REFUSAL}\nHornhoof stopped this command before it started. ${why} A whole test suite does not run in a workspace: the repository's CI runs it for the release. Name the test files of your change to run them here. A refusal is not a result.`;
 }
 
 function refusal(found: readonly Finding[], kinds: readonly ('check' | 'unavailable')[]): CommandDenial | null {

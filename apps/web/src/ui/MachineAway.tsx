@@ -1,5 +1,5 @@
 import { useLanguage, useT } from '../i18n';
-import type { MachineAwayCard } from '../types';
+import type { CopySchemaFailureCard, MachineAwayCard } from '../types';
 import { clock } from './subscription';
 
 /* A machine with agents on it that went away, in words for the person who can switch it on. Nothing here waits for an answer:
@@ -29,6 +29,28 @@ export function MachineAway({ machines }: { machines: MachineAwayCard[] }) {
   return (
     <>
       {machines.map(card => (card.back ? <Back key={card.id} card={card} /> : <Away key={card.id} card={card} />))}
+    </>
+  );
+}
+
+export function CopySchemaFailure({ card }: { card: CopySchemaFailureCard }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const title = t.tasks.copySchemaFailure(card.hostname);
+  const since = new Intl.DateTimeFormat(language, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(card.since));
+  return (
+    <section className="machine-away" aria-label={title}>
+      <h3>{title}</h3>
+      <p>{t.tasks.copySchemaFailureSince(card.attempt, since)}</p>
+      <p>{t.tasks.copySchemaFailureDo}</p>
+    </section>
+  );
+}
+
+export function CopySchemaFailures({ cards }: { cards: CopySchemaFailureCard[] }) {
+  return (
+    <>
+      {cards.map(card => <CopySchemaFailure key={card.id} card={card} />)}
     </>
   );
 }

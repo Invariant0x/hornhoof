@@ -219,7 +219,7 @@ function AutonomousJournalView({ entries }: { entries: AutonomousReleaseEntry[] 
           {entries.map(entry => (
             <li key={entry.id}>
               {t.autonomousJournalWho(entry.agentName, String(entry.taskNumber))}:{' '}
-              <code>{entry.commitSha}</code> ({t.autonomousJournalProof(String(entry.testRunNumber), entry.reviewerName)})
+              <code>{entry.commitSha}</code> ({entry.testRunNumber === null ? t.autonomousJournalCi(entry.ciChecks, entry.reviewerName) : t.autonomousJournalProof(String(entry.testRunNumber), entry.reviewerName)})
             </li>
           ))}
         </ul>

@@ -42,8 +42,8 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'run_tests',
     {
       description:
-        'Runs release checks on main, the repository\'s configured main line, a turn branch or a release branch. Use selected local tests to check a change during a task. ' +
-        'A full release run can reuse passing results from the same release with matching reusable evidence. Without that evidence it runs the selected profile. A whole product run or the exact declared full command can publish hornhoof/tests on the pinned commit. ' +
+        'Runs the checks of a task on main, the repository\'s configured main line, a turn branch or a release branch. A release does not rest on these runs: it relies on the repository\'s CI for its exact commit. Use selected local tests to check a change during a task. ' +
+        'A whole run can reuse passing results from the same release with matching reusable evidence. Without that evidence it runs the selected profile. A whole product run or the exact declared full command can publish hornhoof/tests on the pinned commit. ' +
         `Hornhoof pins the commit the branch is at now, readies the product's harness, and wakes you on the task with the result; with command it runs that command instead, split into up to ${MAX_TEST_PARTS} parts with {part} and {parts} in it. ` +
         `A part that runs a command gets an empty folder in $HH_OUT: every plain file it leaves there goes on the task as test-<run>-<part>-<name>, whether its tests passed or failed but not when it was stopped, at most ${MAX_RUN_FILES} files of up to 50 MB per part, and the result names them. A run of the product's suites, without command, has no $HH_OUT.`,
       inputSchema: {

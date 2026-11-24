@@ -38,16 +38,20 @@ const defaultPlaceName = (p: TaskPlace) => p?.name ?? '';
 
 /* onOpenAgent opens the asking agent's window, to see in its terminal what it did. */
 /* waitsFor: whom a request waits for, by the person it is for, on lists of more people than one. */
-type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName?: (p: TaskPlace) => string; inline?: boolean; waitsFor?: (personId: string) => string; onDefer?: () => void };
+/* viewerId: the signed-in person; headings address them directly only when the request waits for them and they may answer it. */
+type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName?: (p: TaskPlace) => string; inline?: boolean; waitsFor?: (personId: string) => string; viewerId?: string; onDefer?: () => void };
+
+const isAddressedToViewer = (request: WaitingRequest, viewerId?: string): boolean =>
+  request.canAnswer && (viewerId === undefined || request.ownerPersonId === viewerId);
 
 /* An approval names a commit, or under a department's policy the work its words say. */
-const asksToApprove = (t: Messages, request: WaitingRequest) => (request.commit ? t.tasks.asksApproval(request.agent.name) : t.tasks.asksApprovalOf(request.agent.name));
-
-function whoAsked(t: Messages, request: WaitingRequest): string {
-  if (request.kind === 'approval') return asksToApprove(t, request);
+export function whoAsked(t: Messages, request: WaitingRequest, viewerId?: string): string {
   if (request.kind === 'stuck') return t.tasks.stuck(request.agent.name);
-  if (request.kind === 'choice') return t.tasks.asksChoice(request.agent.name);
-  return t.tasks.asks(request.agent.name);
+  const words = isAddressedToViewer(request, viewerId)
+    ? { question: t.tasks.asks, choice: t.tasks.asksChoice, approval: t.tasks.asksApproval, approvalOf: t.tasks.asksApprovalOf }
+    : t.tasks.asksOther;
+  if (request.kind === 'approval') return (request.commit ? words.approval : words.approvalOf)(request.agent.name);
+  return words[request.kind](request.agent.name);
 }
 
 const pickBody = (pick: number, text: string) => (text.trim() ? { pick, answer: text.trim() } : { pick });
@@ -390,7 +394,7 @@ function RequestFeedback({ busy, failure }: { busy: boolean; failure: unknown })
    Its answers show only to a person the server lets take it; anyone else reads who takes it. */
 export const namedReadOnly = (request: WaitingRequest) => !request.canAnswer && request.decidedBy?.kind === 'named_person';
 
-function RequestItem({ request, onDone, inline, onDefer, ...shared }: Shared & { request: WaitingRequest; onDone: () => void }) {
+function RequestItem({ request, onDone, inline, onDefer, viewerId, ...shared }: Shared & { request: WaitingRequest; onDone: () => void }) {
   const t = useT();
   const [text, setText] = useState(() => draftsByRequest.get(request.id) ?? '');
   const { busy, failure, send, post } = useRequestSend(request.id, onDone);
@@ -422,7 +426,7 @@ function RequestItem({ request, onDone, inline, onDefer, ...shared }: Shared & {
 
   /* Hornhoof's own words about a stuck task are said in the person's language. */
   const said = request.kind === 'stuck' ? t.tasks.stuckText(agent.name, task.number) : request.text;
-  const who = whoAsked(t, request);
+  const who = whoAsked(t, request, viewerId);
   return (
     <article className={`req req-${request.kind}`} aria-label={`#${task.number} ${task.title}`} aria-busy={busy}>
       {inline ? <header><RequestAuthor who={who} request={request} /></header> : <RequestHeader who={who} request={request} onDefer={onDefer} {...shared} />}

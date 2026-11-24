@@ -1,5 +1,5 @@
 import { runsInClass, TestExecution, TestEnvironmentReceipt, type EnvironmentSnapshot, type RuntimeCapability } from '@hornhoof/protocol';
-import type { TestEnvironmentSelection, testParts } from '../../db/schema.js';
+import type { TestEnvironmentSelection } from '../../db/schema.js';
 
 function receiptIdentity(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt): boolean {
   return receipt.commitSha === snapshot.description.commitSha && receipt.manifestHash === snapshot.description.manifestHash;
@@ -35,12 +35,4 @@ export function productReceipt(snapshot: EnvironmentSnapshot | null, selection: 
   if (!snapshot || !selection || !parsed.success) return null;
   const receipt = parsed.data;
   return receiptIdentity(snapshot, receipt) && receiptSelection(snapshot, selection, receipt) && receiptOutcomes(snapshot, receipt, message) && receiptRuntimes(snapshot, receipt, known) && receiptMutations(receipt) ? receipt : null;
-}
-
-/* A part keeps its receipt only when it was accepted against the runtimes its node said it has as the part ended, so the runtimes it
-   names stand for that node here; everything else is checked again. */
-export function passedProductPart(snapshot: EnvironmentSnapshot, part: typeof testParts.$inferSelect): boolean {
-  if (part.status !== 'passed' || part.commit !== snapshot.description.commitSha || part.exitCode !== 0 || part.error !== null || !part.finishedAt) return false;
-  return productReceipt(snapshot, part.environmentSelection, { type: 'tests.done', partId: part.id, ok: true, commit: part.commit, exitCode: 0, error: null, log: '',
-    ...(part.environmentReceipt ? { environmentReceipt: part.environmentReceipt } : {}) }, part.environmentReceipt?.runtimes ?? []) !== null;
 }

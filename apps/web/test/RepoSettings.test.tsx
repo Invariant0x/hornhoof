@@ -175,3 +175,74 @@ describe('repository confirmation', () => {
     await vi.waitFor(() => expect(puts(calls)).toEqual([{ url: 'https://github.com/acme/next.git', branch: 'main', token: 'ghp_super_secret_token_9876' }]));
   });
 });
+
+const WORKFLOW = 'Release workflow';
+const PATH_OF_IT = '.github/workflows/images.yml';
+
+describe("the repository's release workflow", () => {
+  it('says which workflow it is, and when none is named, what that means for a release', () => {
+    shown({ ...REPO, releaseWorkflow: PATH_OF_IT });
+    expect(screen.getByText(`Release workflow: ${PATH_OF_IT}`)).toBeInTheDocument();
+    expect(screen.queryByText(/No release workflow is named/)).not.toBeInTheDocument();
+  });
+
+  it.each([['none', REPO], ['a repository saved before there was one', OLDER]])('says there is none for %s', (_what, repository) => {
+    shown(repository);
+    expect(screen.getByText("No release workflow is named, so a release cannot record on this repository's CI")).toBeInTheDocument();
+  });
+
+  it('is filled in when changing, says that a person names it and what it must do, and goes out when changed, without the spaces around it', async () => {
+    const user = userEvent.setup();
+    const calls = shown({ ...REPO, releaseWorkflow: PATH_OF_IT });
+    await user.click(screen.getByRole('button', { name: 'Change' }));
+    const field = screen.getByLabelText(WORKFLOW);
+    expect(field).toHaveValue(PATH_OF_IT);
+    expect(field).toHaveAccessibleDescription(expect.stringContaining('A person names it'));
+    expect(field).toHaveAccessibleDescription(expect.stringContaining('(full run)'));
+    await user.clear(field);
+    await user.type(field, '  .github/workflows/release.yml  ');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(puts(calls)).toEqual([{ ...SAVED, releaseWorkflow: '.github/workflows/release.yml' }]));
+  });
+
+  it('goes away when the field is emptied', async () => {
+    const user = userEvent.setup();
+    const calls = shown({ ...REPO, releaseWorkflow: PATH_OF_IT });
+    await user.click(screen.getByRole('button', { name: 'Change' }));
+    await user.clear(screen.getByLabelText(WORKFLOW));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(puts(calls)).toEqual([{ ...SAVED, releaseWorkflow: null }]));
+  });
+
+  it.each([
+    ['unchanged', { ...REPO, releaseWorkflow: PATH_OF_IT }],
+    ['still none', REPO],
+    ['still none on a repository saved before there was one', OLDER],
+  ])('is not sent when %s', async (_what, repository) => {
+    const user = userEvent.setup();
+    const calls = shown(repository);
+    await user.click(screen.getByRole('button', { name: 'Change' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(puts(calls)).toEqual([SAVED]));
+  });
+
+  it('says why the server refused it, and keeps what was typed', async () => {
+    const user = userEvent.setup();
+    shown(REPO, [400, { error: { code: 'validation', message: 'x', reason: 'repo_release_workflow_invalid' } }]);
+    await user.click(screen.getByRole('button', { name: 'Change' }));
+    await user.type(screen.getByLabelText(WORKFLOW), 'images');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Name the release workflow by the path of its file');
+    expect(screen.getByLabelText(WORKFLOW)).toHaveValue('images');
+  });
+
+  it('reads in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    const user = userEvent.setup();
+    shown({ ...REPO, releaseWorkflow: PATH_OF_IT });
+    expect(screen.getByText(`Релизный workflow: ${PATH_OF_IT}`)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    expect(screen.getByLabelText('Релизный workflow')).toHaveValue(PATH_OF_IT);
+  });
+});

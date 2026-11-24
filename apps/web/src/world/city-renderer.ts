@@ -5,9 +5,10 @@
 
 import type { WorldMode } from '@hornhoof/protocol/world';
 import type { Graphics, MeshSimple, Texture } from 'pixi.js';
-import { artFootprintCentre, resolveBuildingArt, type BuildingArt, type BuildingArtLayer } from './art';
+import { artFootprintCentre, bridgePicturePath, masterTileW, resolveBuildingArt, type BuildingArt, type BuildingArtLayer, type BuildingPicturePassport } from './art';
 import { parseArtTint, type DisplayRunPool, type WorldArtLibrary } from './art-runtime';
-import { cityDepthY, type CityBuilding, type CityState, type RoadTier } from './city-layout';
+import { bridgePieceAt, bridgePieceTiles } from './bridge-site';
+import { cityDepthY, type CityBuilding, type CityState, type RoadTier, type RoadTile } from './city-layout';
 import { clothWind, swayClothVertices } from './cloth';
 import type { BuildingConstructionState } from './construction';
 import { tileCenterToWorld, tileDiamondVertices, type Point2D, type TileCoord } from './coords';
@@ -42,7 +43,7 @@ export type CityArtContext = Readonly<{
   upgradingHouseIds?: ReadonlySet<string>;
   /* The drawn variant of each building's step (building-variants.ts). */
   variants: ReadonlyMap<string, number>;
-  /* Streets are painted on the ground (road-strips.ts): draw only the bridges. */
+  /* Streets are baked into the ground (street-field.ts): draw only the bridge. */
   paintedRoads?: boolean;
   /* Filled with the cloth layers drawn, for the per-frame wind pass (swayCloths). */
   swaying?: ClothLayer[];
@@ -170,6 +171,42 @@ function drawBuildingArtPixi(
   return true;
 }
 
+export type BridgeMark = Readonly<{ road: RoadTile; path: string }>;
+export type RoadMarks = Readonly<{ streets: readonly RoadTile[]; bridge: readonly BridgeMark[] }>;
+
+/* What the city draws of its roads: the street tiles unless the streets are baked into the ground, and the bridge's
+   pieces on its water tiles and on a bank tile the drawn water spills over. A road tile on water off the bridge, which
+   only an older rule could have left, is drawn by nothing, and nothing stands in for a bridge piece (#1985). */
+export function roadMarks(city: Pick<CityState, 'roads' | 'bridge'>, paintedRoads: boolean): RoadMarks {
+  const streets = paintedRoads ? [] : [...city.roads.values()].filter(road => !road.bridge);
+  const site = city.bridge ?? null;
+  if (!site) return { streets, bridge: [] };
+  const drawn = bridgePieceTiles(site);
+  const bridge = drawn.flatMap((t, k) => {
+    const road = city.roads.get(`${t.col},${t.row}`);
+    return road ? [{ road, path: bridgePicturePath(site.axis, bridgePieceAt(drawn.length, k)) }] : [];
+  });
+  return { streets, bridge };
+}
+
+/* The bridge's pieces from their pictures, each with its ground anchor on its tile's centre, at the depth of its tile;
+   a piece whose picture is still loading is left out until the redraw it brings. */
+export function drawBridgePieces(ctx: CityArtContext, pack: WorldPackManifest, marks: readonly BridgeMark[], tileW: number, tileH: number): void {
+  const scale = tileW / masterTileW(pack);
+  for (const mark of marks) {
+    const anchor = (ctx.library.index?.files[mark.path]?.passport as BuildingPicturePassport | undefined)?.groundAnchor;
+    const tex = anchor ? ctx.library.texture(mark.path) : null;
+    if (!tex || !anchor) continue;
+    const { col, row } = mark.road;
+    const centre = tileCenterToWorld(col, row, tileW, tileH);
+    ctx.pool.depth = cityDepthY({ col, row, spanCol: 1, spanRow: 1 }, tileH);
+    const sprite = ctx.pool.sprite(tex);
+    sprite.anchor.set(anchor.x / tex.width, anchor.y / tex.height);
+    sprite.scale.set(scale);
+    sprite.position.set(centre.x, centre.y);
+  }
+}
+
 export function renderCityToPixi(
   g: Graphics,
   state: CityRenderState,
@@ -207,15 +244,14 @@ export function renderCityToPixi(
     );
   };
 
-  /* 1. Roads and bridges (viewport-culled, fill-only without heavy per-tile stroke triangulation); with painted
-     streets on the ground only the bridges. */
-  for (const road of city.roads.values()) {
+  /* 1. Streets (viewport-culled, fill-only without heavy per-tile stroke triangulation) unless they are baked into the
+     ground, and the bridge from its pictures. */
+  const marks = roadMarks(city, Boolean(art?.paintedRoads));
+  if (art) drawBridgePieces(art, pack, marks.bridge, tileW, tileH);
+  for (const road of marks.streets) {
     if (!tileInWindow(road.col, road.row)) continue;
-    if (art?.paintedRoads && !road.bridge) continue;
     const pts = tileDiamondVertices(road.col, road.row, tileW, tileH);
-    const style = road.bridge
-      ? { fill: 0x9b6d3f, stroke: 0x593a1d, alpha: 0.96 }
-      : ROAD_COLORS[road.tier];
+    const style = ROAD_COLORS[road.tier];
     g.moveTo(pts[0].x, pts[0].y)
       .lineTo(pts[1].x, pts[1].y)
       .lineTo(pts[2].x, pts[2].y)
@@ -322,9 +358,9 @@ export function renderCityFallback2D(
   const { city } = state;
   const districtColors = state.districtColors ?? {};
 
-  for (const road of city.roads.values()) {
+  for (const road of roadMarks(city, false).streets) {
     const pts = tileDiamondVertices(road.col, road.row, tileW, tileH);
-    const style = road.bridge ? { fill: 0x9b6d3f, alpha: 0.96 } : ROAD_COLORS[road.tier];
+    const style = ROAD_COLORS[road.tier];
     fillDiamond2D(ctx, pts as unknown as FlatDiamond, style.fill, style.alpha);
   }
   for (const pt of groundMarks(state)) {
