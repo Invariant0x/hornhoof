@@ -22,6 +22,13 @@ describe('a server in production with no FILES_DIR', () => {
     for (const NODE_ENV of [undefined, 'development', 'test']) expect(filesDirRefusal({ NODE_ENV }, loadConfig({ HORNHOOF_SECRET: TEST_SECRET }))).toBeNull();
   });
 
+  it('does not start behind a keeper without FILES_DIR, whatever NODE_ENV says, as its files go to the other machines from there', () => {
+    for (const NODE_ENV of [undefined, 'development', 'production']) {
+      expect(filesDirRefusal({ NODE_ENV }, loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_KEEPER: 'on' })), `NODE_ENV ${NODE_ENV}`).toContain('FILES_DIR');
+      expect(filesDirRefusal({ NODE_ENV }, loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_KEEPER: 'on', FILES_DIR: '/files' }))).toBeNull();
+    }
+  });
+
   it('stops before it opens the database, with that line and a failed exit', async () => {
     const started = promisify(execFile)(process.execPath, ['--import', 'tsx', 'src/main.ts'], {
       env: { PATH: process.env.PATH, NODE_ENV: 'production', HORNHOOF_SECRET: TEST_SECRET },
