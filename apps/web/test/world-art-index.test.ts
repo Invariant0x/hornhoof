@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildArtIndexFromFolder, checkDistArt, main, normalizePassport, readPngSize, runArtCheck, worldArtIndexPlugin, writeDistArtIndexes } from '../scripts/world-art-index';
+import { acceptPackArt } from '../scripts/world-art-accept';
 import { ART_CONTRACT_VERSION, type BuildingPicturePassport } from '../src/world/art';
 
 /* PNG signature and IHDR chunk are all the size reader needs. */
@@ -96,15 +97,31 @@ describe('Stage 9 art check command: builds art-index.json from an artist folder
     expect(written.files['buildings/department/shrine/complete.png'].w).toBe(736);
   });
 
-  it('fails with the file named when a passport breaks the contract, and writes nothing', () => {
+  /* Design, 24.11: one bad file never switches the whole index off. The check holds out the file it rejects, says why,
+     and writes the index for the rest; a file that fails only because a held one is gone (a cloak without its sheet) is
+     held out with it. */
+  it('holds out a file whose passport breaks the contract, names it and why, and writes the index for the rest', () => {
     const root = tempArt();
     put(root, 'buildings/department/shrine/complete.png', pngHeader(736, 900));
     put(root, 'buildings/department/shrine/complete.json', JSON.stringify({ groundAnchor: [100, 100], corners: { top: [368, 532], right: [728, 712], bottom: [368, 892], left: [8, 712] } }));
+    put(root, 'people/egypt-mason/tier_1/walk.png', pngHeader(1088, 1000));
+    put(root, 'people/egypt-mason/tier_1/walk.json', JSON.stringify({ frameW: 136, frameH: 200, frames: 8, fps: 10, anchor: [68, 190] }));
+    put(root, 'people/egypt-scribe/tier_1/walk.png', pngHeader(1000, 1000));
+    put(root, 'people/egypt-scribe/tier_1/walk.json', JSON.stringify({ frameW: 136, frameH: 200, frames: 8, fps: 10, anchor: [68, 190] }));
+    put(root, 'people/egypt-scribe/tier_1/walk.cloak.png', pngHeader(1000, 1000));
     const lines: string[] = [];
     const result = runArtCheck({ folder: root, pack: 'egypt', write: true, list: false, print: l => lines.push(l) });
-    expect(result.ok).toBe(false);
-    expect(lines.join('\n')).toMatch(/shrine\/complete\.png: groundAnchor/);
-    expect(() => readFileSync(join(root, 'art-index.json'))).toThrow();
+    expect(result.ok, 'a file was rejected: the command exits 1').toBe(false);
+    expect(result.written, 'yet the index of the rest is written').toBe(true);
+    expect(result.held).toEqual(['buildings/department/shrine/complete.png', 'people/egypt-scribe/tier_1/walk.cloak.png', 'people/egypt-scribe/tier_1/walk.png']);
+    const out = lines.join('\n');
+    expect(out).toMatch(/4 files in the folder/);
+    expect(out).toMatch(/HELD OUT buildings\/department\/shrine\/complete\.png: groundAnchor/);
+    expect(out).toMatch(/HELD OUT people\/egypt-scribe\/tier_1\/walk\.png: width 1000 px must equal frameW \* frames/);
+    expect(out).toMatch(/HELD OUT people\/egypt-scribe\/tier_1\/walk\.cloak\.png: cloak layer without its base sheet/);
+    expect(out).toMatch(/3 files held out/);
+    const written = JSON.parse(readFileSync(join(root, 'art-index.json'), 'utf8')) as { files: Record<string, unknown> };
+    expect(Object.keys(written.files)).toEqual(['people/egypt-mason/tier_1/walk.png']);
   });
 
   it('lists every file the pack has a slot for, required ones marked, for the artists', () => {
@@ -222,14 +239,40 @@ describe('Production build art check: fails when the web dist has no world-art/<
     expect(writeDistArtIndexes(tempArt(), () => {})).toEqual([]);
   });
 
+  /* A 4x4 villa whose right lot corner sits 5 px out, beyond the check's 2 px. */
+  function offVilla(art: string): void {
+    put(art, 'buildings/house/villa/v05/complete.png', pngHeader(976, 1200));
+    put(
+      art,
+      'buildings/house/villa/v05/complete.json',
+      JSON.stringify({ groundAnchor: [488, 950], corners: { top: [488, 710], right: [973, 950], bottom: [488, 1190], left: [8, 950] } }),
+    );
+  }
+
+  it('leaves out of the built index every file the art check holds out, so a release never draws a rejected file', () => {
+    const dist = tempArt();
+    const art = join(dist, 'world-art', 'egypt');
+    shrine(art);
+    offVilla(art);
+    const lines: string[] = [];
+    expect(writeDistArtIndexes(dist, l => lines.push(l), acceptPackArt)).toEqual(['egypt']);
+    const written = JSON.parse(readFileSync(join(art, 'art-index.json'), 'utf8')) as { files: Record<string, unknown> };
+    expect(Object.keys(written.files)).toEqual(['buildings/department/shrine/complete.png']);
+    expect(lines.join('\n')).toMatch(/world-art\/egypt: held out buildings\/house\/villa\/v05\/complete\.png: /);
+    expect(checkDistArt({ dist, pack: 'egypt', print: () => {} }).ok).toBe(true);
+  });
+
   it('runs the index writer as the web build ends, on the build output (#1947)', async () => {
     const dist = tempArt();
     shrine(join(dist, 'world-art', 'egypt'));
+    offVilla(join(dist, 'world-art', 'egypt'));
     const plugin = worldArtIndexPlugin();
     expect(plugin.apply).toBe('build');
-    (plugin.configResolved as (c: { root: string; build: { outDir: string } }) => void)({ root: '/', build: { outDir: dist } });
+    (plugin.configResolved as (c: { root: string; build: { outDir: string } }) => void)({ root: join(__dirname, '..'), build: { outDir: dist } });
     await (plugin.closeBundle as () => void | Promise<void>)();
     expect(checkDistArt({ dist, pack: 'egypt', print: () => {} }).ok).toBe(true);
+    const written = JSON.parse(readFileSync(join(dist, 'world-art/egypt/art-index.json'), 'utf8')) as { files: Record<string, unknown> };
+    expect(Object.keys(written.files), 'the build holds out what the art check rejects').toEqual(['buildings/department/shrine/complete.png']);
     const config = readFileSync(join(__dirname, '..', 'vite.config.ts'), 'utf8');
     expect(config).toMatch(/worldArtIndexPlugin\(\)/);
   });

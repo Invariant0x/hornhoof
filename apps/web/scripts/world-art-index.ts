@@ -17,7 +17,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ART_INDEX_FILE, declaredArtFiles, validateArtIndex, type ArtIndex, type ArtIndexEntry } from '../src/world/art';
+import { acceptedArtIndex, ART_INDEX_FILE, declaredArtFiles, validateArtIndex, type ArtIndex, type ArtIndexEntry } from '../src/world/art';
 import type { WorldPackManifest } from '../src/world/manifest';
 import { resolveWorldPack } from '../src/world-packs/registry';
 import { buildArtIndexFromFolder, contentHash, readPngSize } from '../world-art-index.config';
@@ -32,32 +32,37 @@ export type ArtCheckOptions = Readonly<{
   print: (line: string) => void;
 }>;
 
-export function runArtCheck(opts: ArtCheckOptions): { ok: boolean } {
+/* ok: every file of the folder passes; held: the files left out of the index, which the engine draws without (the
+   index of the rest is still written, so ok is false but written true); written: whether art-index.json was written. */
+export function runArtCheck(opts: ArtCheckOptions): { ok: boolean; held: string[]; written: boolean } {
   const pack = resolveWorldPack(opts.pack);
   if (!pack?.art) {
     opts.print(`Unknown pack "${opts.pack}" or a pack without an art catalog.`);
-    return { ok: false };
+    return { ok: false, held: [], written: false };
   }
   if (opts.list) {
     for (const d of declaredArtFiles(pack)) opts.print(`${d.required ? 'required' : 'optional'}  ${d.path}`);
   }
-  if (!opts.folder) return { ok: true };
+  if (!opts.folder) return { ok: true, held: [], written: false };
 
-  const index = buildArtIndexFromFolder(opts.folder, pack.id);
-  const report = validateArtIndex(pack, index);
-  opts.print(`${report.present} files in the folder, ${report.declared} slots in pack "${pack.id}".`);
-  for (const e of report.errors) opts.print(`ERROR ${e}`);
+  const folderIndex = buildArtIndexFromFolder(opts.folder, pack.id);
+  const { index, held, report } = acceptedArtIndex(pack, folderIndex);
+  opts.print(`${Object.keys(folderIndex.files).length} files in the folder, ${report.declared} slots in pack "${pack.id}".`);
+  if (!report.ok) {
+    for (const e of report.errors) opts.print(`ERROR ${e}`);
+    opts.print('Nothing written: fix the errors above first.');
+    return { ok: false, held: [], written: false };
+  }
+  /* A rejected file is held out, not fatal: the engine draws its slot from the nearest drawn picture, or its placeholder. */
+  for (const h of held) opts.print(`HELD OUT ${h.path}: ${h.reasons.join('; ')}`);
   for (const w of report.warnings) opts.print(`WARNING ${w}`);
   opts.print(`still missing ${report.missingRequired.length} required files (run with --list to see every slot).`);
-  if (!report.ok) {
-    opts.print('Nothing written: fix the errors above first.');
-    return { ok: false };
-  }
+  if (held.length > 0) opts.print(`${held.length} files held out of ${ART_INDEX_FILE}: fix them and check again, and list them in the pack's notes meanwhile.`);
   if (opts.write) {
     writeFileSync(join(opts.folder, ART_INDEX_FILE), `${JSON.stringify(index, null, 1)}\n`);
-    opts.print(`Wrote ${ART_INDEX_FILE}.`);
+    opts.print(`Wrote ${ART_INDEX_FILE} with ${Object.keys(index.files).length} files.`);
   }
-  return { ok: true };
+  return { ok: held.length === 0, held: held.map(h => h.path), written: opts.write };
 }
 
 export type DistArtCheckOptions = Readonly<{

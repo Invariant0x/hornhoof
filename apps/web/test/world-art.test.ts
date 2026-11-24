@@ -230,8 +230,9 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
     expect(resolveBuildingArt(STUB_DIAMOND_PACK, null, b, null)).toBeNull();
     expect(resolveBuildingArt(PACK, null, b, null)).toBeNull();
     expect(resolveBuildingArt(PACK, index({}), b, null)).toBeNull();
-    const onlyComplete = index({ 'buildings/department/hall/complete.png': picture('3x3', 900) });
-    expect(resolveBuildingArt(PACK, onlyComplete, b, job(5))).toBeNull();
+    /* A step with not one picture keeps its placeholder; with any picture, see 'shows the nearest drawn picture' below. */
+    const otherStepOnly = index({ 'buildings/house/large/complete.png': picture('3x3', 900) });
+    expect(resolveBuildingArt(PACK, otherStepOnly, b, job(5))).toBeNull();
   });
 
   it('draws the finished look, upgraded look, annex and a tinted district flag at the picture flag anchor', () => {
@@ -458,5 +459,38 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
     expect(validateWorldPack(dupSteps)).toMatchObject({ ok: false });
     expect(validateWorldPack({ ...PACK, art: { ...CATALOG, people: { looks: ['look-a'], tiers: 6 } } })).toMatchObject({ ok: false });
     expect(validateWorldPack({ ...PACK, art: { ...CATALOG, baseUrl: 'relative/' } })).toMatchObject({ ok: false });
+  });
+
+  /* Design, 24.11 (company note #107): no placeholder box in front of people. A fill level, tier or stage not drawn yet
+     shows the nearest drawn picture of the same line; ties go to the later one. */
+  it('shows the nearest drawn picture of the line when the one a building needs is not drawn yet', () => {
+    const pathOf = (files: ArtIndex, b: CityBuilding, j: BuildingConstructionState | null = null) => resolveBuildingArt(PACK, files, b, j)?.layers[0]?.path;
+
+    const onlyFull = index({ 'buildings/supply/store/fill_4.png': picture('3x3', 600) });
+    const store = building({ kind: 'supply', spanCol: 3, spanRow: 3, stage: 6, maxStage: 6, fullness: 0.25 });
+    expect(pathOf(onlyFull, store), 'a granary with only its full picture').toBe('buildings/supply/store/fill_4.png');
+    expect(pathOf(onlyFull, { ...store, resting: true }), 'resting, so empty').toBe('buildings/supply/store/fill_4.png');
+    const ends = index({ 'buildings/supply/store/fill_0.png': picture('3x3', 600), 'buildings/supply/store/fill_4.png': picture('3x3', 600) });
+    expect(pathOf(ends, { ...store, fullness: 0.5 }), 'a tie goes to the later picture').toBe('buildings/supply/store/fill_4.png');
+    expect(pathOf(ends, { ...store, fullness: 0.25 })).toBe('buildings/supply/store/fill_0.png');
+
+    const tier5 = index({ 'buildings/monument/mound/tier_05.png': picture('4x4', 900) });
+    const mound = building({ kind: 'monument', spanCol: 4, spanRow: 4, stage: 2, maxStage: 10, progress: 0.2 });
+    expect(pathOf(tier5, mound), 'a pyramid with only tier 5').toBe('buildings/monument/mound/tier_05.png');
+    expect(resolveBuildingArt(PACK, tier5, { ...mound, progress: 1, reached: true }, null)?.layers.map(l => l.path), 'no capstone off its last tier').toEqual([
+      'buildings/monument/mound/tier_05.png',
+    ]);
+
+    const carved = index({ 'buildings/statue/figure/stage_03.png': picture('1x1', 400) });
+    expect(pathOf(carved, building({ kind: 'statue', spanCol: 1, spanRow: 1, stage: 12, maxStage: 20 }))).toBe('buildings/statue/figure/stage_03.png');
+
+    /* A construction job on a step drawn finished only (the villas of 24.11), then with one stage of its own. */
+    const hall = building({ stage: 9 });
+    const finishedOnly = index({ 'buildings/department/hall/complete.png': picture('3x3', 900) });
+    expect(pathOf(finishedOnly, hall, job(5))).toBe('buildings/department/hall/complete.png');
+    const withStage = index({ 'buildings/department/hall/complete.png': picture('3x3', 900), 'buildings/department/hall/stage_04.png': picture('3x3', 900) });
+    expect(pathOf(withStage, hall, job(5)), 'stage 4 is nearer to stage 5 than the finished look').toBe('buildings/department/hall/stage_04.png');
+    const placed = resolveBuildingArt(PACK, withStage, hall, job(5))!;
+    expect(placed.artPxPerTile, 'scaled from the drawn picture like any other').toBeCloseTo(PACK.projection.buildingFootprintsMaster4x['3x3'].diamondW / 3, 6);
   });
 });

@@ -1,14 +1,15 @@
 /* The art index of a world art folder, written from the files it holds (#1947): each PNG with its size, the passport
    JSON beside it, its byte size and a hash of its bytes. The artists' check (scripts/world-art-index.ts) writes it into
    their folder; the web build writes it into every art folder of its dist as its last step, so a release never ships
-   an index the build did not write. Node only, and only the art contract's constants from the app, so the Vite config
-   can load it without the engine. */
+   an index the build did not write. The build holds out what the art check rejects, as the check does
+   (scripts/world-art-accept.ts, loaded through Vite when the build ends). Node only, and only the art contract's
+   constants from the app, so the Vite config can load it without the engine. */
 
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { ART_CONTRACT_VERSION, ART_INDEX_FILE } from './src/world/art-contract.js';
-import type { ArtIndex, ArtIndexEntry, ArtPassport } from './src/world/art.js';
+import type { ArtIndex, ArtIndexEntry, ArtPassport, HeldArtFile } from './src/world/art.js';
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -75,16 +76,22 @@ export function buildArtIndexFromFolder(folder: string, packId: string): ArtInde
   return { contract: ART_CONTRACT_VERSION, pack: packId, files };
 }
 
+/* The art check's verdict on one pack's folder: the files it accepts, and those it holds out with why. */
+export type AcceptArt = (packId: string, index: ArtIndex) => { index: ArtIndex; held: readonly HeldArtFile[] };
+
 /* Writes art-index.json into every art folder of a built web dist from the files the dist holds, with their sizes and
    content hashes, over whatever index the art folder brought. The packs written; none for a build without art. */
-export function writeDistArtIndexes(dist: string, print: (line: string) => void): string[] {
+export function writeDistArtIndexes(dist: string, print: (line: string) => void, accept?: AcceptArt): string[] {
   const root = join(dist, 'world-art');
   if (!existsSync(root)) return [];
   const written: string[] = [];
   for (const pack of readdirSync(root).sort()) {
     const folder = join(root, pack);
     if (!statSync(folder).isDirectory()) continue;
-    const index = buildArtIndexFromFolder(folder, pack);
+    const built = buildArtIndexFromFolder(folder, pack);
+    const verdict = accept ? accept(pack, built) : { index: built, held: [] };
+    for (const h of verdict.held) print(`world-art/${pack}: held out ${h.path}: ${h.reasons.join('; ')}`);
+    const index = verdict.index;
     writeFileSync(join(folder, ART_INDEX_FILE), `${JSON.stringify(index, null, 1)}\n`);
     print(`world-art/${pack}/${ART_INDEX_FILE}: ${Object.keys(index.files).length} files with their hashes.`);
     written.push(pack);
@@ -92,17 +99,24 @@ export function writeDistArtIndexes(dist: string, print: (line: string) => void)
   return written;
 }
 
+/* The art check's verdict, from the web app at root (apps/web); a missing checker fails the build, never skips it. */
+const ART_CHECKER = 'scripts/world-art-accept.ts';
+
 /* The web build's last step: the art index of the dist comes out of the build itself, never from a hand-made file. */
-export function worldArtIndexPlugin(): { name: string; apply: 'build'; configResolved: (config: { root: string; build: { outDir: string } }) => void; closeBundle: () => void } {
+export function worldArtIndexPlugin(): { name: string; apply: 'build'; configResolved: (config: { root: string; build: { outDir: string } }) => void; closeBundle: () => Promise<void> } {
   let outDir = '';
+  let root = '';
   return {
     name: 'hornhoof-world-art-index',
     apply: 'build',
     configResolved: config => {
+      root = config.root;
       outDir = resolve(config.root, config.build.outDir);
     },
-    closeBundle: () => {
-      writeDistArtIndexes(outDir, line => console.log(line));
+    closeBundle: async () => {
+      const { runnerImport } = await import('vite');
+      const { module } = await runnerImport<{ acceptPackArt: AcceptArt }>(resolve(root, ART_CHECKER));
+      writeDistArtIndexes(outDir, line => console.log(line), module.acceptPackArt);
     },
   };
 }
