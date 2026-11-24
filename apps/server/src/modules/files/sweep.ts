@@ -1,8 +1,9 @@
 import { sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
+import { backupRound } from './backup.js';
 import { recordFile } from './files.js';
-import { NAMED } from './named.js';
+import { NAMED, SET_ASIDE } from './named.js';
 import { countedNow, keptElsewhere, placeFiles, trimTargets } from './place.js';
 
 /* What the leading app does with the store each minute: picks the machines that keep each file, marks a content no row
@@ -28,9 +29,7 @@ export function namedUnrecorded(which: SQL): SQL {
     ) n WHERE ${which} AND NOT EXISTS (SELECT 1 FROM net.files f WHERE f.sha256 = n.sha256) GROUP BY n.sha256`;
 }
 
-/* A database a restore set aside, or one made of what a machine uploaded, may be merged back: the files its rows name
-   stay while it is there, for at most the 30 days it is kept. */
-export const SET_ASIDE = sql`EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname LIKE 'hornhoof_before_%' OR datname LIKE 'hornhoof_upload_%')`;
+export { SET_ASIDE } from './named.js';
 
 /* Marks the contents no row names since now, and those named again as in use, and gives the ones unused for a day their
    time to go, unless a database set aside is there. Says how many are to go now. */
@@ -152,6 +151,8 @@ export async function storeRound(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Pro
   const mine = await files.machineId(db);
   files.placedThrough = (await placeFiles(db, mine, { now, after: files.placedThrough })).through;
   files.trimmedThrough = (await trimTargets(db, mine, { now, after: files.trimmedThrough })).through;
+  /* The backup takes in what rows name before the live store lets go of what none names. */
+  await backupRound(ctx, now);
   await markUnused(db, now);
   await dropDue(ctx, now);
   await trimTransit(ctx, now);

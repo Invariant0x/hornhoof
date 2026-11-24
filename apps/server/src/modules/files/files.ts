@@ -62,6 +62,8 @@ export class Files {
   private keyKnown: { enc: string; key: Buffer } | null = null;
   private ownStore: FileStore | null = null;
   private ownDir: string | null = null;
+  private ownBackup: FileStore | null = null;
+  private ownBackupDir: string | null = null;
   private machine: string | null = null;
   /* How long a read waits for a file this machine lacks; a test waits less. */
   wantWaitMs = WANT_WAIT_MS;
@@ -81,6 +83,13 @@ export class Files {
     const dir = this.config.filesDir ? join(this.config.filesDir, 'store') : (this.ownDir ??= mkdtempSync(join(tmpdir(), 'hornhoof-files-')));
     if (this.ownStore?.dir !== dir) this.ownStore = new FileStore(dir);
     return this.ownStore;
+  }
+
+  /* The store's backup on this machine, beside its live store and apart from it: its own folder and its own temporary files. */
+  backupStore(): FileStore {
+    const dir = this.config.filesDir ? join(this.config.filesDir, 'store-backup') : (this.ownBackupDir ??= mkdtempSync(join(tmpdir(), 'hornhoof-files-backup-')));
+    if (this.ownBackup?.dir !== dir) this.ownBackup = new FileStore(dir);
+    return this.ownBackup;
   }
 
   /* The store key, made once by the first app that needs it: two at once make one, as the second finds the first's. It

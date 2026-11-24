@@ -5,6 +5,7 @@ import type { Ctx } from '../../app.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
+import { backupState } from './backup.js';
 import { copiesSet, copiesWanted, counted, countedTargets, MAX_COPIES, seats } from './place.js';
 import { plainOf } from './seal.js';
 
@@ -42,11 +43,13 @@ export type FileStoreState = {
   capacityBytes: number;
   underCopied: number;
   stuckBytes: number;
+  backup: Awaited<ReturnType<typeof backupState>>;
 };
 
 export async function fileStoreState(ctx: Pick<Ctx, 'db' | 'files'>, now = new Date()): Promise<FileStoreState> {
   const { db } = ctx;
-  const all = await seats(db, await ctx.files.machineId(db), now);
+  const mine = await ctx.files.machineId(db);
+  const all = await seats(db, mine, now);
   const copies = await copiesSet(db);
   const wanted = copiesWanted(copies, all);
   const ids = `{${counted(all).map(seat => seat.id).join(',')}}`;
@@ -72,6 +75,7 @@ export async function fileStoreState(ctx: Pick<Ctx, 'db' | 'files'>, now = new D
     ),
     underCopied: Number(row?.under ?? 0),
     stuckBytes: Number(row?.stuck ?? 0),
+    backup: await backupState(db, mine),
   };
 }
 
