@@ -18,7 +18,7 @@ export default {
     'Orion', 'Lyra', 'Altair', 'Nova', 'Rigel', 'Cassia',
     'Deneb', 'Mira', 'Atlas', 'Electra', 'Castor', 'Pollux',
     'Sirius', 'Capella', 'Antares', 'Bellatrix', 'Elara', 'Kepler',
-    'Halley', 'Leda', 'Phoebe', 'Titania', 'Oberon', 'Juno',
+    'Halley', 'Leda', 'Phoebe', 'Titania', 'Oberon', 'Rhea',
     'Hyperion', 'Cosmo', 'Selene', 'Talos', 'Zenith', 'Aurora',
     'Ceres', 'Draco', 'Io', 'Nadir', 'Quasar', 'Vesta',
   ],
