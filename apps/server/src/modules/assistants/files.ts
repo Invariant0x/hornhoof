@@ -70,7 +70,7 @@ export async function fileByLink(ctx: Ctx, params: unknown, reply: FastifyReply)
 }
 
 async function sendWhole(ctx: Ctx, found: { id: string; name: string | null; mediaType: string; length: number }, reply: FastifyReply) {
-  const bytes = await fileStream(ctx, found.id, found.length);
+  const bytes = await fileStream(ctx, found.id);
   return reply
     .header('content-disposition', disposition(found.name ?? 'file'))
     .header('x-content-type-options', 'nosniff')

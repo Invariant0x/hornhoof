@@ -107,7 +107,8 @@ async function recordLook(ctx: Ctx, row: Case, signal: Signal, { frame, png }: S
 }
 
 async function casePicture(ctx: Ctx, row: Case, png: Buffer): Promise<string> {
-  const [picture] = await ctx.db.insert(attachments).values({ companyId: row.companyId, jobId: row.jobId, agentId: row.agentId, operatorCaseId: row.id, mediaType: 'image/png', bytes: png, size: png.length }).returning({ id: attachments.id });
+  const kept = await ctx.files.putBytes(ctx.db, png);
+  const [picture] = await ctx.db.insert(attachments).values({ companyId: row.companyId, jobId: row.jobId, agentId: row.agentId, operatorCaseId: row.id, mediaType: 'image/png', sha256: kept.sha256, size: kept.size }).returning({ id: attachments.id });
   return picture!.id;
 }
 

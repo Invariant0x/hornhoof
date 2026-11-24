@@ -9,12 +9,11 @@ import type { NamedTurn, UpdateCalledOff, UpdateRequest } from '../modules/updat
 import type { UncheckedItem } from '../modules/tasks/unchecked.js';
 import type { TaskPriority, UnitFingerprint } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
-import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigint, bigserial, boolean, check, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const companyId = () => uuid('company_id').notNull().references(() => companies.id);
-const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({ dataType: () => 'bytea' });
 
 /* Legacy rows keep null metadata. A versioned public stamp is always complete. */
 const materialStamp = (revision: AnyPgColumn, digest: AnyPgColumn) => sql`
@@ -1650,11 +1649,16 @@ export const attachments = pgTable(
     taskId: uuid('task_id').references(() => tasks.id),
     name: text('name'),
     mediaType: text('media_type').notNull(),
-    bytes: bytea('bytes').notNull(),
+    /* The sha256 of its bytes, which the company's file store keeps on its machines (modules/files). None on a row moved
+       from before whose big file was lost with its machine, or on one still waiting to be moved. */
+    sha256: text('sha256'),
     size: integer('size').notNull(),
     createdAt: createdAt(),
   },
-  t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_person_id').on(t.personId), index('attachments_operator_case_id').on(t.operatorCaseId)],
+  t => [
+    index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_person_id').on(t.personId), index('attachments_operator_case_id').on(t.operatorCaseId),
+    check('attachments_sha256', sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
+  ],
 );
 
 /* A phone is lent independently of its host computer's root access and compute pool. */

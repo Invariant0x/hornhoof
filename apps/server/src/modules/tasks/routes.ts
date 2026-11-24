@@ -617,6 +617,6 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { turn } = PipelineQuery.parse(req.query);
     const dept = await departmentOf(db, me.companyId, id);
     if (!dept || dept.parentId) throw refuse(404, 'department_unknown', 'This department does not exist.');
-    return { report: await departmentPipeline(db, me.companyId, dept.id, turn) };
+    return { report: await departmentPipeline(db, me.companyId, dept.id, turn, ctx.files) };
   });
 }

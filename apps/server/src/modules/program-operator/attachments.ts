@@ -1,21 +1,25 @@
-import { and, eq, isNull, lte, sql } from 'drizzle-orm';
+import { and, eq, isNull, lte } from 'drizzle-orm';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
+import type { Ctx } from '../../app.js';
 import { canViewAgent } from '../../auth/agent-view.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import type { ToolJob } from '../tools/job.js';
+import { fileBytes } from '../tasks/attachments.js';
 import { ofOperations } from './staff.js';
 
 const MAX_PICTURE_BYTES = 3 * 1024 * 1024;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 export const casePictureUnknown = (): ApiError => new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
 
-/* Bound the bytes in the query too: an invalid row never becomes an unbounded download. */
-async function casePicture(db: Db, companyId: string, id: string, caseId?: string) {
-  const [found] = await db.select({ bytes: attachments.bytes, incident: programOperatorCases, target: agents }).from(attachments)
+type Reader = Pick<Ctx, 'db' | 'config' | 'files'>;
+
+/* Bound the size in the query too: an invalid row never becomes an unbounded download. */
+async function casePicture(ctx: Reader, companyId: string, id: string, caseId?: string) {
+  const [found] = await ctx.db.select({ id: attachments.id, incident: programOperatorCases, target: agents }).from(attachments)
     .innerJoin(programOperatorCases, eq(programOperatorCases.id, attachments.operatorCaseId))
     .innerJoin(agents, eq(agents.id, programOperatorCases.agentId))
     .innerJoin(jobs, eq(jobs.id, programOperatorCases.jobId))
@@ -24,9 +28,10 @@ async function casePicture(db: Db, companyId: string, id: string, caseId?: strin
       eq(agents.companyId, companyId), eq(jobs.companyId, companyId), eq(subscriptions.companyId, companyId),
       eq(attachments.agentId, agents.id), eq(attachments.jobId, jobs.id), eq(jobs.agentId, agents.id),
       eq(jobs.kind, 'conversation'), eq(attachments.mediaType, 'image/png'),
-      lte(sql<number>`octet_length(${attachments.bytes})`, MAX_PICTURE_BYTES), caseId ? eq(programOperatorCases.id, caseId) : undefined));
+      lte(attachments.size, MAX_PICTURE_BYTES), caseId ? eq(programOperatorCases.id, caseId) : undefined));
   if (!found) return null;
-  const bytes = Buffer.from(found.bytes);
+  const bytes = await fileBytes(ctx, found.id);
+  if (bytes.length > MAX_PICTURE_BYTES) return null;
   return bytes.subarray(0, 8).equals(PNG_SIGNATURE) ? { ...found, bytes } : null;
 }
 
@@ -52,19 +57,19 @@ async function agentMayRead(db: Db, job: ToolJob, found: CasePicture): Promise<b
 }
 
 /* A case reference and a picture UUID are the entire interface: names, paths and target overrides grant no access. */
-export async function agentCasePicture(db: Db, job: ToolJob, ref: string, file: string): Promise<Buffer> {
+export async function agentCasePicture(ctx: Reader, job: ToolJob, ref: string, file: string): Promise<Buffer> {
   const caseId = ref.slice('operator-case:'.length);
   if (!z.uuid().safeParse(caseId).success || !z.uuid().safeParse(file).success) throw casePictureUnknown();
-  const found = await casePicture(db, job.companyId, file, caseId);
-  if (!found || !(await agentMayRead(db, job, found))) throw casePictureUnknown();
+  const found = await casePicture(ctx, job.companyId, file, caseId);
+  if (!found || !(await agentMayRead(ctx.db, job, found))) throw casePictureUnknown();
   return found.bytes;
 }
 
 /* A person sees the picture when they see the target employee, on the one rule of who sees whom. To anyone else it does
    not exist, as for an agent above: its refusal does not tell a real picture from a made up id. */
-export async function personCasePicture(db: Db, person: Person, id: string): Promise<Buffer> {
-  const found = await casePicture(db, person.companyId, id);
-  if (!found || !(await canViewAgent(db, person, found.target))) throw casePictureUnknown();
+export async function personCasePicture(ctx: Reader, person: Person, id: string): Promise<Buffer> {
+  const found = await casePicture(ctx, person.companyId, id);
+  if (!found || !(await canViewAgent(ctx.db, person, found.target))) throw casePictureUnknown();
   return found.bytes;
 }
 
