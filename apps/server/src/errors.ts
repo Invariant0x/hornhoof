@@ -176,6 +176,8 @@ export type ErrorReason =
   | 'file_away'
   | 'file_retry'
   | 'file_lost'
+  | 'move_approved'
+  | 'move_unknown'
   | 'relay_unreachable'
   | 'link_taken'
   | 'link_reserved'

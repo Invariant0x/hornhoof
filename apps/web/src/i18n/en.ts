@@ -235,6 +235,18 @@ export const en = {
     encryptedHere: 'Encrypted to this machine',
     encryptedRelay: 'Encrypted to hornhoof.org for now. Hornhoof moves the encryption to this machine on its own.',
   },
+  fileCopies: {
+    title: 'File copies across machines',
+    hint: "How many of the company's machines keep each file, each copy on another machine. With two, losing one machine loses no file.",
+    copies: (n: number) => (n === 1 ? '1 copy' : `${n} copies`),
+    kept: (n: number, machines: number) => `Each file is kept on ${n} ${n === 1 ? 'machine' : 'machines'} now. ${machines} ${machines === 1 ? 'machine keeps' : 'machines keep'} files.`,
+    noMachine: 'No machine keeps files now. Give a machine an area for them in its settings.',
+    oneMachine: 'Only one machine keeps files, so each file has one copy. Connect another machine with a keeper to keep a second.',
+    room: (used: string, all: string) => `The files take ${used} of the ${all} the machines' areas hold.`,
+    under: (n: number) => `${n} ${n === 1 ? 'file is' : 'files are'} kept fewer times than asked. ${n === 1 ? 'It is' : 'They are'} copied once a machine with room is online.`,
+    stuck: (amount: string) => `${amount} wait on a machine that is to give them up, until another machine has room for them.`,
+    gb: (n: string) => `${n} GB`,
+  },
   backups: {
     title: 'Backups',
     last: (time: string) => `The last backup: ${time}.`,
