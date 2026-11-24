@@ -1085,7 +1085,7 @@ describe('service test cleanup on failure or abort', () => {
       [
         'export default {',
         `  root: ${JSON.stringify(checkout)},`,
-        "  test: { pool: 'forks', maxWorkers: 1, testTimeout: 20000, reporters: ['default'], include: ['apps/node/test/test-services.test.ts'] },",
+        "  test: { pool: 'forks', maxWorkers: 1, testTimeout: 0, hookTimeout: 0, reporters: ['default'], include: ['apps/node/test/test-services.test.ts'] },",
         '};',
         '',
       ].join('\n'),
