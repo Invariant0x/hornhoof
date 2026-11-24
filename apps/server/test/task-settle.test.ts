@@ -12,6 +12,7 @@ import { GitHubRateLimited } from '../src/modules/testruns/github-limit.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { listen, mcp } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
+import { stored } from './files-fixture.js';
 
 await prepareSharedDatabase();
 
@@ -251,7 +252,7 @@ describe('settle_task closes the clear cases, in any department', () => {
     const f = await watched();
     const make = async (title: string) => {
       const doc = (await f.create({ resultKind: 'document', paths: undefined, testsAgentId: undefined, securityAgentId: undefined, title })).task;
-      await f.db.insert(attachments).values({ companyId: doc.companyId, taskId: doc.id, agentId: f.author.id, name: 'handbook.md', mediaType: 'text/markdown', bytes: Buffer.from('# Handbook'), size: 10 });
+      await f.db.insert(attachments).values({ companyId: doc.companyId, taskId: doc.id, agentId: f.author.id, name: 'handbook.md', mediaType: 'text/markdown', sha256: await stored(f.db, Buffer.from('# Handbook'), f.ctx.config), size: 10 });
       await submit(f.ctx, f.author.id, doc.id, { summary: 'Wrote the handbook.', evidence: 'Read it through.', recorded: { file: 'handbook.md' } });
       const route = await routeOf(f.db, await f.read(doc.id));
       await verdict(f.ctx, f.reviewer.id, doc.id, { pass: true, comment: 'Checked.', candidateId: route.state.candidateId! });
@@ -353,7 +354,7 @@ describe('a hand-in of work that is not code says where its result is recorded',
     expect((await report(f.ctx, f.head.id, first.id, { done: true, summary: 'All parts are in.', recorded: { path: 'reports/totals.md' } })).task.status).toBe('done');
     const second = await group('Report two');
     await expect(report(f.ctx, f.head.id, second.id, { done: true, summary: 'All parts are in.', recorded: { file: 'totals.md' } })).rejects.toMatchObject({ status: 409, message: expect.stringContaining('totals.md') as unknown });
-    await f.db.insert(attachments).values({ companyId: f.task.companyId, taskId: second.id, agentId: f.head.id, name: 'totals.md', mediaType: 'text/markdown', bytes: Buffer.from('# Totals'), size: 8 });
+    await f.db.insert(attachments).values({ companyId: f.task.companyId, taskId: second.id, agentId: f.head.id, name: 'totals.md', mediaType: 'text/markdown', sha256: await stored(f.db, Buffer.from('# Totals'), f.ctx.config), size: 8 });
     expect((await report(f.ctx, f.head.id, second.id, { done: true, summary: 'All parts are in.', recorded: { file: 'totals.md' } })).task.status).toBe('done');
     expect((await f.log(second.id)).find(e => e.kind === 'report' && 'recorded' in e.data)?.data).toMatchObject({ recorded: { file: 'totals.md' } });
   });

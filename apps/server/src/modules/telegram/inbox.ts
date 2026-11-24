@@ -7,6 +7,7 @@ import { agentEvents, agents, people, telegramBots, telegramReplies } from '../.
 import { only } from '../../db/selections.js';
 import { ApiError, loggable } from '../../errors.js';
 import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.js';
+import { takenBytes } from '../tasks/attachments.js';
 import { writeToAgent } from '../conversation/routes.js';
 import { TELEGRAM_FILE_BYTES, TelegramError, type TelegramFile, type TelegramMessage, type TelegramUpdate, type TelegramUser } from './api.js';
 import { chatLanguage } from './language.js';
@@ -122,7 +123,7 @@ async function bringFiles(ctx: Ctx, me: Person, agentId: string, came: Came, fet
       notes.push(said ? `[A voice message${seconds(file)}. Its words, as speech recognition heard them: ${said}]` : `[A voice message${seconds(file)}, with no transcript: its recording is the file voice.ogg below.]`);
     }
     try {
-      ids.push((await keepMessageFile(ctx, me, agentId, { bytes, size: bytes.length }, name)).id);
+      ids.push((await keepMessageFile(ctx, me, agentId, await takenBytes(ctx, bytes), name)).id);
     } catch (err) {
       if (!(err instanceof ApiError)) throw err;
       notes.push(`[${name} did not come: Hornhoof has no room left for the company's files.]`);

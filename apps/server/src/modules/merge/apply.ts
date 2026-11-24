@@ -13,6 +13,7 @@ import {
   liveMergeReader, NeedMoreFromSource, noteMoreNeeded, prepareSource, type CodeLine, type MergeReader, type SourceRequest,
 } from './snapshot.js';
 import type { MergeSource } from './source.js';
+import type { Files } from '../files/files.js';
 import { nameOf, valueWords } from './words.js';
 import { fingerprintMask, maskCompanyRows, maskJson, maskRow, type Fingerprint, type Mask } from '../tasks/hide-secret.js';
 
@@ -129,8 +130,33 @@ export class UnitWriter {
   constructor(
     readonly q: Query,
     readonly facts: Facts,
-    private readonly opts: { now: string; label: string; afterRestore: boolean; whole?: (t: TableFacts, key: Record<string, unknown>) => Promise<Row | null>; mask?: Mask | null },
+    private readonly opts: { now: string; label: string; afterRestore: boolean; whole?: (t: TableFacts, key: Record<string, unknown>) => Promise<Row | null>; mask?: Mask | null; store?: StoreBytes },
   ) {}
+
+  /* A file of a source from before the store comes with its bytes, from the source while it is there: the row as it is
+     written, its text masked as any, carries them until they go into this side's store. */
+  private async withOldBytes(t: TableFacts, unit: Unit, row: Row): Promise<void> {
+    if (t.name !== 'attachments') return;
+    if (row.sha256 != null) {
+      delete row.bytes;
+      return;
+    }
+    if (typeof row.bytes !== 'string') row.bytes = (await this.opts.whole?.(t, unit.key))?.bytes ?? null;
+  }
+
+  /* Those bytes go into this side's store, and the row names them by their hash, which the merge's records keep as a
+     column it wrote its own way. A row with no byte, an empty file or a big one on a machine's disk, stays as it came.
+     False when there is no store to keep them in: such a row is not written. */
+  private async storedOldBytes(t: TableFacts, unit: Unit, row: Row): Promise<boolean> {
+    if (t.name !== 'attachments') return true;
+    const hex = row.bytes;
+    delete row.bytes;
+    if (typeof hex !== 'string' || !hex.startsWith('\\x') || hex.length <= 2) return true;
+    if (!this.opts.store) return false;
+    row.sha256 = await this.opts.store(Buffer.from(hex.slice(2), 'hex'));
+    unit.rewritten = { cols: [...new Set([...(unit.rewritten?.cols ?? []), 'sha256'])], was: { ...unit.rewritten?.was, sha256: null } };
+    return true;
+  }
 
   /* A file is read as its hash; a row that is written needs its bytes, from the source while it is there. False when
      they cannot be had: such a row is not written. */
@@ -287,7 +313,9 @@ export class UnitWriter {
     const row = await this.prepared(t, ruleOf(t.name), unit);
     if (!row) return;
     if (!(await this.withFiles(t, unit, row, t.columns.map(column => column.name)))) return void (unit.refused = NO_FILE);
+    await this.withOldBytes(t, unit, row);
     this.masked(t, row);
+    if (!(await this.storedOldBytes(t, unit, row))) return void (unit.refused = NO_FILE);
     await this.q(`INSERT INTO public.${quote(t.name)} SELECT * FROM jsonb_populate_record(NULL::public.${quote(t.name)}, $1::jsonb)`, [JSON.stringify(row)]);
     unit.written = row;
     unit.done = 'added';
@@ -470,6 +498,7 @@ class Merge {
     private readonly src: MergeReader,
     private readonly merge: { id: string; label: string; kept: boolean; companyId: string },
     private readonly onUnit?: (n: number) => void | Promise<void>,
+    private readonly store?: StoreBytes,
   ) {}
 
   async run(): Promise<Omit<MergeResult, 'heldMs'>> {
@@ -676,6 +705,7 @@ class Merge {
       now: this.now, label: this.merge.label, afterRestore: this.merge.kept || this.path === 'compare',
       whole: (t, key) => this.src.wholeOf(t, key),
       mask: this.secrets,
+      store: this.store,
     });
     /* What nodes said of jobs whose rows were away, on either side. */
     const running = parkedNodes([...(await parkedOf(q)), ...(await this.src.parked())]);
@@ -771,6 +801,11 @@ class Merge {
   private async withFile(unit: Unit): Promise<Row | null> {
     const t = this.facts.tables.get(unit.table)!;
     const x = unit.x;
+    /* A file of a source from before the store: its bytes go into this side's store, and the row kept names them. */
+    if (t.name === 'attachments' && x && x.sha256 == null && this.store) {
+      const hex = (await this.src.wholeOf(t, unit.key))?.bytes;
+      if (typeof hex === 'string' && hex.startsWith('\\x') && hex.length > 2) return { ...x, sha256: await this.store(Buffer.from(hex.slice(2), 'hex')) };
+    }
     const files = x ? t.columns.filter(column => column.type === 'bytea' && typeof x[column.name] === 'string' && (x[column.name] as string).startsWith(FILE_HASH)).map(column => column.name) : [];
     if (!x || files.length === 0) return x;
     const whole = await this.src.wholeOf(t, unit.key);
@@ -902,11 +937,17 @@ const refuseMerge = (reason: string): never => {
   throw new MergeRefused(reason);
 };
 
+/* The store of this side, where the bytes of a file from a source of before the store go; without it, such a file is
+   refused. */
+export type MergeFiles = Pick<Files, 'putBytes'>;
+type StoreBytes = (bytes: Buffer) => Promise<string>;
+type RunOptions = { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number; clock?: () => number; files?: MergeFiles };
+
 async function runPreparedMerge(
   db: Db,
   merge: { id: string; label: string; kept: boolean; companyId: string },
   prepared: MergeReader,
-  opts: { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number; clock?: () => number },
+  opts: RunOptions,
 ): Promise<MergeResult> {
   let heldMs = 0;
   /* The time the writes are held is counted on the clock given, which tests move; the real one by default. */
@@ -915,7 +956,10 @@ async function runPreparedMerge(
     const began = now();
     try {
       /* Read committed so the deferred fence trigger at commit sees live lease renewals (and any fence) committed while this merge ran. */
-      return await db.transaction(tx => new Merge(queryOf(tx as unknown as Db), prepared, merge, opts.onUnit).run());
+      return await db.transaction(tx => {
+        const store = opts.files ? async (bytes: Buffer) => (await opts.files!.putBytes(tx, bytes)).sha256 : undefined;
+        return new Merge(queryOf(tx as unknown as Db), prepared, merge, opts.onUnit, store).run();
+      });
     } catch (err) {
       /* A session outside the gate held a table for longer than the merge waits: nothing was changed, and it is tried
          again later. */
@@ -932,7 +976,7 @@ async function runPeerMerge(
   db: Db,
   merge: { id: string; label: string; kept: boolean; companyId: string },
   source: MergeSource,
-  opts: { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number; clock?: () => number },
+  opts: RunOptions,
 ): Promise<MergeResult> {
   const request: SourceRequest = { compare: false, files: new Map() };
   for (let attempt = 0; ; attempt += 1) {
@@ -952,7 +996,7 @@ export async function runMerge(
   db: Db,
   merge: { id: string; label: string; kept: boolean; companyId: string },
   source: MergeSource,
-  opts: { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number; log?: (line: string) => void; clock?: () => number } = {},
+  opts: RunOptions & { log?: (line: string) => void } = {},
 ): Promise<MergeResult> {
   const [target] = await queryOf(db)<{ status: string; source: string }>('SELECT status, source FROM net.merges WHERE id = $1::uuid', [merge.id]);
   if (target?.status !== 'pending') throw new MergeRefused('The merge was applied already.');

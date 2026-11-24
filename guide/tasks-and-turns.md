@@ -183,12 +183,22 @@ The task's view lists its files.
 
 ## How much room do task files have?
 
-The files live in the database, so every copy of the database carries them.
+The files live in the company's file store on the server's disk, in its `FILES_DIR` volume, not in the database. Each file is sealed and named by its sha256, and the database keeps only what describes it, so no copy of the database and no backup grows with the files.
 
-- One file can be up to 50 MB.
 - One task holds up to 500 MB of files.
-- The whole company holds up to 2 GB, or as many megabytes as `TASK_FILES_MB` in `.env` says.
+- The whole company holds up to 2 GB, or as many megabytes as `TASK_FILES_MB` in `.env` says. The same content counts once, however many tasks carry it.
 - The files of a turn go 30 days after it closes.
+- The files of a task outside any turn go 30 days after the task closes.
+- A file that no task or message names any more leaves the store a day later.
+
+## How do files leave the database after an update from 0.43?
+
+After the update the server copies each file of the database into the store while it serves, checks each one there by its hash, and reads it from the store from then on. It deletes nothing by itself: the bytes stay in the database until the CEO says yes.
+
+- Once every file on the server is copied, the server writes a reconciliation in its log: how many files, distinct contents and bytes, how many files are not on this server (a big file lost before), the size of the database, and the digest of the list.
+- The CEO, or the orchestrator for him, reads it with `GET /api/files/move` and says yes with `POST /api/files/move/approve` and that digest. Nobody else can.
+- Only then does the server clear the bytes of exactly the files on that list, each only while the database still finds them the bytes the store keeps. It then drops the old column, gives the database's room back with `VACUUM FULL`, and writes its size before and after.
+- Until then the files of tasks outside any turn stay. The files of turns closed 30 days ago go as before.
 
 A comment, message, report or reason that carries a file pasted as a long run of base64 or hex is refused. The refusal says how to put the file on the task instead.
 

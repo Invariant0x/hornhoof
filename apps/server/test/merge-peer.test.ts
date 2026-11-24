@@ -23,6 +23,7 @@ import { MACHINE_SOURCE, type MergeSource } from '../src/modules/merge/source.js
 import { appOn, ownDatabases, setUpCompany } from './helpers.js';
 import { openTestDb } from './helpers-db.js';
 import { forkOf, pgliteSource, type Side } from './merge-fixture.js';
+import { sha256Of, stored } from './files-fixture.js';
 
 /* Each test forks its database, which a shared one would not survive. */
 ownDatabases();
@@ -534,18 +535,16 @@ describe('a merge that needs more of the old database than it read ahead', () =>
     expect(await brought()).toBe(true);
   });
 
-  it("reads the bytes of a file again when the leader's own one went meanwhile, and writes it whole", async () => {
+  it("brings back a file the leader's own database lost meanwhile, by the hash that names it in the store", async () => {
     const s = await stand();
     const [orchestrator] = await s.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-    /* Both hold the file alike, so its bytes are not read ahead. */
-    const [file] = await s.db.insert(attachments).values({ companyId: s.acme.id, agentId: orchestrator!.id, mediaType: 'text/plain', bytes: new TextEncoder().encode('the file'), size: 8 }).returning();
+    const [file] = await s.db.insert(attachments).values({ companyId: s.acme.id, agentId: orchestrator!.id, mediaType: 'text/plain', sha256: await stored(s.db, 'the file'), size: 8 }).returning();
     const { brought } = await led(s);
     await restoreHere(s);
-    const { merge, reads, asked } = await merging(s, once(() => s.db.delete(attachments).where(eq(attachments.id, file!.id))));
-    expect({ status: merge.status, path: merge.path, error: merge.error, reads, asked })
-      .toEqual({ status: 'merged', path: 'compare', error: null, reads: 2, asked: [{ files: [{ table: 'attachments', key: { id: file!.id } }] }] });
+    const { merge } = await merging(s, once(() => s.db.delete(attachments).where(eq(attachments.id, file!.id))));
+    expect({ status: merge.status, path: merge.path, error: merge.error }).toEqual({ status: 'merged', path: 'compare', error: null });
     const [back] = await s.db.select().from(attachments).where(eq(attachments.id, file!.id));
-    expect(new TextDecoder().decode(back!.bytes)).toBe('the file');
+    expect(back!.sha256).toBe(sha256Of('the file'));
     expect(await brought()).toBe(true);
   });
 

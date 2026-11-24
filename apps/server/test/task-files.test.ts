@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -10,11 +10,12 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { assistants, attachments, agents, companies, departments, jobs, machines, nodes, people, programInstances, programOperatorCases, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
 import { ask, comment, createTask } from '../src/modules/tasks/engine.js';
-import { dropOldFiles, FILE_BYTES, PICTURE_BYTES, TASK_FILES_BYTES } from '../src/modules/tasks/attachments.js';
+import { checkPictureRoom, dropOldFiles, FILE_BYTES, PICTURE_BYTES, TASK_FILES_BYTES } from '../src/modules/tasks/attachments.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { rememberPrivateTurn } from '../src/modules/tools/private-turns.js';
 import { setUpCompany, testApp } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
+import { filesUnder, sha256Of, stored } from './files-fixture.js';
 
 await prepareSharedDatabase();
 
@@ -49,10 +50,11 @@ async function company(env: NodeJS.ProcessEnv = {}, beforeReady?: (app: FastifyI
   const attach = (token: string, query: string, body: Buffer) =>
     app.inject({ method: 'POST', url: `/api/attachments?${query}`, payload: body, headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token}` } });
   const fetchFile = (token: string, query: string) => app.inject({ method: 'GET', url: `/api/attachments/file?${query}`, headers: { authorization: `Bearer ${token}` } });
-  /* A file put on the task without its bytes, only its size, so caps are reached without holding gigabytes. */
+  /* A file put on the task without its bytes, only its size, as a row from before the store is, so caps are reached
+     without holding gigabytes. */
   const counted = async (taskId: string, size: number, at = new Date()) => {
     const [job] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: bruno.id, kind: 'conversation', prompt: 'go', timeoutMs: 900000, status: 'done' }).returning();
-    return (await db.insert(attachments).values({ companyId, jobId: job!.id, agentId: bruno.id, taskId, name: `old-${size}.bin`, mediaType: 'application/octet-stream', bytes: Buffer.from('x'), size, createdAt: at }).returning())[0]!;
+    return (await db.insert(attachments).values({ companyId, jobId: job!.id, agentId: bruno.id, taskId, name: `old-${size}.bin`, mediaType: 'application/octet-stream', size, createdAt: at }).returning())[0]!;
   };
   return { app, db, companyId, ceo: ceo!, dev: dev!, head, bruno, sam, task, turn, attach, fetchFile, counted };
 }
@@ -85,11 +87,13 @@ describe('a task file', () => {
     expect((await fetchFile(token, `task=${task.number}&file=notes.txt`)).payload).toBe('second');
   });
 
-  it('is refused from an agent not on the task, past 50 MB, without a name, and for a task or file that is not there', async () => {
+  /* A task file has no limit of its own past the task's and the company's room: one over 50 MB, which a request may not
+     bring whole, is kept as any other. */
+  it('is refused from an agent not on the task, without a name, and for a task or file that is not there, and kept past 50 MB', async () => {
     const { bruno, sam, task, turn, attach, fetchFile } = await company();
     const token = await turn(bruno);
     expect((await attach(await turn(sam), `task=${task.number}&name=a.txt`, Buffer.from('x'))).statusCode).toBe(404);
-    expect((await attach(token, `task=${task.number}&name=big.bin`, Buffer.alloc(FILE_BYTES + 1))).statusCode).toBe(413);
+    expect((await attach(token, `task=${task.number}&name=big.bin`, Buffer.alloc(FILE_BYTES + 1))).statusCode).toBe(201);
     expect((await attach(token, `task=${task.number}&name=`, Buffer.from('x'))).statusCode).toBe(400);
     expect((await attach(token, 'task=999&name=a.txt', Buffer.from('x'))).statusCode).toBe(404);
     expect((await fetchFile(token, `task=${task.number}&file=missing.txt`)).statusCode).toBe(404);
@@ -166,18 +170,19 @@ describe('chunked task files', () => {
     expect(sent.statusCode).toBe(413);
     expect(sent.json()).toEqual(declared.json());
     expect(input.issued()).toBe(12);
-    expect(readdirSync(dir)).toEqual([]);
+    expect(filesUnder(dir)).toEqual([]);
     expect(await c.db.select(idOnly(attachments)).from(attachments)).toEqual(before);
   });
 
-  it.each([['file', FILE_BYTES], ['picture', PICTURE_BYTES]] as const)('also stops at the single %s limit', async (kind, limit) => {
+  /* A task file has no limit of its own: the store keeps one of any size the task's and the company's room allow. */
+  it('also stops at the single picture limit', async () => {
+    const limit = PICTURE_BYTES;
     const input = countedUpload([Buffer.alloc(limit), Buffer.alloc(4), Buffer.alloc(4)]);
     const c = await company({}, input.install);
     const token = await c.turn(c.bruno);
-    const query = kind === 'file' ? `task=${c.task.number}&name=large.bin` : '';
-    const sent = await c.app.inject({ method: 'POST', url: `/api/attachments?${query}`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' } });
+    const sent = await c.app.inject({ method: 'POST', url: '/api/attachments?', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' } });
     expect(sent.statusCode).toBe(413);
-    expect(sent.json().error.reason).toBe(kind === 'file' ? 'file_too_big' : 'attachment_invalid');
+    expect(sent.json().error.reason).toBe('attachment_invalid');
     expect(input.issued()).toBe(limit + 4);
     expect(await c.db.select(idOnly(attachments)).from(attachments)).toEqual([]);
   });
@@ -193,7 +198,7 @@ describe('chunked task files', () => {
     expect((await c.fetchFile(token, `task=${c.task.number}&file=exact.txt`)).payload).toBe('12345678');
   });
 
-  it('removes the partial disk file without asking for the tail', async () => {
+  it("removes the store's partial file without asking for the tail", async () => {
     const input = countedUpload([Buffer.alloc(FILE_BYTES + 1), Buffer.alloc(4), Buffer.alloc(4)]);
     const c = await company({}, input.install);
     const dir = mkdtempSync(join(tmpdir(), 'hh-quota-disk-'));
@@ -204,7 +209,7 @@ describe('chunked task files', () => {
     const sent = await c.app.inject({ method: 'POST', url: `/api/attachments?task=${c.task.number}&name=large.bin`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' } });
     expect(sent.statusCode).toBe(413);
     expect(input.issued()).toBe(FILE_BYTES + 5);
-    expect(readdirSync(dir)).toEqual([]);
+    expect(filesUnder(dir)).toEqual([]);
     expect(await c.db.select(idOnly(attachments)).from(attachments)).toEqual([]);
   });
 });
@@ -235,6 +240,14 @@ describe('the room for task files', () => {
     expect(plain.ctx.config.taskFilesBytes).toBe(2 * 1024 * 1024 * 1024);
   });
 
+  it("gives a person's first picture the company's whole room, and counts each content once", async () => {
+    const { app, companyId, task, counted } = await company({ TASK_FILES_MB: '3' });
+    const limit = 3 * 1024 * 1024;
+    expect((await checkPictureRoom(app.ctx, companyId, 10)).bytes).toBe(limit);
+    await counted(task.id, 1000);
+    expect((await checkPictureRoom(app.ctx, companyId, 10)).bytes).toBe(limit - 1000);
+  });
+
   it('lets go of the files of a turn closed 30 days ago, and keeps the rest', async () => {
     const { app, db, companyId, head, task, counted } = await company();
     const day = 24 * 60 * 60 * 1000;
@@ -252,8 +265,25 @@ describe('the room for task files', () => {
   });
 });
 
+describe('a task file fetched again', () => {
+  it('answers its hash as its version, and 304 with no bytes to one who has them already', async () => {
+    const { app, bruno, sam, task, turn, attach, fetchFile } = await company();
+    const bytes = Buffer.from('a report');
+    expect((await attach(await turn(bruno), `task=${task.number}&name=report.txt`, bytes)).statusCode).toBe(201);
+    const token = await turn(sam);
+    const etag = `"${sha256Of(bytes)}"`;
+    const first = await fetchFile(token, `task=${task.number}&file=report.txt`);
+    expect([first.statusCode, first.headers.etag, first.payload]).toEqual([200, etag, 'a report']);
+    const asked = (tag: string) => app.inject({ method: 'GET', url: `/api/attachments/file?task=${task.number}&file=report.txt`, headers: { authorization: `Bearer ${token}`, 'if-none-match': tag } });
+    const same = await asked(etag);
+    expect([same.statusCode, same.payload, same.headers['x-file-name']]).toEqual([304, '', 'report.txt']);
+    const other = await asked(`"${sha256Of('other bytes')}"`);
+    expect([other.statusCode, other.payload]).toEqual([200, 'a report']);
+  });
+});
+
 describe('a task file over 50 MB', () => {
-  it("lives on the disk of the machine that took it, for any agent to fetch, and goes after 30 days though its turn is open", async () => {
+  it("goes into the company's store as any file does, sealed under its hash, for any agent to fetch, and stays while its task is open", async () => {
     const { app, db, bruno, sam, task, turn, attach, fetchFile } = await company();
     const dir = mkdtempSync(join(tmpdir(), 'hh-files-'));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
@@ -262,18 +292,19 @@ describe('a task file over 50 MB', () => {
     const sent = await attach(await turn(bruno), `task=${task.number}&name=dump.tar`, bytes);
     expect(sent.statusCode).toBe(201);
     const { id } = sent.json();
-    expect(readdirSync(dir)).toEqual([id]);
+    const sha256 = sha256Of(bytes);
+    expect(filesUnder(dir)).toEqual([sha256]);
+    expect(readFileSync(join(dir, 'store', sha256.slice(0, 2), sha256)).includes(bytes.subarray(0, 64))).toBe(false);
+    expect((await db.select({ sha256: attachments.sha256 }).from(attachments).where(eq(attachments.id, id)))).toEqual([{ sha256 }]);
     const got = await fetchFile(await turn(sam), `task=${task.number}&file=dump.tar`);
     expect(got.headers['content-length']).toBe(String(FILE_BYTES + 1));
     expect(got.rawPayload.equals(bytes)).toBe(true);
     const detail = await taskDetail(app.ctx, (await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!, () => true);
-    expect(detail.files).toEqual([expect.objectContaining({ id, name: 'dump.tar', size: FILE_BYTES + 1, big: true })]);
+    expect(detail.files).toEqual([expect.objectContaining({ id, name: 'dump.tar', size: FILE_BYTES + 1 })]);
+    expect(detail.files[0]).not.toHaveProperty('big');
     const day = 24 * 60 * 60 * 1000;
-    expect(await dropOldFiles(app.ctx, new Date(Date.now() + 29 * day))).toBe(0);
-    expect(readdirSync(dir)).toEqual([id]);
-    expect(await dropOldFiles(app.ctx, new Date(Date.now() + 30 * day + 60_000))).toBe(1);
-    expect(readdirSync(dir)).toEqual([]);
-    expect(await db.select(idOnly(attachments)).from(attachments)).toEqual([]);
+    expect(await dropOldFiles(app.ctx, new Date(Date.now() + 31 * day))).toBe(0);
+    expect(filesUnder(dir)).toEqual([sha256]);
   });
 });
 
@@ -397,10 +428,10 @@ describe('cross-department hh-fetch and attachment boundaries', () => {
     /* Assistant's own chat file and owner message picture stay inaccessible to company employees. */
     const assistantChat = await attach(assistantToken, 'chat=1&name=private-notes.txt', Buffer.from('owner-private'));
     expect(assistantChat.statusCode).toBe(201);
-    const [assistantMsgPic] = await db.insert(attachments).values({ companyId, agentId: assistantAgent!.id, personId: ceo.id, name: 'id-card.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
-    const [spoofedAssistantTaskFile] = await db.insert(attachments).values({ companyId, agentId: assistantAgent!.id, taskId: task.id, name: 'assistant-secret.txt', mediaType: 'application/octet-stream', bytes: Buffer.from('secret'), size: 6 }).returning();
+    const [assistantMsgPic] = await db.insert(attachments).values({ companyId, agentId: assistantAgent!.id, personId: ceo.id, name: 'id-card.png', mediaType: 'image/png', sha256: await stored(db, PNG, app.ctx.config), size: PNG.length }).returning();
+    const [spoofedAssistantTaskFile] = await db.insert(attachments).values({ companyId, agentId: assistantAgent!.id, taskId: task.id, name: 'assistant-secret.txt', mediaType: 'application/octet-stream', sha256: await stored(db, Buffer.from('secret'), app.ctx.config), size: 6 }).returning();
     const [assistantTask] = await db.insert(tasks).values({ ...task, id: undefined, number: task.number + 50, assigneeAgentId: assistantAgent!.id, executorAgentId: assistantAgent!.id }).returning();
-    await db.insert(attachments).values({ companyId, agentId: bruno.id, taskId: assistantTask!.id, name: 'personal-plan.txt', mediaType: 'application/octet-stream', bytes: Buffer.from('plan'), size: 4 });
+    await db.insert(attachments).values({ companyId, agentId: bruno.id, taskId: assistantTask!.id, name: 'personal-plan.txt', mediaType: 'application/octet-stream', sha256: await stored(db, Buffer.from('plan'), app.ctx.config), size: 4 });
     for (const readerToken of [brunoToken, samToken]) {
       expect((await fetchFile(readerToken, `task=${task.number}&file=${assistantChat.json().id}`)).statusCode).toBe(404);
       expect((await fetchFile(readerToken, `task=message&file=${assistantMsgPic!.id}`)).statusCode).toBe(404);
@@ -413,7 +444,7 @@ describe('cross-department hh-fetch and attachment boundaries', () => {
     expect((await fetchFile(assistantToken, `task=message&file=${assistantMsgPic!.id}`)).statusCode).toBe(200);
 
     /* 4. Private message picture to another employee and Program Operator case screenshot stay refused. */
-    const [brunoMsgPic] = await db.insert(attachments).values({ companyId, agentId: bruno.id, personId: ceo.id, name: 'key.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+    const [brunoMsgPic] = await db.insert(attachments).values({ companyId, agentId: bruno.id, personId: ceo.id, name: 'key.png', mediaType: 'image/png', sha256: await stored(db, PNG, app.ctx.config), size: PNG.length }).returning();
     expect((await fetchFile(samToken, `task=message&file=${brunoMsgPic!.id}`)).statusCode).toBe(404);
     expect((await fetchFile(samToken, `task=${task.number}&file=${brunoMsgPic!.id}`)).statusCode).toBe(404);
 
@@ -422,7 +453,7 @@ describe('cross-department hh-fetch and attachment boundaries', () => {
     const [jobRow] = await db.select().from(jobs).where(eq(jobs.agentId, bruno.id));
     const [instance] = await db.insert(programInstances).values({ id: randomUUID(), companyId, agentId: bruno.id, nodeId: node!.id }).returning();
     const [incident] = await db.insert(programOperatorCases).values({ companyId, agentId: bruno.id, jobId: jobRow!.id, nodeId: node!.id, instance: instance!.id, reason: 'assignment_unrecorded', evidenceKey: randomUUID(), capability: randomUUID(), deadlineAt: new Date(Date.now() + 60000) }).returning();
-    const [casePic] = await db.insert(attachments).values({ companyId, agentId: bruno.id, jobId: jobRow!.id, taskId: task.id, operatorCaseId: incident!.id, name: 'terminal.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+    const [casePic] = await db.insert(attachments).values({ companyId, agentId: bruno.id, jobId: jobRow!.id, taskId: task.id, operatorCaseId: incident!.id, name: 'terminal.png', mediaType: 'image/png', sha256: await stored(db, PNG, app.ctx.config), size: PNG.length }).returning();
     for (const readerToken of [brunoToken, samToken, assistantToken]) {
       expect((await fetchFile(readerToken, `task=operator-case:${incident!.id}&file=${casePic!.id}`)).statusCode).toBe(404);
       expect((await fetchFile(readerToken, `task=${task.number}&file=${casePic!.id}`)).statusCode).toBe(404);
