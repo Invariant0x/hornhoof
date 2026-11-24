@@ -8,6 +8,7 @@ import { note, published } from './events.js';
 import { refuse, taskSpot, type Task, type Tx, type Wake } from './state.js';
 import { newTrackerFields, type TrackerFields, type TrackerInput } from '../tracker/task-fields.js';
 import { keepWakes } from './outbox.js';
+import { queueFacts, slotVerdict, waitsText } from './slots.js';
 import { refuseNotUrgent } from './urgency.js';
 import { handOff } from './pulses.js';
 import { nudgeTrackerKeepers } from '../tracker/nudge.js';
@@ -19,7 +20,7 @@ export type Turn = typeof turns.$inferSelect;
 /* One task as the orchestrator or a head gives it. department: a head's own, which it may leave out. from: the item of a
    department's list it was, and the person it comes from: whoever took the item to work, or for the orchestrator, whoever
    put it in the list. */
-export type PlanItem = { department?: string; product?: string; title: string; brief: string; body: string; workKind?: Task['workKind']; riskClass?: Task['riskClass']; urgent?: boolean; from?: { item: string; personId: string } } & TrackerInput;
+export type PlanItem = { department?: string; product?: string; title: string; brief: string; body: string; workKind?: Task['workKind']; riskClass?: Task['riskClass']; urgent?: boolean; small?: boolean; from?: { item: string; personId: string } } & TrackerInput;
 type Head = { id: string; name: string };
 type Placed = PlanItem & { department: string; head: Head; tracker: TrackerFields };
 /* Who gives the work, the orchestrator or a head, and the run they do it in. */
@@ -110,6 +111,8 @@ async function insertGiven(tx: Tx, companyId: string, planner: Planner, items: P
   let n = await lastTaskNumber(tx, companyId);
   const given: Given[] = [];
   for (const item of items) {
+    /* Whether it joins a slot of its department's turn, or waits in the queue for the next one: nobody holds it until then. */
+    const queued = (await slotVerdict(tx, item.department, { productId: item.product ?? null, small: item.small === true, urgent: item.urgent })) === 'queue';
     const [row] = await tx
       .insert(tasks)
       .values({
@@ -124,8 +127,10 @@ async function insertGiven(tx: Tx, companyId: string, planner: Planner, items: P
         workKind: item.workKind,
         riskClass: item.riskClass,
         urgent: item.urgent,
+        small: item.small === true,
         status: 'open',
-        assigneeAgentId: item.head.id,
+        assigneeAgentId: queued ? null : item.head.id,
+        queuedAt: queued ? new Date() : null,
         createdByAgentId: agentId,
         createdByPersonId: item.from?.personId ?? null,
         updatedAt: new Date(),
@@ -134,27 +139,28 @@ async function insertGiven(tx: Tx, companyId: string, planner: Planner, items: P
     await createCoordinationRoute(tx, row!);
     const actor = personId ? { personId } : { agentId };
     await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: { toStatus: row!.status, ...(item.from ? { backlog: item.from.item } : {}), ...(improvement ? { improvement } : {}) } });
-    await note(tx, row!, { kind: 'assigned', actor: { agentId }, data: { assignee: item.head.id } });
-    given.push({ task: row!, head: item.head });
+    if (!queued) await note(tx, row!, { kind: 'assigned', actor: { agentId }, data: { assignee: item.head.id } });
+    given.push({ task: row!, head: item.head, queued: queued ? (await queueFacts(tx, [row!])).get(row!.id)!.ahead : null });
   }
   await keepWakes(tx, companyId, wakesFor(given));
   return given;
 }
 
-type Given = { task: Task; head: Head };
+/* queued: how many turns ahead a task waits in the queue, none for one that was given out. */
+type Given = { task: Task; head: Head; queued: number | null };
 
-const wakesFor = (given: Given[]): Wake[] => given.map(g => ({ agentId: g.head.id, taskId: g.task.id, why: 'assigned' as const }));
+const wakesFor = (given: Given[]): Wake[] => given.filter(g => g.queued === null).map(g => ({ agentId: g.head.id, taskId: g.task.id, why: 'assigned' as const }));
 
 async function announce(ctx: Live, given: Given[]): Promise<void> {
   for (const g of given) {
     published(ctx, g.task);
-    await handOff(ctx, { agentId: g.task.createdByAgentId! }, g.task);
+    if (g.queued === null) await handOff(ctx, { agentId: g.task.createdByAgentId! }, g.task);
   }
   for (const departmentId of new Set(given.map(g => g.task.departmentId))) await nudgeTrackerKeepers(ctx, { companyId: given[0]!.task.companyId, departmentId }, given[0]!.task.createdByAgentId);
 }
 
 export const turnName = (t: Pick<Turn, 'number' | 'title' | 'goal'>) => `Turn ${t.number} "${t.title || t.goal}"`;
-const whoGot = (given: Given[]) => given.map(g => `#${g.task.number} to ${g.head.name}`).join(', ');
+const whoGot = (given: Given[]) => given.map(g => (g.queued === null ? `#${g.task.number} to ${g.head.name}` : `#${g.task.number} ${waitsText(g.queued)}`)).join(', ');
 
 /* The work of each piece's department: a head's only of its own, which it may leave out, and the orchestrator's of the
    department it names. */
