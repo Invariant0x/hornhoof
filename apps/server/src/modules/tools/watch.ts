@@ -328,6 +328,26 @@ async function undeliveredSince(ctx: Pick<Ctx, 'db'>, companyId: string, since: 
   });
 }
 
+/* The only list a round reads to find stuck agents: it holds nobody who shows a sign of work. */
+function registerHangsTool(server: McpServer, ctx: Ctx, job: ToolJob, grants: ReadonlySet<Grant>): void {
+  if (!grants.has('hangs')) return;
+  server.registerTool(
+    'suspected_hangs',
+    {
+      description:
+        `The agents whose running turn gave no sign of work for more than ${HANG_AFTER_MS / 60_000} minutes while a task in work is on them, the longest silent first, and nobody else: code alone, the same for every program. ` +
+        'Each entry has the agent, its turn, its task, how long it has been silent and its last sign (an event, the program\'s own sign, a change of its state, the end of a check or a restart). ' +
+        'A task that waits for a person, an outside event or other tasks, or is paused, makes no entry. An entry leaves by itself when the agent shows a sign of life or its turn ends. ' +
+        'A script or a build that runs long is silent too: read the screen with program_screen before you judge. Check only these agents.',
+    },
+    async () => {
+      const reader = await readerOf(ctx, job.agentId);
+      const hangs = await suspectedHangs(ctx, job.companyId);
+      return json(hangs.map(({ sight, ...hang }) => shownAll(hang, opensTask(reader, sight))));
+    },
+  );
+}
+
 /* The tools a skill grants an employee, for watching the company on a timer round: every agent's state, what failed, and
    restarting a program. Every employee has message_employee, which a grant only widens to other departments, and a head
    has tell_orchestrator. */
@@ -417,24 +437,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     );
   }
 
-  /* The only list a round reads to find stuck agents: it holds nobody who shows a sign of work. */
-  if (grants.has('hangs')) {
-    server.registerTool(
-      'suspected_hangs',
-      {
-        description:
-          `The agents whose running turn gave no sign of work for more than ${HANG_AFTER_MS / 60_000} minutes while a task in work is on them, the longest silent first, and nobody else: code alone, the same for every program. ` +
-          'Each entry has the agent, its turn, its task, how long it has been silent and its last sign (an event, the program\'s own sign, a change of its state, the end of a check or a restart). ' +
-          'A task that waits for a person, an outside event or other tasks, or is paused, makes no entry. An entry leaves by itself when the agent shows a sign of life or its turn ends. ' +
-          'A script or a build that runs long is silent too: read the screen with program_screen before you judge. Check only these agents.',
-      },
-      async () => {
-        const reader = await readerOf(ctx, job.agentId);
-        const hangs = await suspectedHangs(ctx, job.companyId);
-        return json(hangs.map(({ sight, ...hang }) => shownAll(hang, opensTask(reader, sight))));
-      },
-    );
-  }
+  registerHangsTool(server, ctx, job, grants);
 
   if (grants.has('failures')) {
     server.registerTool(

@@ -59,7 +59,7 @@ async function company() {
     await c.db.update(jobs).set({ toolTokenHash: hashToken(token) }).where(eq(jobs.id, turn));
     await jobOf(c.ctx, { headers: { authorization: `Bearer ${token}` } } as FastifyRequest);
   };
-  const ends = (turn: string) => handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: turn, ok: true, sessionId: 'session', result: 'Done.', tail: '' });
+  const ends = (turn: string) => handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: turn, ok: true, sessionId: 'session', result: 'Done.', tail: '', error: null });
   const list = () => suspectedHangs(c.ctx, c.companyId, new Date());
   const names = async () => (await list()).map(h => h.agent);
   return { ...c, later, iso, work, chat, report, said, called, ends, list, names };

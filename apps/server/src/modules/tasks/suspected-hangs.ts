@@ -89,6 +89,23 @@ function lastSign(ctx: Ctx, job: Job, program: TurnProgram | null, worked: numbe
   return last;
 }
 
+/* The task in work a turn is on: its own, or for a turn on no task, one in work its agent holds. None when it waits. */
+function taskOfTurn({ job, agent, task: own }: Turn, held: Task[], working: ReadonlySet<string>): Task | null {
+  if (job.taskId) return own && working.has(own.id) ? own : null;
+  return held.find(t => working.has(t.id) && (t.assigneeAgentId === agent.id || t.executorAgentId === agent.id)) ?? null;
+}
+
+function hangOf({ job, agent }: Turn, task: Task, program: TurnProgram | null, sign: { at: number; kind: HangSignKind }, silentMs: number): SuspectedHang {
+  return {
+    agentId: agent.id, agent: agent.name, turnId: job.id,
+    task: { id: task.id, number: task.number, title: task.title },
+    silentMs, silentMinutes: Math.floor(silentMs / 60_000),
+    lastSign: { at: new Date(sign.at).toISOString(), kind: sign.kind },
+    program: program ? { state: program.state, tool: program.tool } : null,
+    sight: { status: task.status, departmentId: task.departmentId, assigneeAgentId: task.assigneeAgentId, executorAgentId: task.executorAgentId },
+  };
+}
+
 /* The running turns Hornhoof suspects to hang: no sign of work for 10 minutes while a task in work is on their agent. Code
    alone, for every program alike. Nothing is kept: an entry is gone the moment a sign comes or the turn ends. A turn on a
    task that waits is left out, and so is one on no task whose agent holds none in work. */
@@ -100,21 +117,13 @@ export async function suspectedHangs(ctx: Ctx, companyId: string, now = new Date
   const working = await inWork(ctx, [...held, ...turns.flatMap(t => (t.task ? [t.task] : []))]);
   const signs = await lastTurnSigns(ctx, turns.map(t => t.job.id));
   const hangs: SuspectedHang[] = [];
-  for (const { job, agent, task: own } of turns) {
-    const task = job.taskId ? (own && working.has(own.id) ? own : null) : held.find(t => working.has(t.id) && (t.assigneeAgentId === agent.id || t.executorAgentId === agent.id)) ?? null;
+  for (const turn of turns) {
+    const task = taskOfTurn(turn, held, working);
     if (!task) continue;
-    const program = agentProgramState(ctx, job).program;
-    const sign = lastSign(ctx, job, program, signs.get(job.id), nowMs);
+    const program = agentProgramState(ctx, turn.job).program;
+    const sign = lastSign(ctx, turn.job, program, signs.get(turn.job.id), nowMs);
     const silentMs = Math.max(0, nowMs - sign.at);
-    if (silentMs < HANG_AFTER_MS) continue;
-    hangs.push({
-      agentId: agent.id, agent: agent.name, turnId: job.id,
-      task: { id: task.id, number: task.number, title: task.title },
-      silentMs, silentMinutes: Math.floor(silentMs / 60_000),
-      lastSign: { at: new Date(sign.at).toISOString(), kind: sign.kind },
-      program: program ? { state: program.state, tool: program.tool } : null,
-      sight: { status: task.status, departmentId: task.departmentId, assigneeAgentId: task.assigneeAgentId, executorAgentId: task.executorAgentId },
-    });
+    if (silentMs >= HANG_AFTER_MS) hangs.push(hangOf(turn, task, program, sign, silentMs));
   }
   return hangs.sort((a, b) => b.silentMs - a.silentMs || a.agent.localeCompare(b.agent));
 }
