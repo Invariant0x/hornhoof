@@ -39,6 +39,7 @@ const LINES: Lines = {
   absent: () => 'No GitHub Actions run is on this commit yet.',
   stripped: ci => `This commit keeps no workflow file, while the repository's default branch ${ci.branch} has CI, so no CI can run on it.`,
   unsupported: ci => `The repository's CI can't be read: ${ci.why}.`,
+  unnamed: ci => `The repository's release workflow can't be told: ${ci.why}`,
   limited: ci => new GitHubRateLimited(ci.limit).message,
   unread: ci => `The repository's CI could not be read now: ${ci.why}.`,
 };
@@ -62,7 +63,7 @@ export async function requireCi(ctx: Reading, repo: RepoAddress, commit: string)
   if (ci.state === 'absent') return ci;
   const result = ciResult(ci);
   if (result) return result;
-  if (ci.state === 'unsupported') throw refuse(409, 'repo_invalid', `${ciLine(ci)} Nothing was recorded for ${commit}.`);
+  if (ci.state === 'unsupported' || ci.state === 'unnamed') throw refuse(409, 'repo_invalid', `${ciLine(ci)} Nothing was recorded for ${commit}.`);
   const unread = ci.state === 'unread' || ci.state === 'limited';
   throw unread
     ? refuse(409, 'repo_invalid', `${ciLine(ci)} Nothing was recorded for ${commit}. Try again.`)
@@ -75,7 +76,7 @@ async function ciSaid(ctx: Said, task: Pick<Task, 'productId' | 'departmentId'>,
   const found = ctx.config ? await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]).catch(() => null) : null;
   if (!found) return undefined;
   const ci = await readCiOf(ctx, found.repo, commit);
-  return { line: ciLine(ci), decisive: ['green', 'red', 'pending', 'idle', 'absent', 'stripped', 'unsupported'].includes(ci.state) };
+  return { line: ciLine(ci), decisive: ['green', 'red', 'pending', 'idle', 'absent', 'stripped', 'unnamed', 'unsupported'].includes(ci.state) };
 }
 
 /* What the checks of commit say, for whoever asks for an approval of it, gives it, or releases on it: the repository's CI, and

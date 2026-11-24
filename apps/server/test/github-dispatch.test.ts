@@ -28,11 +28,21 @@ const file = (text: string) => ({ body: { type: 'file', encoding: 'base64', cont
 const BY_HAND = 'name: Release\non:\n  push:\n    branches: [main]\n  workflow_dispatch:\njobs:\n  test:\n    runs-on: ubuntu-latest\n';
 const ON_PUSH = 'name: CI\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n';
 type W = { id: number; name: string; path: string; state: string; text: string; last?: string | null };
-const wf = (id: number, name: string, text: string, last: string | null = 'success', state = 'active'): W => ({ id, name, path: `.github/workflows/${name.toLowerCase()}.yml`, state, text, last });
+const wf = (id: number, name: string, text: string, last: string | null = 'success', state = 'active'): W => ({ id, name, path: `.github/workflows/${name.toLowerCase().replace(/ /g, '-')}.yml`, state, text, last });
 
 /* A repository whose workflows are the given ones; the commit's run of the one started by hand lists as `listed`. */
-const repository = (workflows: W[], extra: { post?: Answer; listed?: unknown[] } = {}) => (path: string, init: RequestInit): Answer | undefined => {
+const MADE = 'e'.repeat(40);
+const RELEASED_AT = '2026-11-20T10:00:00Z';
+const alive = (workflow_id: number) => ({ id: 900 + workflow_id, workflow_id, head_sha: MADE, run_started_at: '2026-11-20T09:50:00Z', updated_at: '2026-11-20T10:01:00Z', repository: { full_name: 'acme/shop' }, head_repository: { full_name: 'acme/shop' }, name: 'run', status: 'completed', conclusion: 'success', run_attempt: 1 });
+type Made = { by: number[] };
+const repository = (workflows: W[], extra: { post?: Answer; listed?: unknown[]; made?: Made } = {}) => (path: string, init: RequestInit): Answer | undefined => {
   if (path === '') return { body: { default_branch: 'main' } };
+  if (path === 'releases?per_page=30') return { body: extra.made ? [{ tag_name: 'v0.43.0', draft: false, prerelease: false, published_at: RELEASED_AT }] : [] };
+  if (path === 'git/ref/tags/v0.43.0') return { body: { object: { type: 'commit', sha: MADE } } };
+  if (path === `actions/runs?head_sha=${MADE}&status=success&per_page=100&page=1`) {
+    const runs = (extra.made?.by ?? []).map(alive);
+    return { body: { total_count: runs.length, workflow_runs: runs } };
+  }
   if (path === 'commits?per_page=1') return { body: [{ sha: DEFAULT }] };
   if (path === 'actions/workflows?per_page=100') return { body: { total_count: workflows.length, workflows: workflows.map(({ id, name, path: p, state }) => ({ id, name, path: p, state })) } };
   for (const w of workflows) {
@@ -92,6 +102,27 @@ describe("starting the repository's release workflow on a commit of a turn branc
       const said = await dispatcher().start();
       expect(said).toMatchObject({ state: 'refused' });
       expect(said.state === 'refused' && said.why).toContain('Release (.github/workflows/release.yml); Images (.github/workflows/images.yml)');
+      expect(called.filter(c => c.init.method === 'POST')).toEqual([]);
+    });
+
+    it('starts the workflow that made the latest version release, though a second one can be started by hand and was green too (Images and Installer site)', async () => {
+      const called = github(repository([wf(3, 'Images', BY_HAND), wf(2, 'Installer site', BY_HAND)], { made: { by: [3] }, listed: [run({ workflow_id: 3 })] }));
+      expect(await dispatcher().start()).toMatchObject({ state: 'started', workflow: 'Images (.github/workflows/images.yml)', run: 777 });
+      expect(called.filter(c => c.init.method === 'POST').map(c => c.path)).toEqual(['actions/workflows/3/dispatches']);
+    });
+
+    it('refuses where the workflow that made the latest release cannot be started by hand, and names it', async () => {
+      const called = github(repository([wf(3, 'Images', ON_PUSH), wf(2, 'Installer site', BY_HAND)], { made: { by: [3] } }));
+      const said = await dispatcher().start();
+      expect(said).toMatchObject({ state: 'refused' });
+      expect(said.state === 'refused' && said.why).toContain('Images (.github/workflows/images.yml) made the latest version release, but it cannot be started by hand');
+      expect(called.filter(c => c.init.method === 'POST')).toEqual([]);
+    });
+
+    it('refuses, naming them, where more than one workflow was going on when the latest release was made', async () => {
+      const called = github(repository([wf(3, 'Images', BY_HAND), wf(2, 'Installer site', BY_HAND)], { made: { by: [3, 2] } }));
+      const said = await dispatcher().start();
+      expect(said.state === 'refused' && said.why).toContain('was going on when the latest version release was made: Images (.github/workflows/images.yml); Installer site (.github/workflows/installer-site.yml)');
       expect(called.filter(c => c.init.method === 'POST')).toEqual([]);
     });
 

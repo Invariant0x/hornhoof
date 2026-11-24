@@ -24,7 +24,7 @@ function github(answer: (path: string) => Answer | undefined) {
 }
 
 const run = (id: number, name: string, extra: Record<string, unknown> = {}) => ({
-  id, name, head_sha: COMMIT, status: 'completed', conclusion: 'success', run_attempt: 1,
+  id, name, workflow_id: 1, head_sha: COMMIT, status: 'completed', conclusion: 'success', run_attempt: 1,
   html_url: `https://github.com/acme/shop/actions/runs/${id}`, repository: { full_name: 'acme/shop' }, head_repository: { full_name: 'acme/shop' }, ...extra,
 });
 const job = (id: number, runId: number, name: string, extra: Record<string, unknown> = {}) => ({
@@ -34,11 +34,50 @@ const job = (id: number, runId: number, name: string, extra: Record<string, unkn
 const runsPage = (workflow_runs: unknown[], total = workflow_runs.length) => ({ total_count: total, workflow_runs });
 const jobsPage = (jobs: unknown[], total = jobs.length) => ({ total_count: total, jobs });
 type Listed = { run: ReturnType<typeof run>; jobs?: unknown[] };
-/* A repository whose commit has the workflow runs given, each with the jobs listed for it. */
-const actions = (listed: Listed[]) => (path: string): Answer | undefined => {
+
+const BY_HAND = 'name: Release\non:\n  push:\n  workflow_dispatch:\njobs:\n  test:\n    runs-on: ubuntu-latest\n';
+const ON_PUSH = 'name: CI\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n';
+const TAG_COMMIT = 'e'.repeat(40);
+const TAG_OBJECT = 'f'.repeat(40);
+const RELEASED_AT = '2026-11-20T10:00:00Z';
+type Wf = { id: number; name: string; text: string; last: string | null; state: string; path: string };
+const wf = (id: number, name: string, extra: Partial<Wf> = {}): Wf => ({ id, name, text: BY_HAND, last: 'success', state: 'active', path: `.github/workflows/${name.toLowerCase().replace(/ /g, '-')}.yml`, ...extra });
+/* A version release the repository published: its tag, what the tag names, and the runs of the commit that succeeded. */
+type Released = { tag: string; commit?: string; at?: string; draft?: boolean; prerelease?: boolean; annotated?: boolean; gone?: boolean; runs?: unknown[] };
+/* A run of workflow that was going on while the release was published, by default. */
+const during = (workflow_id: number, extra: Record<string, unknown> = {}) =>
+  run(900 + workflow_id, 'release run', { workflow_id, head_sha: TAG_COMMIT, run_started_at: '2026-11-20T09:50:00Z', updated_at: '2026-11-20T10:01:00Z', ...extra });
+type Setup = { workflows?: Wf[]; releases?: Released[] };
+
+/* What GitHub says of which workflow releases: the workflows, the version releases and what made the latest, and the default
+   branch with the runs of each workflow on it. By default one workflow, CI, that was never released. */
+const discovery = (setup: Setup = {}) => (path: string): Answer | undefined => {
+  const workflows = setup.workflows ?? [wf(1, 'CI')];
+  const releases = setup.releases ?? [];
+  if (path === 'actions/workflows?per_page=100') return { body: { total_count: workflows.length, workflows: workflows.map(({ id, name, state, path: p }) => ({ id, name, state, path: p })) } };
+  if (path === 'releases?per_page=30') return { body: releases.map(r => ({ tag_name: r.tag, draft: r.draft ?? false, prerelease: r.prerelease ?? false, published_at: r.at ?? RELEASED_AT })) };
+  for (const r of releases) {
+    const commit = r.commit ?? TAG_COMMIT;
+    if (path === `git/ref/tags/${r.tag}`) return r.gone ? undefined : { body: { object: r.annotated ? { type: 'tag', sha: TAG_OBJECT } : { type: 'commit', sha: commit } } };
+    if (r.annotated && path === `git/tags/${TAG_OBJECT}`) return { body: { object: { type: 'commit', sha: commit } } };
+    if (path === `actions/runs?head_sha=${commit}&status=success&per_page=100&page=1`) return { body: runsPage(r.runs ?? []) };
+  }
+  if (path === '') return { body: { default_branch: 'main' } };
+  if (path === 'commits?per_page=1') return { body: [{ sha: DEFAULT }] };
+  for (const w of workflows) {
+    if (path === `contents/${w.path}?ref=${DEFAULT}`) return { body: { type: 'file', encoding: 'base64', content: Buffer.from(w.text).toString('base64') } };
+    if (path === `actions/workflows/${w.id}/runs?branch=main&status=completed&exclude_pull_requests=true&per_page=1`) {
+      return { body: { total_count: w.last ? 1 : 0, workflow_runs: w.last ? [{ conclusion: w.last, status: 'completed' }] : [] } };
+    }
+  }
+  return undefined;
+};
+
+/* A repository whose commit has the workflow runs given, each with the jobs listed for it, and the release workflow its setup says. */
+const actions = (listed: Listed[], setup: Setup = {}) => (path: string): Answer | undefined => {
   if (path === RUNS_AT_COMMIT) return { body: runsPage(listed.map(l => l.run)) };
   const jobs = /^actions\/runs\/(\d+)\/jobs\?filter=latest&per_page=100&page=1$/.exec(path);
-  return jobs ? { body: jobsPage(listed.find(l => l.run.id === Number(jobs[1]))?.jobs ?? []) } : undefined;
+  return jobs ? { body: jobsPage(listed.find(l => l.run.id === Number(jobs[1]))?.jobs ?? []) } : discovery(setup)(path);
 };
 const ci = (name: string, jobs: unknown[], extra: Record<string, unknown> = {}, id = 1) => ({ run: run(id, name, extra), jobs });
 
@@ -48,7 +87,10 @@ describe("the repository's CI on one exact commit", () => {
   it('is green when every run finished with every job done, skipped and neutral jobs as no fault, and asks only for the Actions runs of the exact commit with the repository token', async () => {
     const called = github(actions([ci('CI', [job(11, 1, 'test (1)'), job(12, 1, 'test (2)'), job(13, 1, 'publish', { conclusion: 'skipped' }), job(14, 1, 'lint', { conclusion: 'neutral' })])]));
     expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 2 });
-    expect(called.map(c => c.path)).toEqual([RUNS_AT_COMMIT, 'actions/runs/1/jobs?filter=latest&per_page=100&page=1']);
+    expect(called.map(c => c.path)).toEqual([
+      RUNS_AT_COMMIT, 'actions/workflows?per_page=100', 'releases?per_page=30', '', 'commits?per_page=1', `contents/.github/workflows/ci.yml?ref=${DEFAULT}`,
+      'actions/workflows/1/runs?branch=main&status=completed&exclude_pull_requests=true&per_page=1', 'actions/runs/1/jobs?filter=latest&per_page=100&page=1',
+    ]);
     expect(called[0]!.init).toMatchObject({ method: 'GET', redirect: 'manual', headers: expect.objectContaining({ authorization: `Bearer ${REPO.token}` }) as unknown });
   });
 
@@ -96,7 +138,7 @@ describe("the repository's CI on one exact commit", () => {
     });
 
     it('is unread when the jobs listed are fewer than its total says: a job is missing from the list', async () => {
-      github(path => path === RUNS_AT_COMMIT ? { body: runsPage([run(1, 'CI')]) } : { body: jobsPage(path.endsWith('page=1') ? [job(11, 1, 'test')] : [], 3) });
+      github(path => path === RUNS_AT_COMMIT ? { body: runsPage([run(1, 'CI')]) } : path.includes('/jobs') ? { body: jobsPage(path.endsWith('page=1') ? [job(11, 1, 'test')] : [], 3) } : discovery()(path));
       expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
     });
 
@@ -131,12 +173,125 @@ describe("the repository's CI on one exact commit", () => {
   it.each(['queued', 'in_progress', 'waiting', 'requested', 'pending'])('is pending on a run that is %s, and reads no job of it', async state => {
     const called = github(actions([ci('CI', [job(11, 1, 'test')], { status: state, conclusion: null })]));
     expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'pending', check: 'CI', outcome: state });
-    expect(called.map(c => c.path)).toEqual([RUNS_AT_COMMIT]);
+    expect(called.map(c => c.path)).not.toContain('actions/runs/1/jobs?filter=latest&per_page=100&page=1');
   });
 
   it('puts first a failure over a pending run', async () => {
     github(actions([ci('a', [], { status: 'queued', conclusion: null }, 1), ci('b', [], { conclusion: 'failure' }, 2)]));
     expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'red', check: 'b' });
+  });
+
+  describe('tests that were skipped prove nothing (B1)', () => {
+    it("is red, never green, for Images' run where the first job saw a status that says the tests passed and so skipped them: mark and images succeeded, test did not run", async () => {
+      github(actions([ci('Images', [job(11, 1, 'mark'), job(12, 1, 'test', { conclusion: 'skipped' }), job(13, 1, 'images (hornhoof)')])]));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'red', check: 'Images / test', url: 'https://github.com/acme/shop/actions/runs/1/job/12', outcome: 'skipped' });
+    });
+
+    it.each(['test', 'Test', 'tests', 'test (1)', 'test (3/4)', 'tests (linux, 22)'])('is red for a skipped test job named %s', async name => {
+      github(actions([ci('CI', [job(11, 1, 'mark'), job(12, 1, name, { conclusion: 'skipped' })])]));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'red', outcome: 'skipped' });
+    });
+
+    it('is red for a skipped test job whatever else passed, and names it first before one that is still pending', async () => {
+      github(actions([ci('CI', [job(11, 1, 'lint', { status: 'in_progress', conclusion: null }), job(12, 1, 'test (2)', { conclusion: 'skipped' }), job(13, 1, 'build')])]));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'red', check: 'CI / test (2)', outcome: 'skipped' });
+    });
+
+    it.each(['test-real', 'passed', 'contest', 'latest', 'publish', 'e2e tests', 'test_real'])('does not take a skipped job named %s for a skipped test job', async name => {
+      github(actions([ci('CI', [job(11, 1, 'test'), job(12, 1, name, { conclusion: 'skipped' })])]));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 1 });
+    });
+  });
+
+  describe('only the release workflow counts (B5)', () => {
+    it('is absent, not green, where the one run on the commit is another workflow\'s: anyone with write access can start Media on a branch', async () => {
+      github(actions([ci('Media', [job(51, 5, 'build')], { workflow_id: 9 }, 5)]));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'absent' });
+    });
+
+    it('goes on the release workflow alone: another workflow\'s failed or unfinished run on the commit is no proof and no blocker', async () => {
+      github(actions([
+        ci('CI', [job(11, 1, 'test')], {}, 1),
+        ci('Media', [], { workflow_id: 9, conclusion: 'failure' }, 5),
+        ci('Docs', [], { workflow_id: 8, status: 'in_progress', conclusion: null }, 6),
+      ]));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 1 });
+    });
+
+    it('reads no job of another workflow\'s run', async () => {
+      const called = github(actions([ci('CI', [job(11, 1, 'test')], {}, 1), ci('Media', [job(51, 5, 'build')], { workflow_id: 9 }, 5)]));
+      await githubCiReader()(REPO, COMMIT);
+      expect(called.map(c => c.path).filter(p => p.includes('/jobs'))).toEqual(['actions/runs/1/jobs?filter=latest&per_page=100&page=1']);
+    });
+  });
+
+  describe("which workflow is the repository's release workflow (B6)", () => {
+    const images = wf(1, 'Images');
+    const site = wf(2, 'Installer site');
+    const made = (workflowId: number, extra: Partial<Released> = {}): Released => ({ tag: 'v0.43.0', runs: [during(workflowId)], ...extra });
+    const imagesRun = ci('Images', [job(11, 1, 'mark'), job(12, 1, 'test (1)'), job(13, 1, 'images')], {}, 1);
+
+    it('is the workflow that made the latest version release, though another can be started by hand and was green on the default branch too', async () => {
+      github(actions([imagesRun], { workflows: [images, site], releases: [made(1)] }));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 3 });
+    });
+
+    it('does not take the other workflow of that repository for the release: its run alone is absent, and its failure blocks nothing', async () => {
+      github(actions([ci('Installer site', [job(21, 2, 'deploy')], { workflow_id: 2 }, 2)], { workflows: [images, site], releases: [made(1)] }));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'absent' });
+      github(actions([imagesRun, ci('Installer site', [], { workflow_id: 2, conclusion: 'failure' }, 2)], { workflows: [images, site], releases: [made(1)] }));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 3 });
+    });
+
+    it('reads the tag of an annotated release to its commit', async () => {
+      github(actions([imagesRun], { workflows: [images, site], releases: [made(1, { annotated: true })] }));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'green' });
+    });
+
+    it('takes the newest published version release, setting aside drafts, pre-releases and tags that are no version', async () => {
+      const newer = [
+        { tag: 'v0.44.0', commit: 'd'.repeat(40), at: '2026-11-23T10:00:00Z', draft: true, runs: [during(2, { head_sha: 'd'.repeat(40) })] },
+        { tag: 'v0.44.0-rc.1', commit: 'b'.repeat(40), at: '2026-11-22T10:00:00Z', prerelease: true, runs: [during(2, { head_sha: 'b'.repeat(40) })] },
+        { tag: 'nightly', commit: '9'.repeat(40), at: '2026-11-21T10:00:00Z', runs: [during(2, { head_sha: '9'.repeat(40) })] },
+      ];
+      github(actions([imagesRun], { workflows: [images, site], releases: [...newer, made(1)] }));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'green' });
+    });
+
+    it('names no workflow, and so is unnamed, where more than one was going on when the release was made', async () => {
+      github(actions([imagesRun], { workflows: [images, site], releases: [made(1, { runs: [during(1), during(2)] })] }));
+      const said = await githubCiReader()(REPO, COMMIT);
+      expect(said).toMatchObject({ state: 'unnamed' });
+      expect(said.state === 'unnamed' && said.why).toContain('Images (.github/workflows/images.yml); Installer site (.github/workflows/installer-site.yml)');
+    });
+
+    it.each([
+      ['no version release at all', {}],
+      ['a release made by hand: no run was going on when it was published', { releases: [made(1, { runs: [during(1, { run_started_at: '2026-11-19T09:00:00Z', updated_at: '2026-11-19T09:30:00Z' })] })] }],
+      ['a release whose tag is gone', { releases: [made(1, { gone: true })] }],
+      ['a release made by a workflow that is not active any more', { workflows: [wf(1, 'CI'), wf(3, 'Old', { state: 'disabled_manually' })], releases: [made(3)] }],
+    ])('falls back to the one workflow that can be started by hand and was green on the default branch, with %s', async (_what, setup) => {
+      github(actions([ci('CI', [job(11, 1, 'test')])], setup));
+      expect(await githubCiReader()(REPO, COMMIT)).toEqual({ state: 'green', checks: 1 });
+    });
+
+    it.each([
+      ['two that can be started by hand and were green', [wf(1, 'Images'), wf(2, 'Installer site')]],
+      ['none that can be started by hand', [wf(1, 'CI', { text: ON_PUSH })]],
+      ['none that was green on the default branch', [wf(1, 'CI', { last: 'failure' })]],
+    ])('is unnamed where no release made it and there are %s, and says why', async (_what, workflows) => {
+      github(actions([ci('CI', [job(11, 1, 'test')])], { workflows }));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unnamed', why: expect.stringContaining('release workflow') as unknown });
+    });
+
+    it('is unread, never green, where the list of workflows or of releases cannot be read whole', async () => {
+      github(path => path === 'releases?per_page=30' ? { status: 502 } : actions([imagesRun], { workflows: [images], releases: [] })(path));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
+      github(path => path === 'actions/workflows?per_page=100' ? { body: { total_count: 3, workflows: [] } } : actions([imagesRun])(path));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
+      github(path => path === 'releases?per_page=30' ? { body: { not: 'a list' } } : actions([imagesRun])(path));
+      expect(await githubCiReader()(REPO, COMMIT)).toMatchObject({ state: 'unread' });
+    });
   });
 
   describe('a commit no workflow run is on', () => {
@@ -269,7 +424,7 @@ describe("the repository's CI on one exact commit", () => {
 
   describe('a long list of jobs', () => {
     const page = (from: number, count: number, total: number) => jobsPage(Array.from({ length: count }, (_v, i) => job(from + i, 1, `test (${from + i})`)), total);
-    const runs = (path: string): Answer | undefined => (path === RUNS_AT_COMMIT ? { body: runsPage([run(1, 'CI')]) } : undefined);
+    const runs = (path: string): Answer | undefined => (path === RUNS_AT_COMMIT ? { body: runsPage([run(1, 'CI')]) } : discovery()(path));
 
     it('is read page by page until every job is in', async () => {
       const called = github(path => {

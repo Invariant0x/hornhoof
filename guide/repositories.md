@@ -41,9 +41,9 @@ Test runs take it along too. [Tests and heavy work on free machines](free-machin
 
 ## What does a release need from the repository's CI?
 
-A release rests on the repository's GitHub Actions runs of its exact commit, which Hornhoof reads with the repository's token. Every job of every run must have finished with success. A commit status or the check of another app proves nothing, as anyone who can write to the repository can post one. A repository with no workflow file and no check at all releases with no run. A repository on another host than github.com cannot be released, because Hornhoof reads no CI there.
+A release rests on the repository's GitHub Actions runs of its exact commit, which Hornhoof reads with the repository's token. Every job of every run must have finished with success, and a test job (named `test` or `tests`, with or without its matrix, as `test (1)`) that was skipped makes the run red: a skipped test proved nothing. Only the runs of the release workflow count; a run of any other workflow on the commit is neither proof nor a blocker. A commit status or the check of another app proves nothing, as anyone who can write to the repository can post one. A repository with no workflow file and no check at all releases with no run. A repository on another host than github.com cannot be released, because Hornhoof reads no CI there.
 
-Pushing a turn branch starts no workflow. Where no run is on the commit of a release, `release_turn` starts the repository's release workflow on the turn branch itself, once for each commit: the one workflow that can be started by hand (`workflow_dispatch`) and whose latest run on the default branch was green. With none, or with more than one, the release is refused and says which; a name for the release workflow in the repository's settings is not there yet. The minute round then records the release when CI is green on that exact commit and tells the head.
+Pushing a turn branch starts no workflow. Where no run is on the commit of a release, `release_turn` starts the repository's release workflow on the turn branch itself, once for each commit: the release workflow. That is the workflow whose run was going on when the repository's latest published version release (a tag that starts with `v` and a digit, no draft or pre-release) was made, and which can be started by hand (`workflow_dispatch`). Where no run made that release, or there is none yet, it is the one workflow that can be started by hand and whose latest run on the default branch was green. With none, or with more than one, the release is refused and names them; a name for the release workflow in the repository's settings is not there yet. The minute round then records the release when CI is green on that exact commit and tells the head.
 
 The token needs **Actions: Read and write** and **Contents: Read** on a fine-grained token, `repo` on a classic one. Without the right to write Actions, the release is refused and says so.
 
@@ -59,7 +59,7 @@ Not after Hornhoof has. Name the repository's full test command, the one that ru
 
 When a test run of exactly this command ends, Hornhoof puts a commit status called `hornhoof/tests` on the commit that run pinned: `success` when it passed, `failure` when it did not. It stays on that commit even when the branch has moved on. A run of one file, or of any other command, marks nothing.
 
-A GitHub workflow can read this status and skip its own tests on a commit that has `success`. Hornhoof's own image build does.
+A GitHub workflow can read this status and skip its own tests on a commit that has `success`. Hornhoof's own image build does. A release does not rest on such a run: a skipped test job makes its run red, so a commit that already carries the status needs a new commit before a release can be recorded.
 
 The token needs the right to write commit statuses: **Commit statuses: Read and write** on a fine-grained token, `repo:status` on a classic one. Without it, or when GitHub does not answer, the task's log and the run's result say so and what to give the token. The run stays passed, and GitHub tests that commit itself.
 

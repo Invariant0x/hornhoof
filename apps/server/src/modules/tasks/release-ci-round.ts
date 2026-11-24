@@ -31,7 +31,7 @@ const settle = (ctx: Ctx, row: Row, set: { state: 'recorded'; releaseId: string 
 /* What a request that waits does on what CI says of its commit: records the release, ends with why, or waits on. */
 type Next = { do: 'record' } | { do: 'end'; note: string } | { do: 'wait' };
 const RECORDS = new Set(['green', 'none']);
-const NOTHING_WILL_COME = new Set(['red', 'idle', 'stripped', 'unsupported']);
+const NOTHING_WILL_COME = new Set(['red', 'idle', 'stripped', 'unnamed', 'unsupported']);
 function nextOf(ci: CiAt, row: Row, now: number): Next {
   if (RECORDS.has(ci.state)) return { do: 'record' };
   if (NOTHING_WILL_COME.has(ci.state)) return { do: 'end', note: ciLine(ci) };
@@ -71,7 +71,9 @@ async function end(ctx: Ctx, row: Row, note: string, say = true): Promise<void> 
 async function recordWaiting(ctx: Ctx, row: Row, task: Task): Promise<void> {
   try {
     const view = await recordRelease(ctx, row.agentId, row.companyId, { task: task.number, commit: row.commit });
-    if ('release' in view && !(await settle(ctx, row, { state: 'recorded', releaseId: view.release })).length) return;
+    /* Its own read of CI may have seen no run where the round saw green: nothing is recorded, and the request waits on. */
+    if (!('release' in view)) return;
+    if (!(await settle(ctx, row, { state: 'recorded', releaseId: view.release })).length) return;
     await tell(ctx, row, `CI is green on ${row.commit} and the release of it is recorded. ${'next' in view ? view.next : ''}`);
   } catch (error) {
     await end(ctx, row, error instanceof Error ? error.message : 'the release could not be recorded.');

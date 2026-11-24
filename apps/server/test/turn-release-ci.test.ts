@@ -46,6 +46,7 @@ describe('the release of a turn on the repository\'s CI', () => {
     ['CI still under way, naming the check that is not done', { state: 'pending', check: 'test (1)', url: RED_LINK, outcome: 'in_progress' }, ['has not finished on this commit', 'test (1) is in_progress', RED_LINK]],
     ['CI that ran jobs and none succeeded', { state: 'idle', checks: 2 }, ['ran 2 jobs', 'none succeeded']],
     ['a commit that took every workflow file away where its default branch has CI', { state: 'stripped', branch: 'main' }, ['keeps no workflow file', 'main has CI', 'no CI can run on it']],
+    ['a repository whose release workflow cannot be told, never as one with no CI', { state: 'unnamed', why: 'More than one workflow was going on when the latest version release was made: Images (a.yml); Installer site (b.yml). Hornhoof does not guess which one releases.' }, ["release workflow can't be told", 'Images (a.yml); Installer site (b.yml)']],
     ['a repository whose host is not read, never as one with no CI', { state: 'unsupported', why: 'the repository is not on github.com, the only host whose CI is read' }, ["CI can't be read", 'not on github.com']],
   ])('refuses %s, and records nothing', async (_what, ci, words) => {
     const f = await releasing();
@@ -280,6 +281,17 @@ describe('the minute round for a release that waits for CI', () => {
     expect(await records(f)).toEqual([expect.objectContaining({ ciState: 'none', ciChecks: null })]);
   });
 
+  it('does not say the release is recorded where the read that records it saw no run yet: the request waits on and starts nothing twice', async () => {
+    const f = await started();
+    let reads = 0;
+    f.repo.ci = () => (++reads === 1 ? { state: 'green', checks: 5 } : absent);
+    await releaseCiRound(f.ctx);
+    expect(await records(f)).toEqual([]);
+    expect(await dispatches(f)).toEqual([expect.objectContaining({ state: 'waiting' })]);
+    expect(await toldHolder(f)).not.toContain('is recorded');
+    expect(f.repo.dispatched).toHaveLength(1);
+  });
+
   it.each<[string, CiAt]>([
     ['still under way', { state: 'pending', check: 'Release / test', url: null, outcome: 'in_progress' }],
     ['not listed yet', absent],
@@ -297,6 +309,7 @@ describe('the minute round for a release that waits for CI', () => {
     ['red', { state: 'red', check: 'Release / test (2)', url: RED_LINK, outcome: 'failure' }, `check Release / test (2) ended with failure (${RED_LINK})`],
     ['run with nothing that succeeded', { state: 'idle', checks: 2 }, 'none succeeded'],
     ['stripped of its workflows', { state: 'stripped', branch: 'main' }, 'keeps no workflow file'],
+    ['without a release workflow Hornhoof can name', { state: 'unnamed', why: 'No workflow of the repository can be started by hand.' }, "release workflow can't be told"],
   ])('ends the request, records nothing and tells the holder why, where CI is %s', async (_what, ci, words) => {
     const f = await started();
     f.repo.ci = ci;

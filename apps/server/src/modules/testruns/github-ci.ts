@@ -1,18 +1,21 @@
 import { z } from 'zod';
-import { bodyWithin } from './bounded.js';
-import { githubName, githubRateLimit, GitHubRateLimited, type GitHubLimits, type RateLimit } from './github-limit.js';
+import { Absent, PER_PAGE, Sha, Unread, defaultBranchOf, everyPage, jsonOf, linkOf, runsAt, shown, type Json, type Run } from './github-api.js';
+import { releaseWorkflowOf } from './github-workflow.js';
+import { githubName, GitHubRateLimited, type GitHubLimits, type RateLimit } from './github-limit.js';
 import type { RepoAddress } from './refs.js';
 
-/* What the repository's own CI says of one exact commit. CI here is the repository's GitHub Actions: the workflow runs of that
-   sha, read from GitHub's API with the repository's token, and the jobs of each. Commit statuses and the check runs of other
-   apps are never read: any token with write access can post one, so none of them proves a thing. The server decides from this
+/* What the repository's own CI says of one exact commit. CI here is the GitHub Actions runs of the repository's release workflow
+   on that sha, read from GitHub's API with the repository's token, and the jobs of each (github-workflow.ts says which
+   workflow that is). Commit statuses, the check runs of other apps and the runs of any other workflow are never read: any token
+   with write access can post a status or start another workflow, so none of them proves a thing. The server decides from this
    answer, never from a caller's word.
-   green: every run of the commit finished, every job of each finished, none failed and one at least succeeded; checks counts the
-   jobs that succeeded. red and pending name the first run or job that stopped it, with its link. idle: runs finished and no job
-   succeeded, as all were skipped. absent: the commit keeps workflow files but no run of them is on it yet. stripped: the
-   commit keeps no workflow file while the default branch has CI, so no run can come. none: the repository has no CI at all.
-   unsupported: not on github.com, the only host read here. unread: GitHub did not answer, or answered what cannot be trusted.
-   limited: the account's request limit is used up. */
+   green: every run of the release workflow on the commit finished, every job of each finished, no test job was skipped, none
+   failed and one at least succeeded; checks counts the jobs that succeeded. red and pending name the first run or job that
+   stopped it, with its link; a test job that was skipped, as Images does where a status says the tests passed, is red. idle:
+   runs finished and no job succeeded, as all were skipped. absent: no run of the release workflow is on the commit yet.
+   stripped: the commit keeps no workflow file while the default branch has CI, so no run can come. unnamed: the repository's
+   release workflow cannot be told. none: the repository has no CI at all. unsupported: not on github.com, the only host read
+   here. unread: GitHub did not answer, or answered what cannot be trusted. limited: the account's request limit is used up. */
 export type CiAt =
   | { state: 'none'; why: string }
   | { state: 'green'; checks: number }
@@ -21,35 +24,14 @@ export type CiAt =
   | { state: 'idle'; checks: number }
   | { state: 'absent' }
   | { state: 'stripped'; branch: string }
+  | { state: 'unnamed'; why: string }
   | { state: 'unsupported'; why: string }
   | { state: 'unread'; why: string }
   | { state: 'limited'; limit: RateLimit };
 export type CiReader = (repo: RepoAddress, commit: string, timeoutMs?: number) => Promise<CiAt>;
 
 const READ_MS = 10_000;
-const MAX_BYTES = 8 * 1024 * 1024;
-const PER_PAGE = 100;
-/* The most jobs of one run read: a thousand. A run with more is not read whole. */
-const MAX_PAGES = 10;
-/* The most workflow runs of one commit read: one page. */
-const MAX_RUNS = PER_PAGE;
-const SHOWN = 160;
 
-export const Sha = z.string().regex(/^[a-f0-9]{40}$/);
-const Repository = z.object({ full_name: z.string().min(1) });
-const WorkflowRun = z.object({
-  id: z.number().int().positive(),
-  name: z.string().nullable().optional(),
-  path: z.string().nullable().optional(),
-  head_sha: Sha,
-  status: z.string().min(1),
-  conclusion: z.string().nullable(),
-  html_url: z.string().nullable().optional(),
-  run_attempt: z.number().int().positive(),
-  repository: Repository,
-  head_repository: Repository.nullable().optional(),
-});
-const RunsPage = z.object({ total_count: z.number().int().nonnegative(), workflow_runs: z.array(WorkflowRun) });
 const Job = z.object({
   id: z.number().int().positive(),
   run_id: z.number().int().positive(),
@@ -61,121 +43,23 @@ const Job = z.object({
   html_url: z.string().nullable().optional(),
 });
 const JobsPage = z.object({ total_count: z.number().int().nonnegative(), jobs: z.array(Job) });
-const Commits = z.array(z.object({ sha: Sha })).min(1);
-const Repo = z.object({ default_branch: z.string().min(1).max(250) });
 const Reported = z.object({ total_count: z.number().int().nonnegative() });
 const StatusReported = Reported.extend({ sha: Sha });
 const Workflows = z.array(z.object({ type: z.string(), name: z.string() }));
 
-type Run = z.infer<typeof WorkflowRun>;
+type JobOf = z.infer<typeof Job>;
 type Stopped = { check: string; url: string | null; outcome: string };
 type Settled = { ok: 'yes'; jobs: number } | { ok: 'skip'; jobs: number } | ({ ok: 'red' } & Stopped) | ({ ok: 'pending' } & Stopped);
-
-export class Unread extends Error {}
-export class Absent extends Error {}
-
-/* Text from GitHub that goes into what an agent reads: short, one line, and a link only if it is a plain https address. */
-export const shown = (text: string): string => text.replace(/\s+/g, ' ').trim().slice(0, SHOWN);
-export function linkOf(url: string | null | undefined): string | null {
-  if (!url || url.length > 300) return null;
-  try {
-    const at = new URL(url);
-    return at.protocol === 'https:' && !at.username && !at.password ? at.href : null;
-  } catch { return null; }
-}
 
 /* A conclusion that is no fault: neutral and skipped ones ran nothing that failed, and count for no success. */
 const NO_FAULT = new Set(['neutral', 'skipped']);
 
-export type Json = (repo: RepoAddress, name: string, path: string, timeoutMs: number) => Promise<unknown>;
-export type Sent = { method: 'GET' } | { method: 'POST'; body: unknown };
-
-const headersOf = (repo: RepoAddress, sent: Sent): Record<string, string> => ({
-  accept: 'application/vnd.github+json',
-  'user-agent': 'hornhoof',
-  'x-github-api-version': '2022-11-28',
-  ...(sent.method === 'POST' ? { 'content-type': 'application/json' } : {}),
-  ...(repo.token ? { authorization: `Bearer ${repo.token}` } : {}),
-});
-
-/* What a request GitHub did not take says: the account's request limit, a missing thing (404), or a refusal with its words. */
-async function failure(response: Response): Promise<Error> {
-  const limit = githubRateLimit(response);
-  const said = (await bodyWithin(response, 64 * 1024).catch(() => null))?.toString('utf8') ?? '';
-  if (limit) return new GitHubRateLimited(limit);
-  return response.status === 404 ? new Absent(said) : new Refused(response.status, said);
-}
-
-/* One request to GitHub's API for the repository, with its token, to api.github.com only and with no redirect followed. The
-   answer's body: a JSON value, or null where GitHub answered with none (204). */
-export async function githubRequest(repo: RepoAddress, name: string, path: string, sent: Sent, timeoutMs: number): Promise<unknown> {
-  const response = await fetch(`https://api.github.com/repos/${name}${path ? `/${path}` : ''}`, {
-    method: sent.method,
-    redirect: 'manual',
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: headersOf(repo, sent),
-    ...(sent.method === 'POST' ? { body: JSON.stringify(sent.body) } : {}),
-  });
-  if (!response.ok) throw await failure(response);
-  if (response.status === 204) return null;
-  const body = await bodyWithin(response, MAX_BYTES);
-  if (!body) throw new Unread('its answer was too large');
-  return JSON.parse(body.toString('utf8')) as unknown;
-}
-
-/* A request GitHub refused: its status, and what it said of why. */
-export class Refused extends Error {
-  constructor(readonly status: number, readonly said: string) {
-    super(`GitHub answered ${status}`);
-  }
-}
-
-export type Send = (repo: RepoAddress, name: string, path: string, sent: Sent, timeoutMs: number) => Promise<unknown>;
-
-/* Requests that share the request limit of the server's account, where a limit is kept. */
-export const sendOf = (limits?: GitHubLimits): Send => (repo, name, path, sent, timeout) =>
-  limits ? limits.request(repo, () => githubRequest(repo, name, path, sent, timeout)) : githubRequest(repo, name, path, sent, timeout);
-
-/* The reads of a reader: a refusal of GitHub is an answer that cannot be read, not one that says what CI is. */
-export const jsonOf = (limits?: GitHubLimits): Json => {
-  const send = sendOf(limits);
-  return (repo, name, path, timeout) => send(repo, name, path, { method: 'GET' }, timeout).catch((error: unknown) => {
-    if (error instanceof Refused) throw new Unread(`GitHub answered ${error.status} when reading the checks`);
-    throw error;
-  });
-};
-
-/* A page-by-page list: what each page holds, until the total is in; a page that comes back empty, a total that changes under
-   the reading or more than the pages allow is a list that cannot be read whole. */
-async function everyPage<T>(what: string, load: (page: number) => Promise<{ total: number; items: T[] } | null>): Promise<T[]> {
-  const all: T[] = [];
-  let total = 0;
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const got = await load(page);
-    if (!got || (page > 1 && got.total !== total)) throw new Unread(`its list of ${what} was incomplete`);
-    total = got.total;
-    all.push(...got.items);
-    if (all.length >= total) return all;
-    if (!got.items.length) throw new Unread(`its list of ${what} was incomplete`);
-  }
-  throw new Unread(`it has more ${what} than are read`);
-}
-
-/* The workflow runs of the exact commit that are this repository's own, the latest attempt of each. A run of a fork, or one
-   that names another commit than the one asked, is not read as the commit's. */
-async function runsOf(json: Json, repo: RepoAddress, name: string, commit: string, timeoutMs: number): Promise<Run[]> {
-  const parsed = RunsPage.safeParse(await json(repo, name, `actions/runs?head_sha=${commit}&per_page=${PER_PAGE}&page=1`, timeoutMs));
-  if (!parsed.success) throw new Unread('its list of workflow runs was incomplete');
-  if (parsed.data.total_count > MAX_RUNS) throw new Unread('it has more workflow runs than are read');
-  if (parsed.data.workflow_runs.length !== parsed.data.total_count) throw new Unread('its list of workflow runs was incomplete');
-  const own = (r: z.infer<typeof Repository> | null | undefined) => r?.full_name.toLowerCase() === name.toLowerCase();
-  const runs = parsed.data.workflow_runs.filter(run => own(run.repository) && (!run.head_repository || own(run.head_repository)));
-  if (runs.some(run => run.head_sha !== commit)) throw new Unread(`a workflow run of it names another commit than ${commit}`);
-  return runs;
-}
+/* The job that runs a repository's tests: named test or tests, with or without the matrix a workflow adds, as test (1). A
+   workflow that skips it, as a status that says the tests passed can make it, has proved nothing of the commit's tests. */
+const TEST_JOB = /^tests?(?: \(.*\))?$/i;
 
 /* Every job of one run, the latest attempt's, each of the run and the commit asked. */
-async function jobsOf(json: Json, repo: RepoAddress, name: string, run: Run, timeoutMs: number): Promise<z.infer<typeof Job>[]> {
+async function jobsOf(json: Json, repo: RepoAddress, name: string, run: Run, timeoutMs: number): Promise<JobOf[]> {
   const jobs = await everyPage('jobs', async page => {
     const parsed = JobsPage.safeParse(await json(repo, name, `actions/runs/${run.id}/jobs?filter=latest&per_page=${PER_PAGE}&page=${page}`, timeoutMs));
     return parsed.success ? { total: parsed.data.total_count, items: parsed.data.jobs } : null;
@@ -188,17 +72,18 @@ async function jobsOf(json: Json, repo: RepoAddress, name: string, run: Run, tim
 
 const runName = (run: Run): string => shown(run.name || run.path || `workflow run ${run.id}`);
 
-function settleJob(run: Run, job: z.infer<typeof Job>): Settled {
+function settleJob(run: Run, job: JobOf): Settled {
   const at = { check: shown(`${runName(run)} / ${job.name}`), url: linkOf(job.html_url) };
   if (job.status !== 'completed') return { ok: 'pending', ...at, outcome: job.status };
   if (job.conclusion === 'success') return { ok: 'yes', jobs: 1 };
+  if (job.conclusion === 'skipped' && TEST_JOB.test(job.name)) return { ok: 'red', ...at, outcome: 'skipped' };
   if (job.conclusion && NO_FAULT.has(job.conclusion)) return { ok: 'skip', jobs: 1 };
   return { ok: 'red', ...at, outcome: job.conclusion ?? 'no conclusion' };
 }
 
 /* What every job of a run that finished with success says: all of them finished, none failed. A run with no job listed has
    a job missing. */
-function settleJobs(run: Run, jobs: z.infer<typeof Job>[]): Settled[] {
+function settleJobs(run: Run, jobs: JobOf[]): Settled[] {
   if (!jobs.length) return [{ ok: 'pending', check: runName(run), url: linkOf(run.html_url), outcome: 'no job of it has reported' }];
   return jobs.map(job => settleJob(run, job));
 }
@@ -235,14 +120,6 @@ async function hasWorkflows(json: Json, repo: RepoAddress, name: string, commit:
   }
 }
 
-/* The default branch of the repository and where it stands now: its name and the commit at its head. */
-export async function defaultBranchOf(json: Json, repo: RepoAddress, name: string, timeoutMs: number): Promise<{ branch: string; head: string }> {
-  const info = Repo.safeParse(await json(repo, name, '', timeoutMs));
-  const head = Commits.safeParse(await json(repo, name, 'commits?per_page=1', timeoutMs));
-  if (!info.success || !head.success) throw new Unread('its default branch was not readable');
-  return { branch: info.data.default_branch, head: head.data[0]!.sha };
-}
-
 /* Whether the default branch has CI of any kind: workflow files at its head, or a check or a status ever reported on it. Any
    sign of CI there, even one that proves nothing, means the repository is not one with no CI. */
 async function defaultHasCi(json: Json, repo: RepoAddress, name: string, head: string, timeoutMs: number): Promise<boolean> {
@@ -262,14 +139,22 @@ async function noRunAt(json: Json, repo: RepoAddress, name: string, commit: stri
   return { state: 'none', why: 'no workflow file, no check and no status belongs to this commit or to the default branch' };
 }
 
+/* What the release workflow's runs on a commit say, the runs of every other workflow set aside. */
+async function ofReleaseWorkflow(json: Json, repo: RepoAddress, name: string, runs: Run[], timeoutMs: number): Promise<CiAt> {
+  const chosen = await releaseWorkflowOf(json, repo, name, false, timeoutMs);
+  if ('no' in chosen) return { state: 'unnamed', why: chosen.no };
+  const own = runs.filter(run => run.workflow_id === chosen.workflow.id);
+  if (!own.length) return { state: 'absent' };
+  return verdict((await Promise.all(own.map(run => settleRun(json, repo, name, run, timeoutMs)))).flat());
+}
+
 async function ciAt(json: Json, repo: RepoAddress, commit: string, timeoutMs: number): Promise<CiAt> {
   if (!Sha.safeParse(commit).success) return { state: 'unread', why: 'the commit is not a full commit id' };
   const name = githubName(repo.url);
   if (!name) return { state: 'unsupported', why: 'the repository is not on github.com, the only host whose CI is read' };
   try {
-    const runs = await runsOf(json, repo, name, commit, timeoutMs);
-    if (!runs.length) return await noRunAt(json, repo, name, commit, timeoutMs);
-    return verdict((await Promise.all(runs.map(run => settleRun(json, repo, name, run, timeoutMs)))).flat());
+    const runs = await runsAt(json, repo, name, commit, '', timeoutMs);
+    return runs.length ? await ofReleaseWorkflow(json, repo, name, runs, timeoutMs) : await noRunAt(json, repo, name, commit, timeoutMs);
   } catch (error) {
     if (error instanceof GitHubRateLimited) return { state: 'limited', limit: error.limit };
     if (error instanceof Unread) return { state: 'unread', why: error.message };

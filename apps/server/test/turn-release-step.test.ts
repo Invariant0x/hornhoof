@@ -72,7 +72,8 @@ describe('the release step of a turn', () => {
   it("asks in its description for no run: the release relies on the repository's CI for the exact commit", async () => {
     const f = await releasing();
     const tool = (await f.client.listTools()).tools.find(found => found.name === 'release_turn')!;
-    expect(tool.description).toMatch(/The release relies on the repository's CI for that exact commit: the GitHub Actions runs of it, which Hornhoof reads from github\.com, never from your word; commit statuses and the checks of other apps prove nothing\. Green CI, every job of every run finished with success, records it with no run/);
+    expect(tool.description).toMatch(/The release relies on the repository's CI for that exact commit: the GitHub Actions runs of it, which Hornhoof reads from github\.com, never from your word; commit statuses and the checks of other apps prove nothing\. Green CI, every job of every run of the release workflow finished with success and no test job skipped, records it with no run, while a run of any other workflow counts for nothing;/);
+    expect(tool.description).toMatch(/no release workflow \(the one whose run made the latest version release, else the one that can be started by hand and was green on the default branch\), or more than one such workflow refuses and says why/);
     expect(tool.description).toMatch(/Where no Actions run is on the commit yet, it starts the repository's release workflow on the turn branch itself, once for each commit, which must be the head of the branch, and answers 'CI started, run N; the release records when it's green'/);
     expect(tool.description).not.toMatch(/whole run|run_tests|nothing reused/);
     expect(tool.inputSchema.properties).not.toHaveProperty('runId');
