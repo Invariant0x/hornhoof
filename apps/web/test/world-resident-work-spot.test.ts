@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { CityState } from '../src/world/city-layout';
+import type { CityBuilding, CityState } from '../src/world/city-layout';
+import { deliverySpotsForBuilding, workSlotsForBuilding } from '../src/world/construction';
 import { createHornhoofLiveFixture, syncLiveSnapshotToCity } from '../src/world/live-sync';
 import type { Direction8, WorldPackManifest } from '../src/world/manifest';
 import { createResidentSimulation, stepResidentSimulation, type ResidentEntity } from '../src/world/residents';
@@ -77,18 +78,34 @@ describe('A delivery ends at the building it is for (#2001)', () => {
     expect(seen.length).toBeGreaterThanOrEqual(12);
   });
 
-  it('spreads the residents bringing stones to one building over its work spots', () => {
+  it('spreads the residents working at one building over its work spots', () => {
+    const live = createHornhoofLiveFixture();
+    const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: live.company.seed, mapSize: 150 });
+    const { city } = syncLiveSnapshotToCity(EGYPT_WORLD_PACK, map, live);
     const seen = arrivals(EGYPT_WORLD_PACK, r => expect(r.workBuildingId, `${r.name} knows its building`).toBeTruthy());
-    const spotsByBuilding = new Map<string, Set<string>>();
-    const residentsByBuilding = new Map<string, Set<string>>();
+    const spotsInUse = new Map<string, Set<string>>();
+    const residents = new Map<string, Set<string>>();
     for (const a of seen) {
-      const id = a.buildingId ?? '';
-      spotsByBuilding.set(id, (spotsByBuilding.get(id) ?? new Set()).add(`${a.col.toFixed(2)},${a.row.toFixed(2)}`));
-      residentsByBuilding.set(id, (residentsByBuilding.get(id) ?? new Set()).add(a.name));
+      const id = a.buildingId!;
+      spotsInUse.set(id, (spotsInUse.get(id) ?? new Set()).add(`${a.col.toFixed(2)},${a.row.toFixed(2)}`));
+      residents.set(id, (residents.get(id) ?? new Set()).add(a.name));
     }
-    const shared = [...residentsByBuilding].filter(([, names]) => names.size >= 2);
-    expect(shared.length, 'the fixture has buildings that several residents bring stones to').toBeGreaterThan(0);
-    for (const [id] of shared) expect(spotsByBuilding.get(id)!.size, `${id} has more than one work spot in use`).toBeGreaterThan(1);
+    let spread = 0;
+    for (const [id, names] of residents) {
+      const building = city.buildings.find(b => b.id === id)!;
+      const spots = deliverySpotsForBuilding(building, null, EGYPT_WORLD_PACK, city);
+      /* Each spot on the lot by a road, one tile from it, and no two the same. */
+      for (const spot of spots) {
+        expect(city.roads.has(tile(spot.col, spot.row)), `${id} spot on a road`).toBe(false);
+        expect(city.roads.has(tile(spot.approach.col, spot.approach.row)), `${id} spot by a road`).toBe(true);
+        expect(Math.hypot(spot.col - spot.approach.col, spot.row - spot.approach.row)).toBeLessThan(1);
+      }
+      expect(new Set(spots.map(s => `${s.col},${s.row}`)).size).toBe(spots.length);
+      const want = Math.min(names.size, spots.length);
+      expect(spotsInUse.get(id)!.size, `${names.size} residents at ${id} with ${spots.length} spots`).toBe(want);
+      if (want > 1) spread++;
+    }
+    expect(spread, 'the fixture has buildings where several residents work side by side').toBeGreaterThan(0);
   });
 
   it('leaves the buildings as the accepted results drew them: a delivery grows nothing by itself', () => {
@@ -99,6 +116,44 @@ describe('A delivery ends at the building it is for (#2001)', () => {
     const sim = createResidentSimulation(EGYPT_WORLD_PACK, city, live);
     for (let tick = 0; tick < 600; tick++) stepResidentSimulation(sim, 0.1);
     expect(city.buildings.map(b => ({ id: b.id, stage: b.stage, progress: b.progress, reached: b.reached }))).toEqual(before);
+  });
+
+  /* The seam with the construction data (#1947 item 11 removes the drawn stand-in workers, not these slots). */
+  it('takes the spots from the building’s work slots: the sled and ramp sides of a monument, every road side of a department', () => {
+    const live = createHornhoofLiveFixture();
+    const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: live.company.seed, mapSize: 150 });
+    const { city } = syncLiveSnapshotToCity(EGYPT_WORLD_PACK, map, live);
+    /* The building alone on its lot with a road all round it. */
+    const alone = (b: CityBuilding): Pick<CityState, 'roads' | 'footprintOccupant'> => {
+      const footprintOccupant = new Map<string, string>();
+      const roads = new Map<string, unknown>();
+      for (let c = b.col - 1; c <= b.col + b.spanCol; c++) {
+        for (let r = b.row - 1; r <= b.row + b.spanRow; r++) {
+          const inside = c >= b.col && c < b.col + b.spanCol && r >= b.row && r < b.row + b.spanRow;
+          if (inside) footprintOccupant.set(`${c},${r}`, b.id);
+          else roads.set(`${c},${r}`, {});
+        }
+      }
+      return { roads, footprintOccupant } as Pick<CityState, 'roads' | 'footprintOccupant'>;
+    };
+    const southEast = (b: CityBuilding, s: { col: number }) => s.col > b.col + b.spanCol - 1;
+    const southWest = (b: CityBuilding, s: { row: number }) => s.row > b.row + b.spanRow - 1;
+
+    const monument = city.buildings.find(b => b.kind === 'monument' && !b.reached)!;
+    const slots = workSlotsForBuilding(monument, null, EGYPT_WORLD_PACK, alone(monument).footprintOccupant);
+    expect(slots.map(s => s.action)).toEqual(expect.arrayContaining(['pull_sled', 'carry_ramp']));
+    const spots = deliverySpotsForBuilding(monument, null, EGYPT_WORLD_PACK, alone(monument));
+    expect(spots.length).toBeGreaterThan(0);
+    expect(spots.length).toBeLessThanOrEqual(slots.length);
+    /* The sled lies off the south-west face, the ramp against the south-east one: a spot by each. */
+    expect(spots.some(s => southWest(monument, s) && s.inward.dr === -1)).toBe(true);
+    expect(spots.some(s => southEast(monument, s) && s.inward.dc === -1)).toBe(true);
+
+    const department = city.buildings.find(b => b.kind === 'department')!;
+    expect(workSlotsForBuilding(department, null, EGYPT_WORLD_PACK)).toEqual([]);
+    const along = deliverySpotsForBuilding(department, null, EGYPT_WORLD_PACK, alone(department));
+    expect(along).toHaveLength(department.spanCol + department.spanRow);
+    expect(along.every(s => southEast(department, s) !== southWest(department, s))).toBe(true);
   });
 
   it.each([

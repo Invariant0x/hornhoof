@@ -3,7 +3,7 @@
    demolition and stage-by-stage building relocation state machine.
    Contains zero theme-specific words. */
 
-import type { CityBuilding } from './city-layout';
+import type { CityBuilding, CityState } from './city-layout';
 import {
   resolveConstructionStages,
   type BuildingLoopKind,
@@ -401,6 +401,64 @@ export function workSlotsForBuilding(
   }
 
   return slots;
+}
+
+/* Where a resident lays what it brings to a building, and stands while it works there (#2001): on the building's own lot,
+   a tenth of a tile inside one of its two front edges (the south-east and south-west faces on screen, the ones the
+   camera sees), on a lot tile with a road beside it, so the walk leaves that road for one short step and ends at the
+   wall's foot. Never a road tile, never behind the building. The building's work slots choose the spots: each takes
+   the front edge spot nearest it (the ramp and the sled on one side, a scaffold on another). A building with no slots,
+   or none near a road, offers every front edge spot with a road beside it. These are data only: nothing here draws a
+   worker, so the residents keep their spots whatever draws the slots. */
+export type DeliverySpot = Readonly<{
+  col: number;
+  row: number;
+  /* The road tile beside the spot, where the walk leaves the road. */
+  approach: Readonly<{ col: number; row: number }>;
+  /* One tile step from the spot into the building: the way a resident there faces. */
+  inward: Readonly<{ dc: number; dr: number }>;
+}>;
+
+/* How far inside its lot's edge a spot lies, in tiles: the lot's tile, at the foot of the wall. */
+const SPOT_INSET = 0.1;
+
+export function deliverySpotsForBuilding(
+  building: CityBuilding,
+  state: BuildingConstructionState | null,
+  pack: WorldPackManifest,
+  city: Pick<CityState, 'roads' | 'footprintOccupant'>,
+): DeliverySpot[] {
+  const c0 = state ? state.col : building.col;
+  const r0 = state ? state.row : building.row;
+  const sc = state ? state.spanCol : building.spanCol;
+  const sr = state ? state.spanRow : building.spanRow;
+  const onLot = (col: number, row: number): boolean => city.footprintOccupant.get(`${col},${row}`) === building.id;
+  const edge: DeliverySpot[] = [];
+  /* The face at the largest column, south-east on screen, then the one at the largest row, south-west. */
+  for (let r = r0; r < r0 + sr; r++) {
+    if (onLot(c0 + sc - 1, r) && city.roads.has(`${c0 + sc},${r}`)) {
+      edge.push({ col: c0 + sc - 0.5 - SPOT_INSET, row: r, approach: { col: c0 + sc, row: r }, inward: { dc: -1, dr: 0 } });
+    }
+  }
+  for (let c = c0; c < c0 + sc; c++) {
+    if (onLot(c, r0 + sr - 1) && city.roads.has(`${c},${r0 + sr}`)) {
+      edge.push({ col: c, row: r0 + sr - 0.5 - SPOT_INSET, approach: { col: c, row: r0 + sr }, inward: { dc: 0, dr: -1 } });
+    }
+  }
+  const chosen: DeliverySpot[] = [];
+  for (const slot of workSlotsForBuilding(building, state, pack, city.footprintOccupant)) {
+    let best: DeliverySpot | null = null;
+    let bestD = Infinity;
+    for (const spot of edge) {
+      const d = Math.hypot(spot.col - slot.col, spot.row - slot.row);
+      if (d < bestD) {
+        bestD = d;
+        best = spot;
+      }
+    }
+    if (best && !chosen.includes(best)) chosen.push(best);
+  }
+  return chosen.length > 0 ? chosen : edge;
 }
 
 export function createConstructionSimulation(pack: WorldPackManifest): ConstructionSimulation {
