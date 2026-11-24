@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildArtIndexFromFolder, checkDistArt, main, normalizePassport, readPngSize, runArtCheck } from '../scripts/world-art-index';
+import { buildArtIndexFromFolder, checkDistArt, main, normalizePassport, readPngSize, runArtCheck, worldArtIndexPlugin, writeDistArtIndexes } from '../scripts/world-art-index';
 import { ART_CONTRACT_VERSION, type BuildingPicturePassport } from '../src/world/art';
 
 /* PNG signature and IHDR chunk are all the size reader needs. */
@@ -191,6 +191,47 @@ describe('Production build art check: fails when the web dist has no world-art/<
     const lines: string[] = [];
     expect(checkDistArt({ dist, pack: 'egypt', print: l => lines.push(l) }).ok).toBe(false);
     expect(lines.join('\n')).toMatch(/belongs to pack "dungeon"/);
+  });
+
+  it('fails a dist whose index gives a file no content hash, or a hash its bytes do not have (#1947)', () => {
+    const dist = distWithArt();
+    const path = 'buildings/department/shrine/complete.png';
+    const index = JSON.parse(readFileSync(join(dist, 'world-art/egypt/art-index.json'), 'utf8')) as { files: Record<string, Record<string, unknown>> };
+    const bare = Object.fromEntries(Object.entries(index.files[path]!).filter(([k]) => k !== 'bytes' && k !== 'hash'));
+    put(dist, 'world-art/egypt/art-index.json', JSON.stringify({ ...index, files: { ...index.files, [path]: bare } }));
+    const a: string[] = [];
+    expect(checkDistArt({ dist, pack: 'egypt', print: l => a.push(l) }).ok).toBe(false);
+    expect(a.join('\n')).toMatch(/shrine\/complete\.png has no content hash/);
+    put(dist, 'world-art/egypt/art-index.json', JSON.stringify({ ...index, files: { ...index.files, [path]: { ...index.files[path], hash: '0000000000000000' } } }));
+    const b: string[] = [];
+    expect(checkDistArt({ dist, pack: 'egypt', print: l => b.push(l) }).ok).toBe(false);
+    expect(b.join('\n')).toMatch(/shrine\/complete\.png has hash 0000000000000000 in the index, its bytes [0-9a-f]{16}/);
+  });
+
+  it('writes the index of each art folder in a built dist from the files it ships, so the build alone gives the hashes (#1947)', () => {
+    const dist = tempArt();
+    shrine(join(dist, 'world-art', 'egypt'));
+    /* The artist's index came along from public/ and is out of date. */
+    put(dist, 'world-art/egypt/art-index.json', JSON.stringify({ contract: ART_CONTRACT_VERSION, pack: 'egypt', files: {} }));
+    expect(writeDistArtIndexes(dist, () => {})).toEqual(['egypt']);
+    const lines: string[] = [];
+    expect(checkDistArt({ dist, pack: 'egypt', print: l => lines.push(l) }).ok, lines.join('\n')).toBe(true);
+    const written = JSON.parse(readFileSync(join(dist, 'world-art/egypt/art-index.json'), 'utf8'));
+    expect(written.files['buildings/department/shrine/complete.png'].hash).toMatch(/^[0-9a-f]{16}$/);
+    /* The public build has no art and gets no index. */
+    expect(writeDistArtIndexes(tempArt(), () => {})).toEqual([]);
+  });
+
+  it('runs the index writer as the web build ends, on the build output (#1947)', async () => {
+    const dist = tempArt();
+    shrine(join(dist, 'world-art', 'egypt'));
+    const plugin = worldArtIndexPlugin();
+    expect(plugin.apply).toBe('build');
+    (plugin.configResolved as (c: { root: string; build: { outDir: string } }) => void)({ root: '/', build: { outDir: dist } });
+    await (plugin.closeBundle as () => void | Promise<void>)();
+    expect(checkDistArt({ dist, pack: 'egypt', print: () => {} }).ok).toBe(true);
+    const config = readFileSync(join(__dirname, '..', 'vite.config.ts'), 'utf8');
+    expect(config).toMatch(/worldArtIndexPlugin\(\)/);
   });
 
   it('runs from the command line with --dist and exits 1 without art, 0 with it', () => {

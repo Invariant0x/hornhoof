@@ -6,93 +6,23 @@
    catalog and the contract, prints what is wrong or missing, and with --write saves
    art-index.json, which the engine reads to know which files to draw.
    With --dist it checks a built web dist instead: it fails unless <dist>/world-art/<id>/art-index.json
-   lists art the pack draws and the dist holds every file it lists, so a production build cannot ship
-   the placeholder look without anyone noticing.
+   lists art the pack draws and the dist holds every file it lists at the size and content hash the index
+   gives, so a production build cannot ship the placeholder look, or art the browser cannot keep, without
+   anyone noticing. The web build writes that index itself (world-art-index.config.ts).
    Not yet a step of the image build (Dockerfile): the art is licensed for Hornhoof only and may not
    go into the public repository or the public image, so the build has no source for it yet, and the
    check would stop every image from main. It joins the image build in the change that brings the art
    source (#1944). */
 
-import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import {
-  ART_CONTRACT_VERSION,
-  ART_INDEX_FILE,
-  declaredArtFiles,
-  validateArtIndex,
-  type ArtIndex,
-  type ArtIndexEntry,
-  type ArtPassport,
-} from '../src/world/art';
+import { ART_INDEX_FILE, declaredArtFiles, validateArtIndex, type ArtIndex, type ArtIndexEntry } from '../src/world/art';
 import type { WorldPackManifest } from '../src/world/manifest';
 import { resolveWorldPack } from '../src/world-packs/registry';
+import { buildArtIndexFromFolder, contentHash, readPngSize } from '../world-art-index.config';
 
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
-export function readPngSize(data: Buffer): { w: number; h: number } | null {
-  if (data.length < 24 || !data.subarray(0, 8).equals(PNG_SIGNATURE) || data.toString('ascii', 12, 16) !== 'IHDR') {
-    return null;
-  }
-  return { w: data.readUInt32BE(16), h: data.readUInt32BE(20) };
-}
-
-const camel = (key: string): string => key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
-
-/* Passports may use snake_case keys and [x, y] pairs; the engine reads camelCase and { x, y }. */
-export function normalizePassport(value: unknown, key = ''): unknown {
-  if (Array.isArray(value)) {
-    if (value.length === 2 && value.every(v => typeof v === 'number') && key !== 'workSlots') {
-      return { x: value[0], y: value[1] };
-    }
-    return value.map(v => normalizePassport(v));
-  }
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) {
-      const ck = camel(k);
-      out[ck] = normalizePassport(v, ck);
-    }
-    return out;
-  }
-  return value;
-}
-
-function walkPngs(root: string, dir = root, out: string[] = []): string[] {
-  for (const name of readdirSync(dir).sort()) {
-    const full = join(dir, name);
-    if (statSync(full).isDirectory()) walkPngs(root, full, out);
-    else if (name.toLowerCase().endsWith('.png')) out.push(relative(root, full).split(sep).join('/'));
-  }
-  return out;
-}
-
-/* The version of a file's bytes in art-index.json: the browser keeps one copy per hash (art-files.ts, #1947). */
-export function contentHash(data: Buffer): string {
-  return createHash('sha256').update(data).digest('hex').slice(0, 16);
-}
-
-export function buildArtIndexFromFolder(folder: string, packId: string): ArtIndex {
-  const files: Record<string, ArtIndexEntry> = {};
-  for (const rel of walkPngs(folder)) {
-    const data = readFileSync(join(folder, rel));
-    const size = readPngSize(data);
-    if (!size) continue;
-    let passport: ArtPassport | undefined;
-    if (!rel.endsWith('.cloak.png')) {
-      const jsonPath = join(folder, rel.replace(/\.png$/i, '.json'));
-      try {
-        passport = normalizePassport(JSON.parse(readFileSync(jsonPath, 'utf8'))) as ArtPassport;
-      } catch {
-        passport = undefined;
-      }
-    }
-    const file = { ...size, bytes: data.length, hash: contentHash(data) };
-    files[rel] = passport ? { ...file, passport } : file;
-  }
-  return { contract: ART_CONTRACT_VERSION, pack: packId, files };
-}
+export { buildArtIndexFromFolder, contentHash, normalizePassport, readPngSize, worldArtIndexPlugin, writeDistArtIndexes } from '../world-art-index.config';
 
 export type ArtCheckOptions = Readonly<{
   folder: string | null;
@@ -151,10 +81,17 @@ function readDistIndex(folder: string, label: string): ArtIndex | string {
 
 function distFileProblem(folder: string, label: string, path: string, entry: ArtIndexEntry): string | null {
   const full = join(folder, path);
-  const size = existsSync(full) ? readPngSize(readFileSync(full)) : null;
-  if (!size) return `${label}/${path} is listed but not in the build`;
-  if (size.w === entry.w && size.h === entry.h) return null;
-  return `${label}/${path} is ${size.w} x ${size.h} in the build, the index says ${entry.w} x ${entry.h}`;
+  const data = existsSync(full) ? readFileSync(full) : null;
+  const size = data ? readPngSize(data) : null;
+  if (!data || !size) return `${label}/${path} is listed but not in the build`;
+  if (size.w !== entry.w || size.h !== entry.h) return `${label}/${path} is ${size.w} x ${size.h} in the build, the index says ${entry.w} x ${entry.h}`;
+  /* The browser keeps each file by its hash (#1947): without one it downloads the file on every visit, and with a wrong
+     one it keeps a copy that never updates. The build writes the index (worldArtIndexPlugin), so this means a dist not
+     built by it. */
+  if (!entry.hash || entry.bytes === undefined) return `${label}/${path} has no content hash: the web build writes the index, rebuild the dist`;
+  const hash = contentHash(data);
+  if (entry.hash !== hash || entry.bytes !== data.length) return `${label}/${path} has hash ${entry.hash} in the index, its bytes ${hash}`;
+  return null;
 }
 
 function drawnFiles(pack: WorldPackManifest, index: ArtIndex): string[] {

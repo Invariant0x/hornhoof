@@ -21,8 +21,9 @@ import {
 import { hashSeed } from './prng';
 import type { ResidentEntity, ResidentPose } from './residents';
 
-export const ART_CONTRACT_VERSION = 2;
-export const ART_INDEX_FILE = 'art-index.json';
+import { ART_CONTRACT_VERSION, ART_INDEX_FILE } from './art-contract';
+
+export { ART_CONTRACT_VERSION, ART_INDEX_FILE };
 /* Two pixels of slack on master 4x geometry: one pixel of anti-aliasing on each side. */
 export const ART_GEOMETRY_TOLERANCE_PX = 2;
 export const PEOPLE_TIER_COUNT = 5;
