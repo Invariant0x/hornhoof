@@ -109,7 +109,7 @@ const TEXT = {
     machines: 'Машины',
     subs: 'Подписки',
     tasks: 'Принято задач',
-    topLv: 'Макс. ур.',
+    topLv: 'Высший ур.',
     goals: 'Цели',
     statues: 'Статуи',
     wall: 'Стена',

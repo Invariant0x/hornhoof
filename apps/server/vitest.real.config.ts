@@ -7,8 +7,8 @@ export default defineConfig({
   test: {
     include: ['test/real/**/*.real.ts'],
     globalSetup: ['test/global-setup.ts'],
-    testTimeout: 120000,
-    // A hook here makes a database on a real server and migrates it: how long that takes is the machine's, so it has no limit.
+    testTimeout: 0,
+    // A test or hook here makes a database on a real server and migrates it: how long that takes is the machine's, so it has no limit.
     hookTimeout: 0,
     fileParallelism: false,
   },
