@@ -1,5 +1,5 @@
 {
-  "id": "02ee6e81-0869-450a-aceb-807baa52b344",
+  "id": "782fb9c5-ad0e-44ec-8fa9-9ecadad17f2e",
   "prevId": "730eacb0-8db3-428f-bb7c-f1e0fac57d18",
   "version": "7",
   "dialect": "postgresql",
@@ -3351,6 +3351,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "slot_cap": {
+          "name": "slot_cap",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -3427,6 +3433,10 @@
         "departments_repo_token_revision": {
           "name": "departments_repo_token_revision",
           "value": "\"departments\".\"repo_token_revision\" > 0"
+        },
+        "departments_slot_cap": {
+          "name": "departments_slot_cap",
+          "value": "\"departments\".\"slot_cap\" is null or \"departments\".\"slot_cap\" >= 1"
         }
       },
       "isRLSEnabled": false
@@ -12405,6 +12415,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "queued_at": {
+          "name": "queued_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -12564,6 +12580,27 @@
           "columns": [
             {
               "expression": "asked_by_person_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tasks_queued": {
+          "name": "tasks_queued",
+          "columns": [
+            {
+              "expression": "department_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "queued_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
