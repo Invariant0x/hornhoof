@@ -1045,8 +1045,8 @@ export function createHornhoofLiveFixture(): WorldLiveSnapshot {
     subscriptions,
     goals,
     activeCalls,
-    /* Six tasks wait to be taken; three came in the last minute, the first two together (#2006). */
-    taskFlow: { open: 6, arrivals: ['2026-11-21T18:59:44Z', '2026-11-21T18:59:47Z', '2026-11-21T18:59:58Z'] },
+    /* Six tasks wait to be taken; three came in the last minute, the first two together in one boat (#2006). */
+    taskFlow: { open: 6, arrivals: ['2026-11-21T18:59:30Z', '2026-11-21T18:59:33Z', '2026-11-21T18:59:58Z'] },
     relocations: [],
     savedLayout: null,
     permissions: {
