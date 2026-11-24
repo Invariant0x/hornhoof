@@ -24,8 +24,7 @@ import {
 
 const MiB = 1024 * 1024;
 const STARTING_JSON = '{"error":{"code":"unavailable","message":"Hornhoof is starting.","reason":"starting"}}';
-const STARTING_TEXT = 'Hornhoof is starting. Try again in a few seconds.
-';
+const STARTING_TEXT = 'Hornhoof is starting. Try again in a few seconds.\n';
 const UPGRADE =
   'GET /socket HTTP/1.1\r\nHost: hornhoof.test\r\nConnection: Upgrade\r\nUpgrade: x-test\r\nX-Stays: kept\r\n\r\n';
 const EARLY_LIMIT = 64 * 1024;
@@ -1482,7 +1481,7 @@ describe('what a hop says about a request', () => {
     ['/x/api/y', STARTING_TEXT],
     ['/x/mcp', STARTING_TEXT],
   ])('says it is starting to %s in the words that path reads', (url, body) => {
-    const answer = startingAnswer(asked({ url }));
+    const answer = startingAnswer(asked({ url, headers: {} }));
     expect(answer.status).toBe(502);
     expect(answer.headers['Retry-After']).toBe('5');
     expect(answer.body).toBe(body);
@@ -1491,8 +1490,7 @@ describe('what a hop says about a request', () => {
 
 describe('a request held while the target is down', () => {
   const HELD_JSON = '{"error":{"code":"unavailable","message":"Hornhoof did not answer for a minute. Try again in a few seconds.","reason":"starting"}}';
-  const HELD_TEXT = 'Hornhoof did not answer for a minute. Try again in a few seconds.
-';
+  const HELD_TEXT = 'Hornhoof did not answer for a minute. Try again in a few seconds.\n';
 
   /* A port nothing listens on yet, and a way to bring a target up on it. */
   async function targetToCome() {
