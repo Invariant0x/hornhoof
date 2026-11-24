@@ -1,7 +1,5 @@
 ---
 id: hh-web-pages
-title: { en: "Read web pages", ru: "Читать веб-страницы" }
-description: { en: "Reads public pages in a real browser on the machine, takes screenshots of them and says what to do at a sign-in or a robot check.", ru: "Читает публичные страницы в настоящем браузере на машине, снимает их и говорит, что делать при входе или проверке на робота." }
 kind: core
 ---
 You can read a web page that scripts build, without asking anyone for a browser.

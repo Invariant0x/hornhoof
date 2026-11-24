@@ -1,7 +1,5 @@
 ---
 id: dsn-accessibility-review
-title: { en: "Accessibility review", ru: "Проверка доступности" }
-description: { en: "Checks a mockup or a built screen against WCAG 2.2 AA, with evidence for each finding.", ru: "Проверяет макет или готовый экран на соответствие WCAG 2.2 AA и подкрепляет каждое замечание доказательством." }
 kind: checklist
 sources: [anthropics/knowledge-work-plugins design/skills/accessibility-review/SKILL.md, wshobson/agents plugins/ui-design/skills/accessibility-compliance/SKILL.md, affaan-m/ECC agents/a11y-architect.md]
 ---

@@ -1,7 +1,5 @@
 ---
 id: sal-pipeline-review
-title: { en: "Pipeline and deal review", ru: "Разбор воронки и сделок" }
-description: { en: "Goes through open deals weekly, checks each against evidence and decides the next step.", ru: "Каждую неделю проходит по открытым сделкам, сверяет каждую с фактами и решает следующий шаг." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins sales/skills/deal-review/SKILL.md, msitarzewski/agency-agents sales/sales-deal-strategist.md]
 ---

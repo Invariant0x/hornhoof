@@ -100,7 +100,7 @@ Never make the version tag or its GitHub release by hand: the workflow makes bot
 These are the same rules everyone follows, people and agents alike. [AGENTS.md](AGENTS.md) has them in short.
 
 - Code, comments, commit messages and the README are in English.
-- Every screen ships in English and Russian. A new string goes into both `apps/web/src/i18n/en.ts` and `apps/web/src/i18n/ru.ts`, in plain words a person outside IT reads without effort.
+- Every screen ships in every language the product ships (today English and Russian). A new string goes into `apps/web/src/i18n/en.ts` and into the file of each shipped language next to it (`ru.ts`), in plain words a person outside IT reads without effort. Never write a text, a plural rule or a date format into a screen: texts live in the language files, plurals go through `plural()`, dates and numbers through `Intl`, and code never names a language (`lang === 'ru'`): the registry says what a language is.
 - No em dashes anywhere, in code, texts or translations. In Russian write "е" instead of "ё".
 - Match the code around you: its naming, how much it comments and how it does things.
 - Do not reformat files you did not change, and do not run a formatter over the whole repository.
@@ -113,11 +113,23 @@ These are the same rules everyone follows, people and agents alike. [AGENTS.md](
 - Reset browser default margins, paddings, borders and backgrounds on interactive controls, and give each component explicit sizing, padding, border, background, font inheritance, centred icons and interactive states instead of relying on browser default geometry. Reserve scrollbar space in scrollable panels without assuming overlay scrollbars, and verify web layout and geometry across Chromium, Firefox and WebKit instead of a single browser engine.
 - Non-visual work (server, data, API, logic, states, live data, behaviour tests and a simple temporary skeleton) proceeds in parallel without waiting on a design mockup; only final visual styling waits for the approved Design reference and visual check, without inventing unchosen tokens or distances.
 - Layouts must accommodate 20 to 30 languages (`1.5x` to `2x` expansion over short Latin copy, taller line-heights for scripts such as CJK and Devanagari, and mirrored RTL layout via logical CSS properties for Arabic and Hebrew).
-- For screenshots and browser checks on a touched screen, read the actually shipped locales from `LANGUAGES` in [`apps/web/src/i18n/index.tsx`](apps/web/src/i18n/index.tsx) and their dictionaries in `apps/web/src/i18n/*.ts`, sum the character lengths of the real translation strings rendered on that screen for each shipped locale, and test the dynamically **longest** and **shortest** shipped locales (plus one shipped RTL locale once `LANGUAGES` includes one) in light and dark themes at phone and desktop widths. Never hardcode a fixed pair of locale IDs forever, and never count a demo or pseudo-locale string as a shipped translation.
+- For screenshots and browser checks on a touched screen, read the actually shipped locales from `LOCALES` in [`packages/protocol/src/locales.ts`](packages/protocol/src/locales.ts) and their dictionaries in `apps/web/src/i18n/*.ts`, sum the character lengths of the real translation strings rendered on that screen for each shipped locale, and test the dynamically **longest** and **shortest** shipped locales (plus one shipped RTL locale once `LOCALES` includes one; the test languages `en-XL` and `ar-XB`, longer and mirrored, stand in until then, see `apps/web/e2e/pseudo-locales.spec.ts`) in light and dark themes at phone and desktop widths. Never hardcode a fixed pair of locale IDs forever, and never count a demo or pseudo-locale string as a shipped translation.
 
 ## Adding a language
 
-All text people see lives in `apps/web/src/i18n/`: `en.ts` is the source, and `ru.ts` is its Russian translation. A new language is a new file next to them with every key of `en.ts`, plus its name in `LANGUAGES` in `index.tsx`. Write it in plain words, the way a person outside IT speaks, and check the screens at phone width, where longer words wrap first. Open an issue before you start, so two people do not translate the same language.
+A language is a line in one registry and a file per text domain named by its id. No code changes.
+
+1. Add a line to `LOCALES` in [`packages/protocol/src/locales.ts`](packages/protocol/src/locales.ts): `id` (a BCP 47 tag, as `Intl` takes it, and the name of the files: `pt-BR`, `zh-Hans`), `name` (the language in its own words), `english` (its name in English), `script` (ISO 15924), `dir` (`ltr` or `rtl`) and `format` only where dates and numbers follow another tag than the language's own.
+2. Add the file of the language to each domain. Each has every text of the English one and the same shape, and a test fails for a text that is missing, extra or of another kind:
+   - the screens: `apps/web/src/i18n/<id>.ts` (the source is `en.ts`; a phrase with a count uses `plural()` with the forms the language has, which `Intl.PluralRules` names: `zero`, `one`, `two`, `few`, `many`, `other`);
+   - the words of the world engine and each pack on the web: `apps/web/src/world/pack-locales/<id>.ts` and `apps/web/src/world-packs/<pack>/locales/<id>.ts`, each English text a pack gives through `text()` being the key;
+   - what the server says in its own words: `apps/server/src/locales/<id>.ts`, and each world pack's name, skills and crew: `apps/server/src/modules/world/packs/locales/<pack>/<id>.ts`;
+   - the names and descriptions of templates: `templates/locales/<id>.yaml`.
+3. A script that is not Latin or Cyrillic needs `apps/web/src/fonts/scripts/<Script>.css` (the ones for Han, Japanese, Korean, Devanagari and Arabic exist; put the font file in its rules when a release ships one). It loads only when a language written in that script is on.
+4. A translator gets the key list from `npx tsx apps/web/scripts/i18n-keys.ts --language <id> --out keys.json`: every text by a path that stays, its English, a note where the meaning is ambiguous (`apps/web/src/i18n/context.ts`) and the words the language has so far.
+5. Check the screens: `apps/web/e2e/pseudo-locales.spec.ts` runs the main screens in a text 40% longer and in a mirrored one, with no text cut and no sideways scroll; run the same screens in the new language at 375 and 1440.
+
+Write it in plain words, the way a person outside IT speaks. Open an issue before you start, so two people do not translate the same language.
 
 ## Commit messages
 

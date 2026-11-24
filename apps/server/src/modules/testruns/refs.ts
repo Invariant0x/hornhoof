@@ -10,7 +10,8 @@ const ADVERTISEMENT = 'application/x-git-upload-pack-advertisement';
 const UPLOAD_PREAMBLE = Buffer.from('001e# service=git-upload-pack\n0000');
 const HEADS = 'refs/heads/';
 
-export type RepoAddress = { url: string; token: string };
+/* releaseWorkflow is the path of the repository's release workflow as a person named it in the repository settings, where one did. */
+export type RepoAddress = { url: string; token: string; releaseWorkflow?: string | null };
 /* A branch or tag by name, or the branch of a task. */
 export type CommitWanted = { branch: string } | { task: number };
 /* tag: the name is no branch of the repository but one of its tags, which git clone --branch takes as well. */

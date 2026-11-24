@@ -1,7 +1,5 @@
 ---
 id: dev-gates
-title: { en: "Choose development checks", ru: "Выбирать проверки разработки" }
-description: { en: "Chooses checks from the assignment, task and risk, preserving independent approval before protected integration.", ru: "Выбирает проверки по назначению, задаче и риску, сохраняя независимое одобрение перед слиянием защищенных изменений." }
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/SKILL.md, affaan-m/ECC skills/council-multi-model/SKILL.md, affaan-m/ECC skills/santa-method/SKILL.md]
 ---

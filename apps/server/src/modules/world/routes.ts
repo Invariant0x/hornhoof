@@ -384,10 +384,10 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
       taskDepartmentId = null;
     }
 
-    const title = `Перестроить ${body.buildingLabel}`.slice(0, 120);
-    const brief = `Принять приказ на перестройку "${body.buildingLabel}" с (${body.fromCol}, ${body.fromRow}) на (${body.toCol}, ${body.toRow}) и отчитаться.`.slice(0, 600);
+    const title = `Move ${body.buildingLabel}`.slice(0, 120);
+    const brief = `Accept the order to move "${body.buildingLabel}" from (${body.fromCol}, ${body.fromRow}) to (${body.toCol}, ${body.toRow}) and report.`.slice(0, 600);
     const taskBody = [
-      `God's Word relocation order / Приказ на перестройку здания.`,
+      `God's Word relocation order.`,
       `Building: ${body.buildingLabel} (${body.buildingId}, kind=${body.buildingKind})`,
       `Current tile: (${body.fromCol}, ${body.fromRow})`,
       `Target tile: (${body.toCol}, ${body.toRow})`,

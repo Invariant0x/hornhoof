@@ -1,7 +1,7 @@
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { WorldRelocationStored } from '@hornhoof/protocol/world';
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
-import type { QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
+import { LOCALE_IDS, type QuestionAudience, type QuestionClassificationSnapshot } from '@hornhoof/protocol';
 import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
@@ -321,6 +321,9 @@ export const departments = pgTable('departments', {
   repoTestMemoryGb: integer('repo_test_memory_gb'),
   /* The command that runs the repository's whole test suite. Only a passed run of exactly this one lets GitHub skip its own tests. */
   repoFullTestCommand: text('repo_full_test_command'),
+  /* The path of the repository's release workflow, as a person named it in the repository settings: the workflow whose full run on
+     a commit says the commit may be released. Hornhoof never works it out; none named, no release records. */
+  repoReleaseWorkflow: text('repo_release_workflow'),
   /* The person the CEO named to take the department's approvals and set its policy; none means the CEO. Only the CEO sets it,
      and it is never worked out from who has access. It counts only while that person is active and still has access. */
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
@@ -509,6 +512,9 @@ export const machines = pgTable(
     copyError: text('copy_error', { enum: COPY_ERRORS }),
     copyAt: timestamp('copy_at', { withTimezone: true }),
     copyName: text('copy_name'),
+    /* The first attempt in the current wait for the copy's schema, until that schema loads. */
+    copySchemaSince: timestamp('copy_schema_since', { withTimezone: true }),
+    copySchemaAttempt: integer('copy_schema_attempt'),
     copyOld: integer('copy_old'),
     /* The term under which the old database that waits for its merge led the company; null for one that never led. */
     copyOldLed: bigint('copy_old_led', { mode: 'number' }),
@@ -1029,7 +1035,7 @@ export const telegramChatLanguages = pgTable(
   {
     botId: uuid('bot_id').notNull().references(() => telegramBots.id, { onDelete: 'cascade' }),
     chatId: bigint('chat_id', { mode: 'number' }).notNull(),
-    lang: text('lang', { enum: ['en', 'ru'] }).notNull(),
+    lang: text('lang', { enum: LOCALE_IDS }).notNull(),
   },
   t => [primaryKey({ columns: [t.botId, t.chatId] })],
 );
@@ -1045,7 +1051,7 @@ export const telegramReplies = pgTable(
     chatId: bigint('chat_id', { mode: 'number' }).notNull(),
     afterSeq: bigint('after_seq', { mode: 'number' }).notNull(),
     answered: boolean('answered').notNull().default(false),
-    lang: text('lang', { enum: ['en', 'ru'] }).notNull(),
+    lang: text('lang', { enum: LOCALE_IDS }).notNull(),
     createdAt: createdAt(),
   },
   t => [unique('telegram_replies_job_chat').on(t.botId, t.jobId, t.chatId)],
@@ -1126,9 +1132,11 @@ export const turns = pgTable(
   ],
 );
 
-/* A release of a turn as its holder asked for it before main moved: the exact commit and main under it, the full run on it,
-   the results it brings with the verdicts on them, or for turnkey work the report its holder closed it with after its own
-   review, security check and tests, and who approved it. Only the tag of a release kept here closes a turn. */
+/* A release of a turn as its holder asked for it before main moved: the exact commit and main under it, what the repository's
+   CI said of it (ciState green with the number of its checks, or none where the repository has no CI; a record from before
+   releases relied on CI names a whole run instead), the results it brings with the verdicts on them, or for turnkey work the
+   report its holder closed it with after its own review, security check and tests, and who approved it. Only the tag of a
+   release kept here closes a turn. */
 export type ReleasedTask = { taskId: string; number: number; commit: string; verdicts: string[]; report?: string };
 export const turnReleases = pgTable(
   'turn_releases',
@@ -1139,6 +1147,8 @@ export const turnReleases = pgTable(
     commit: text('commit').notNull(),
     baseCommitSha: text('base_commit_sha').notNull(),
     runId: uuid('run_id').references((): AnyPgColumn => testRuns.id),
+    ciState: text('ci_state'),
+    ciChecks: integer('ci_checks'),
     tasks: jsonb('tasks').$type<ReleasedTask[]>().notNull().default([]),
     /* The release task and, where it relied on approval, the request or the autonomous release log entry. */
     taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
@@ -1154,6 +1164,39 @@ export const turnReleases = pgTable(
     index('turn_releases_turn_id').on(t.turnId),
     check('turn_releases_commit', sql`${t.commit} ~ '^[0-9a-f]{40}$' AND ${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
     check('turn_releases_approved_once', sql`${t.approvalRequestId} IS NULL OR ${t.autonomousReleaseId} IS NULL`),
+    check('turn_releases_ci', sql`(${t.ciState} IS NULL AND ${t.ciChecks} IS NULL) OR (${t.runId} IS NULL AND ((${t.ciState} = 'green' AND ${t.ciChecks} > 0) IS TRUE OR (${t.ciState} = 'none' AND ${t.ciChecks} IS NULL) IS TRUE))`),
+  ],
+);
+
+/* The release workflow Hornhoof started on a commit of a turn branch for the release its holder asked for: one for each
+   commit, so none is started twice. It waits until the repository's CI says of that commit what a release needs; the minute
+   round then records the release (recorded, with its record) or ends it with why it could not (ended). */
+export const CI_DISPATCH_STATES = ['waiting', 'recorded', 'ended'] as const;
+export const ciDispatches = pgTable(
+  'ci_dispatches',
+  {
+    id: id(),
+    companyId: companyId(),
+    turnId: uuid('turn_id').notNull().references(() => turns.id),
+    taskId: uuid('task_id').notNull().references((): AnyPgColumn => tasks.id),
+    agentId: uuid('agent_id').notNull().references((): AnyPgColumn => agents.id),
+    commit: text('commit').notNull(),
+    branch: text('branch').notNull(),
+    workflow: text('workflow').notNull(),
+    runId: bigint('run_id', { mode: 'number' }),
+    state: text('state').notNull().default('waiting'),
+    note: text('note'),
+    releaseId: uuid('release_id').references((): AnyPgColumn => turnReleases.id),
+    createdAt: createdAt(),
+    settledAt: timestamp('settled_at', { withTimezone: true }),
+  },
+  t => [
+    unique('ci_dispatches_company_commit').on(t.companyId, t.commit),
+    index('ci_dispatches_waiting').on(t.createdAt).where(sql`state = 'waiting'`),
+    check('ci_dispatches_commit', sql`${t.commit} ~ '^[0-9a-f]{40}$'`),
+    check('ci_dispatches_state', sql`${t.state} IN ('waiting', 'recorded', 'ended')`),
+    check('ci_dispatches_settled', sql`(${t.state} = 'waiting') = (${t.settledAt} IS NULL)`),
+    check('ci_dispatches_recorded', sql`(${t.state} = 'recorded') = (${t.releaseId} IS NOT NULL)`),
   ],
 );
 
@@ -2456,7 +2499,9 @@ export const computerRuns = pgTable(
 ).enableRLS();
 
 /* Each exact commit Hornhoof let go to main without a card while the CEO had autonomous release on: who asked for it,
-   the full commit SHA, the main SHA it was fast-forward from, the full test run and the independent PASS verdict. */
+   the full commit SHA, the main SHA it was fast-forward from, what the repository's CI said of it (ciState green with the number
+   of its checks, or none for a repository with no CI; an entry from before releases relied on CI names a test run instead)
+   and the independent PASS verdict. */
 export const autonomousReleases = pgTable('autonomous_releases', {
   id: id(),
   companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
@@ -2468,7 +2513,9 @@ export const autonomousReleases = pgTable('autonomous_releases', {
   commitSha: text('commit_sha').notNull(),
   baseCommitSha: text('base_commit_sha').notNull(),
   testRunId: uuid('test_run_id').references(() => testRuns.id, { onDelete: 'set null' }),
-  testRunNumber: integer('test_run_number').notNull(),
+  testRunNumber: integer('test_run_number'),
+  ciState: text('ci_state'),
+  ciChecks: integer('ci_checks'),
   reviewerAgentId: uuid('reviewer_agent_id').references(() => agents.id, { onDelete: 'set null' }),
   reviewerName: text('reviewer_name').notNull(),
   verdictEventId: bigint('verdict_event_id', { mode: 'number' }).references(() => taskEvents.id, { onDelete: 'set null' }),
@@ -2479,6 +2526,7 @@ export const autonomousReleases = pgTable('autonomous_releases', {
   index('autonomous_releases_company_commit').on(t.companyId, t.commitSha),
   check('autonomous_releases_commit_sha', sql`${t.commitSha} ~ '^[0-9a-f]{40}$'`),
   check('autonomous_releases_base_commit_sha', sql`${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
+  check('autonomous_releases_proof', sql`(${t.testRunNumber} IS NOT NULL AND ${t.ciState} IS NULL AND ${t.ciChecks} IS NULL) OR (${t.testRunNumber} IS NULL AND ((${t.ciState} = 'green' AND ${t.ciChecks} > 0) IS TRUE OR (${t.ciState} = 'none' AND ${t.ciChecks} IS NULL) IS TRUE))`),
 ]);
 
 /* The company's vault of site sign-ins. A person types them into Hornhoof's form, or gives them to an agent that saves

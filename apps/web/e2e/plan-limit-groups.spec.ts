@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { DICTIONARIES, LANGUAGES, type Language } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage } from '../src/i18n';
+import { DICTIONARIES } from '../src/i18n/dictionaries';
 import { BUILTIN_SKINS, type BuiltinSkinId } from '../src/skins/registry';
 import type { Limits, SubView } from '../src/types';
 import { SUB } from './agent-window-api';
@@ -11,7 +12,7 @@ import { serveApi } from './api';
    its Gemini models have most of theirs, so the card shows each group under its own name with what it used and when it
    resets, and the plan is ready. Made-up numbers; every answer of the server is the test's own. */
 
-type Look = { lang: Language; skin: BuiltinSkinId; width: number; dir?: 'rtl' };
+type Look = { lang: ShippedLanguage; skin: BuiltinSkinId; width: number; dir?: 'rtl' };
 const lookName = ({ lang, skin, width, dir }: Look) => `${lang}, ${skin}, ${width}px${dir ? ', RTL' : ''}`;
 
 const HOUR = 3_600_000;

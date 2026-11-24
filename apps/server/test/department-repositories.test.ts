@@ -22,7 +22,7 @@ describe('another repository of a department', () => {
     expect(res.statusCode).toBe(201);
     expect(res.body).not.toContain('ghp_mobile1111');
     const { product } = res.json();
-    expect(product).toEqual({ id: expect.any(String), name: 'mobile-app', repository: { url: 'https://github.com/acme/mobile-app.git', branch: 'main', tokenLast4: '1111', author, testMemoryGb: 4, fullTestCommand: null } });
+    expect(product).toEqual({ id: expect.any(String), name: 'mobile-app', repository: { url: 'https://github.com/acme/mobile-app.git', branch: 'main', tokenLast4: '1111', author, testMemoryGb: 4, fullTestCommand: null, releaseWorkflow: null } });
     const [row] = await c.db.select().from(departments).where(eq(departments.id, product.id));
     expect(row).toMatchObject({ companyId: c.companyId, parentId: c.dev.id, roleCode: 'DEV', repoUrl: 'https://github.com/acme/mobile-app.git', repoBranch: 'main' });
     expect(row!.repoTokenEnc).not.toContain('ghp_mobile1111');

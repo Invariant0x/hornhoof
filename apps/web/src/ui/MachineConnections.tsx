@@ -4,6 +4,7 @@ import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import type { ConnectionHistory, MachineDrop } from '../types';
 import { dropFacts, lengthOf, sawOf } from './connection-details';
 import { everyVisible } from '../guard';
+import { formatTagOf } from '@hornhoof/protocol';
 
 /* A history kept for days changes little: half a minute, and at once when the machine goes or comes. */
 const REFRESH_MS = 30_000;
@@ -50,7 +51,7 @@ function technicalOf(t: Messages, event: MachineDrop): string[] {
 function Drop({ event, technical }: { event: MachineDrop; technical: boolean }) {
   const t = useT();
   const { language } = useLanguage();
-  const when = new Date(event.at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+  const when = new Date(event.at).toLocaleString(formatTagOf(language), { dateStyle: 'medium', timeStyle: 'short' });
   const lines = technical ? technicalOf(t, event) : [];
   return (
     <li className={event.offlineMs === null ? 'away' : undefined}>

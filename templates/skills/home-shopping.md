@@ -1,7 +1,5 @@
 ---
 id: home-shopping
-title: { en: "Shopping lists and supplies", ru: "Списки покупок и запасы" }
-description: { en: "Keeps the shopping list and home supplies, and drafts orders for a person to place.", ru: "Ведет список покупок и домашние запасы и готовит заказы, которые человек оформляет сам." }
 kind: procedure
 ---
 1. **Keep the list**: add what the family asks for and what is running low, group by where it is bought, and remove what was got. Making and sorting lists needs no approval.

@@ -1,7 +1,5 @@
 ---
 id: orch-trouble
-title: { en: "When work goes wrong", ru: "Когда работа идет не так" }
-description: { en: "Finds why work stalled, failed or came back, including external service failures, by looking first, the database included, then decides and fixes the cause itself.", ru: "Находит, почему работа встала, сломалась или вернулась, включая внешние сбои: сначала смотрит сам, в том числе в базу данных, потом решает и устраняет причину." }
 kind: procedure
 sources: [obra/superpowers skills/systematic-debugging/SKILL.md]
 ---

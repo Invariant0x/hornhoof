@@ -4,6 +4,7 @@ import { errorText, useLanguage, useT } from '../i18n';
 import { Field } from './Field';
 import { NOT_A_LOGIN, SecretInput } from './SecretInput';
 import { TickBox } from './TickBox';
+import { formatTagOf } from '@hornhoof/protocol';
 
 /* The company's saved site sign-ins: any person adds, changes and removes one, and every employee and assistant of the
    company takes it to sign in. The password and the code secret are typed here and never shown again. */
@@ -34,7 +35,7 @@ const ORDER: FieldName[] = ['name', 'site', 'login', 'password', 'code'];
 
 function useWhen() {
   const { language } = useLanguage();
-  return (iso: string) => new Date(iso).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
+  return (iso: string) => new Date(iso).toLocaleString(formatTagOf(language), { dateStyle: 'short', timeStyle: 'short' });
 }
 
 /* The form of one entry: a new one, or the change of one, where an empty password or code keeps the stored one. */

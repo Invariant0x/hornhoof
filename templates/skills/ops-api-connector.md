@@ -1,7 +1,5 @@
 ---
 id: ops-api-connector
-title: { en: "Build a connector", ru: "Создание подключения" }
-description: { en: "Connects an outside service through its API or an MCP server, with the smallest access and a smoke test.", ru: "Подключает внешний сервис через его API или MCP-сервер с минимальным доступом и проверочным тестом." }
 kind: procedure
 sources: [affaan-m/ECC skills/api-connector-builder/SKILL.md, anthropics/skills skills/mcp-builder/SKILL.md, affaan-m/ECC skills/canary-watch/SKILL.md]
 ---

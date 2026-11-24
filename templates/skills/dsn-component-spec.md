@@ -1,7 +1,5 @@
 ---
 id: dsn-component-spec
-title: { en: "Component specification", ru: "Спецификация компонента" }
-description: { en: "Writes the full description of a shared component: its parts, variants, states and rules of use.", ru: "Полностью описывает общий компонент: части, варианты, состояния и правила использования." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins design/skills/design-system/SKILL.md, wshobson/agents plugins/ui-design/skills/design-system-patterns/SKILL.md]
 ---

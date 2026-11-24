@@ -1,5 +1,10 @@
 name: Images
 
+# A run by hand with full set runs every test: no status that says tests passed spares it, and no earlier commit narrows it.
+# Hornhoof starts it so for a release, and its title then ends with (full run), by which it counts for the release. A push, a
+# pull request or a run by hand without full may run only the tests a change reached, and proves less.
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('{0}{1}', github.workflow, inputs.full && ' (full run)' || '') || '' }}
+
 on:
   push:
     branches: [main]
@@ -21,6 +26,11 @@ on:
   # hand builds the images of any branch under the tag of its commit alone and moves nothing.
   pull_request:
   workflow_dispatch:
+    inputs:
+      full:
+        description: Run every test, whatever a mark says, narrowed by no earlier commit. Hornhoof sets it when it starts this workflow for a release.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -49,6 +59,8 @@ jobs:
     permissions:
       contents: read
       statuses: read
+    env:
+      FULL_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.full }}
     outputs:
       proved: ${{ steps.mark.outputs.proved }}
       parts: ${{ steps.select.outputs.parts }}

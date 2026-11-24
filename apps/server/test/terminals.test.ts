@@ -494,7 +494,7 @@ describe('a turn a person typed into the terminal', () => {
     const message = (await events(app, ceo)).find((e: { kind: string; jobId: string | null }) => e.kind === 'message' && e.jobId === opened.jobId);
     expect(message).toMatchObject({
       jobId: opened.jobId, data: { text: 'what do we sell' }, person: { name: 'Ivan' },
-      message: { direction: 'in', from: { kind: 'person', name: 'Ivan', role: { en: 'CEO', ru: 'CEO' } }, to: { kind: 'agent', id: orchestratorId } },
+      message: { direction: 'in', from: { kind: 'person', name: 'Ivan', role: { en: 'CEO' } }, to: { kind: 'agent', id: orchestratorId } },
     });
     /* The CEO typed it, so the tools only the CEO may ask for work in it. */
     expect((await app.ctx.db.select({ answersCeo: jobs.answersCeo, prompt: jobs.prompt }).from(jobs).where(eq(jobs.id, opened.jobId!)))[0]).toEqual({ answersCeo: true, prompt: 'what do we sell' });

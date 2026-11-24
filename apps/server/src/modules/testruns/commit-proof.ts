@@ -7,7 +7,7 @@ import { runScope, scopeWords, type RunScope, type ScopeSource } from './purpose
 
 type TaskPlace = Pick<typeof tasks.$inferSelect, 'id' | 'companyId' | 'turnId' | 'departmentId'>;
 
-/* What test runs say of one exact commit. run: the newest passed run on it that left no suite out, a whole run of its release, else
+/* What test runs say of one exact commit. run: the newest passed run on it that left no suite out, a whole run of the product, else
    the newest that passed on it, on any task of the company, as the final check of a turn is rarely the task that asks; scope: what that run
    left out, for a run of the product's environment; failedRun: the newest that failed on it, which whoever decides hears of all
    the same; other: when none passed on it, the newest that passed on another commit of this work, and proves nothing here. */
@@ -39,7 +39,7 @@ async function newestFailed(db: Db, companyId: string, commit: string) {
   return run ?? null;
 }
 
-/* A whole run of the release proves the commit, whatever narrower run passed after it. */
+/* A whole run of the product proves the commit most, whatever narrower run passed after it. */
 async function bestPassed(db: Db, companyId: string, commit: string): Promise<(Passed & { scope: RunScope | null }) | null> {
   const runs = await db
     .select(PASSED)
@@ -77,11 +77,15 @@ export async function commitProof(db: Db, task: TaskPlace, commit: string): Prom
   return { commit, run: passed?.number ?? null, command: passed ? commandShown(passed.command) : null, scope: passed?.scope ?? null, failedRun: failed?.number ?? null, other: passed ? null : await passedElsewhere(db, task) };
 }
 
-/* The same in a sentence, for whoever asks for an approval, gives it, or releases on it. */
-export function proofLine(p: CommitProof): string {
+/* The same in a sentence, for whoever asks for an approval, gives it, or releases on it. ci is what the repository's CI says of
+   the commit, where it was asked. Where it says green, red, under way or nothing succeeded, it is the whole sentence, as it is
+   what checks a release and no test run is named beside it; where there is no CI or it could not be read, the test runs that
+   checked the commit are said before it. */
+export function proofLine(p: CommitProof, ci?: { line: string; decisive: boolean }): string {
   const ran = p.scope ? `Test run ${p.run} passed on this commit with profile ${p.scope.profile}${scopeWords(p.scope)}` : `Test run ${p.run} (${p.command}) passed on this commit.`;
   const said = p.run !== null ? ran : 'No passed test run checked this commit.';
   const failed = p.failedRun !== null ? ` Test run ${p.failedRun} failed on it.` : '';
   const other = p.other ? ` Test run ${p.other.run} passed on ${p.other.commitSha}, which proves nothing about this one.` : '';
-  return `${said}${failed}${other}`;
+  if (ci?.decisive) return ci.line;
+  return `${said}${failed}${other}${ci ? ` ${ci.line}` : ''}`;
 }

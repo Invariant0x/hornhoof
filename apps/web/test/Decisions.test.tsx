@@ -3,9 +3,11 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import { People } from '../src/screens/People';
 import type { AccessInput, AccessView, Me, PersonView, StructureItem, WaitingRequest } from '../src/types';
-import { Requests } from '../src/ui/Requests';
+import { Requests, whoAsked } from '../src/ui/Requests';
 import { StaffCard } from '../src/ui/StaffCard';
 import { StructureCard } from '../src/ui/StructureCard';
 import { ME, mockApi, ORG_WITH_TEAMS, PEOPLE, REQUESTS, ROSTER, WHOLE } from './api-mock';
@@ -58,6 +60,50 @@ describe('a decision for someone who may not take it', () => {
     inRussian(<Requests requests={[question, approval]} {...shared} />);
     expect(screen.getByText('Принимают люди отдела Development, CEO или его заместитель.')).toBeInTheDocument();
     expect(screen.getByText('Принимает CEO или его заместитель.')).toBeInTheDocument();
+  });
+
+  it('uses neutral headings without "asks you" / "просит вас" when the viewer cannot answer', () => {
+    const policy: WaitingRequest = { ...approval, id: 'r4', commit: null };
+    const { unmount } = render(<Requests requests={[question, approval, policy, choice]} {...shared} />);
+    const [q, a, p, c] = screen.getAllByRole('article');
+    expect(q!.querySelector('header')).toHaveTextContent('Dana asks');
+    expect(a!.querySelector('header')).toHaveTextContent('Dana asks for commit approval');
+    expect(p!.querySelector('header')).toHaveTextContent('Dana asks for approval');
+    expect(c!.querySelector('header')).toHaveTextContent('Dana asks for a choice');
+    for (const card of [q, a, p, c]) expect(card!.querySelector('header')).not.toHaveTextContent(/\basks you\b/i);
+    unmount();
+
+    inRussian(<Requests requests={[question, approval, policy, choice]} {...shared} />);
+    const [rq, ra, rp, rc] = screen.getAllByRole('article');
+    expect(rq!.querySelector('header')).toHaveTextContent('Dana спрашивает');
+    expect(ra!.querySelector('header')).toHaveTextContent('Dana просит одобрить коммит');
+    expect(rp!.querySelector('header')).toHaveTextContent('Dana просит одобрить');
+    expect(rc!.querySelector('header')).toHaveTextContent('Dana просит выбрать');
+    for (const card of [rq, ra, rp, rc]) expect(card!.querySelector('header')).not.toHaveTextContent(/просит вас/i);
+  });
+
+  it('addresses the viewer directly only when canAnswer is true and ownerPersonId matches viewerId', () => {
+    const policy: WaitingRequest = { ...approval, id: 'r4', commit: null, ownerPersonId: 'p2', canAnswer: true };
+    const commit: WaitingRequest = { ...approval, ownerPersonId: 'p2', canAnswer: true };
+    const pick: WaitingRequest = { ...choice, ownerPersonId: 'p2', canAnswer: true };
+    const ask: WaitingRequest = { ...question, ownerPersonId: 'p2', canAnswer: true };
+    const stuck: WaitingRequest = { ...question, id: 'r5', kind: 'stuck', ownerPersonId: 'p2', canAnswer: true };
+
+    /* Another person's actionable cards use neutral phrasing when viewerId differs. */
+    expect(whoAsked(en, pick, 'p1')).toBe('Dana asks for a choice');
+    expect(whoAsked(en, commit, 'p1')).toBe('Dana asks for commit approval');
+    expect(whoAsked(en, policy, 'p1')).toBe('Dana asks for approval');
+    expect(whoAsked(en, ask, 'p1')).toBe('Dana asks');
+    expect(whoAsked(en, stuck, 'p1')).toBe('Dana is stuck');
+    expect(whoAsked(ru, policy, 'p1')).toBe('Dana просит одобрить');
+    expect(whoAsked(ru, stuck, 'p1')).toBe('Dana застрял');
+
+    /* The viewer's own actionable cards keep direct phrasing. */
+    expect(whoAsked(en, pick, 'p2')).toBe('Dana asks you to pick one');
+    expect(whoAsked(en, commit, 'p2')).toBe('Dana asks you to approve a commit');
+    expect(whoAsked(en, policy, 'p2')).toBe('Dana asks you to approve this');
+    expect(whoAsked(en, ask, 'p2')).toBe('Dana asks');
+    expect(whoAsked(ru, policy, 'p2')).toBe('Dana просит вас это одобрить');
   });
 
   it('shows the proposal cards without their buttons', async () => {

@@ -1,7 +1,5 @@
 ---
 id: fin-saas-metrics
-title: { en: "SaaS metrics", ru: "Метрики SaaS" }
-description: { en: "Computes recurring revenue, churn, acquisition cost and lifetime value the same way every month.", ru: "Каждый месяц одинаково считает регулярную выручку, отток, стоимость привлечения и ценность клиента." }
 kind: procedure
 sources: [alirezarezvani/claude-skills finance/skills/saas-metrics-coach/SKILL.md, wshobson/agents plugins/startup-business-analyst]
 ---
