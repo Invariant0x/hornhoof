@@ -314,6 +314,8 @@ export function WorldMapView({
       constructionRef.current = constructionSim;
 
       void IsometricWorldEngine.create({
+        /* The product map lowers its quality by the frame time it measures (#1947 item 6). */
+        quality: 'auto',
         host,
         pack,
         terrainMap: map,

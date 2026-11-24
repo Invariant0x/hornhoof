@@ -21,6 +21,7 @@ import { DisplayRunPool, WorldArtLibrary, type WorldArtStats } from './art-runti
 import { residentStandsStill, residentWalkSpeed } from './art';
 import { bakeChunkCanvas, buildTileLookup, type BakedChunk } from './chunk-baker';
 import { buildChunkGrid, ChunkLruCache, cullVisibleChunks, type ChunkCoord, type ChunkGrid } from './chunks';
+import { FrameQuality, QUALITY_STEPS, type QualityStep } from './frame-quality';
 import {
   mapWorldBounds,
   pickAtScreen,
@@ -89,6 +90,8 @@ export type WorldEngineStats = Readonly<{
   /* Frames stepped since the map started, and whether it is parked behind another tab (#1947 item 3). */
   framesDrawn: number;
   paused: boolean;
+  /* The quality step drawn at, and whether it follows the frame time (#1947 item 6). */
+  quality: QualityStep & { level: number; auto: boolean };
   fps: number;
   frameTimeMs: number;
   cpuStepMs: number;
@@ -139,6 +142,9 @@ export type WorldEngineOptions = Readonly<{
   onSelect?: (pick: PickResult | null) => void;
   onSelectResident?: (resident: ResidentEntity | null) => void;
   onHover?: (tile: TileCoord | null) => void;
+  /* 'auto': the quality steps by the frame time measured (#1947 item 6); a number holds that step of QUALITY_STEPS.
+     The product map is auto; the viewer pages hold full quality, so what they show and measure stays the same. */
+  quality?: 'auto' | number;
 }>;
 
 type CachedChunkEntry = {
@@ -281,6 +287,12 @@ export class IsometricWorldEngine {
   /* The pieces around the view, worked out again when the view's pieces or the detail change (item 4). */
   private aheadPlan: AheadPlan | null = null;
   private aheadSlice = 0;
+  /* The quality step (#1947 item 6): followed by frame time when auto, held otherwise. */
+  private readonly frameQuality: FrameQuality | null;
+  private qualityLevel: number;
+  private qualityStep: QualityStep;
+  private frozenWind: number | null = null;
+  private lastScreenBakeAt = -Infinity;
   private lowDetailCount = 0;
   /* Where the camera stood at the last scene sync and how fast it moved since, in world px per ms (item 4). */
   private lastSyncCamera: { x: number; y: number; at: number } | null = null;
@@ -348,6 +360,10 @@ export class IsometricWorldEngine {
       ? tileCenterToWorld(options.initialCenterTile.col, options.initialCenterTile.row, this.tileW, this.tileH)
       : { x: initial.x, y: initial.y };
     this.markerTile = options.markerTile ?? null;
+    const quality = options.quality ?? 0;
+    this.frameQuality = quality === 'auto' ? new FrameQuality() : null;
+    this.qualityLevel = quality === 'auto' ? 0 : clamp(Math.round(quality), 0, QUALITY_STEPS.length - 1);
+    this.qualityStep = QUALITY_STEPS[this.qualityLevel]!;
     this.camera = {
       x: clamp(startCenter.x, this.bounds.minX, this.bounds.maxX),
       y: clamp(startCenter.y, this.bounds.minY, this.bounds.maxY),
@@ -528,6 +544,7 @@ export class IsometricWorldEngine {
       this.mountFallbackCanvas();
     }
 
+    if (this.qualityLevel !== 0) this.applyQuality(this.qualityLevel);
     this.attachEvents();
     this.lastFrameTs = performance.now();
     this.stepFrame(this.lastFrameTs);
@@ -739,7 +756,7 @@ export class IsometricWorldEngine {
       zoom: clamp(this.camera.zoom, this.zoomBounds.minZoom, this.zoomBounds.maxZoom),
     };
     if (this.app) {
-      this.app.renderer.resize(next.width, next.height);
+      this.app.renderer.resize(next.width, next.height, this.dpr * this.qualityStep.resolution);
     } else if (this.fallbackCanvas) {
       this.fallbackCanvas.width = Math.round(next.width * this.dpr);
       this.fallbackCanvas.height = Math.round(next.height * this.dpr);
@@ -1157,6 +1174,7 @@ export class IsometricWorldEngine {
     /* The pieces around the view too, so the first pan after the screen finds them baked (item 4). */
     const visible = [...inView, ...this.chunksAhead(rect, inView)];
     const deadline = performance.now() + budgetMs;
+    this.lastScreenBakeAt = performance.now();
     let done = 0;
     let bakedNow = 0;
     for (const chunk of visible) {
@@ -1220,6 +1238,7 @@ export class IsometricWorldEngine {
     this.cityDirty = true;
     this.dirtyScene = true;
     this.lastFrameTs = performance.now();
+    this.frameQuality?.restart(this.lastFrameTs);
     this.rafId = requestAnimationFrame(this.onAnimationFrame);
   }
 
@@ -1228,6 +1247,7 @@ export class IsometricWorldEngine {
     return {
       framesDrawn: this.framesDrawn,
       paused: this.paused,
+      quality: { ...this.qualityStep, level: this.qualityLevel, auto: this.frameQuality !== null },
       fps: Math.round(this.lastFps),
       frameTimeMs: Math.round(this.lastFrameMs * 10) / 10,
       cpuStepMs: Math.round(this.lastCpuStepMs * 100) / 100,
@@ -1346,8 +1366,14 @@ export class IsometricWorldEngine {
   private stepFrame(ts: number): void {
     this.framesDrawn++;
     const stepStart = performance.now();
-    const dtMs = Math.max(1, Math.min(100, ts - this.lastFrameTs || 16.67));
+    const frameMs = ts - this.lastFrameTs;
+    const dtMs = Math.max(1, Math.min(100, frameMs || 16.67));
     this.lastFrameTs = ts;
+    if (this.frameQuality) {
+      /* The frames of the loading screen's baking measure the baking, not the drawing. */
+      if (ts - this.lastScreenBakeAt < 500) this.frameQuality.restart(ts);
+      else if (this.frameQuality.frame(frameMs, ts) !== this.qualityLevel) this.applyQuality(this.frameQuality.level);
+    }
     this.lastFrameMs = dtMs;
     this.fpsSamples.push(1000 / dtMs);
     if (this.fpsSamples.length > 30) this.fpsSamples.shift();
@@ -1369,10 +1395,10 @@ export class IsometricWorldEngine {
 
     /* Smoothly animate the dedicated liquid layer independently from baked ground chunks. */
     let liquidAnimated = false;
-    if (this.terrainMap && this.pack.liquidLayer) {
+    if (this.terrainMap && this.pack.liquidLayer && this.qualityStep.animation !== 'still') {
       liquidAnimated = true;
       const dtSec = dtMs / 1000;
-      const animDetail = animationDetailForZoom(this.camera.zoom);
+      const animDetail = this.qualityStep.animation === 'full' ? animationDetailForZoom(this.camera.zoom) : 'reduced';
       const speedScale = animDetail === 'reduced' ? 0.55 : 1.0;
       if (this.windClockSec !== null) {
         /* A fixed clock moves the water by the clock, not by how long the frames took. */
@@ -1435,10 +1461,14 @@ export class IsometricWorldEngine {
     /* Plants sway in the wind, so a map with plants redraws every frame. */
     let plantsAnimated = false;
     if (this.plantRenderer) {
-      plantsAnimated = true;
+      /* At the 'still' step the plants stand in the wind of the moment it began, laid out again only as the view moves. */
+      const still = this.qualityStep.animation === 'still';
+      plantsAnimated = !still;
       if (this.app) {
-        this.plantRenderer.update(visibleWorldRect(this.camera, this.viewport, this.tileW), this.windTime());
-      } else {
+        if (!still || this.dirtyScene || this.pendingBakeCount > 0) {
+          this.plantRenderer.update(visibleWorldRect(this.camera, this.viewport, this.tileW), this.frozenWind ?? this.windTime());
+        }
+      } else if (!still) {
         this.dirtyScene = true;
       }
     }
@@ -1448,7 +1478,7 @@ export class IsometricWorldEngine {
       this.syncScene(BAKE_BUDGET_MS);
     }
     /* Awnings and cloth of the buildings in view move with the wind, after the city pass that placed them. */
-    const swayAnimated = Boolean(this.app) && this.swayingLayers.length > 0;
+    const swayAnimated = Boolean(this.app) && this.swayingLayers.length > 0 && this.qualityStep.animation === 'full';
     if (swayAnimated) swayCloths(this.swayingLayers, this.windTime());
     if (
       this.app &&
@@ -2058,6 +2088,18 @@ export class IsometricWorldEngine {
       );
     }
     ctx.restore();
+  }
+
+  /* Draws at a quality step from now on: render resolution, plant density and animation (#1947 item 6). */
+  private applyQuality(level: number): void {
+    this.qualityLevel = level;
+    this.qualityStep = QUALITY_STEPS[level]!;
+    this.plantRenderer?.setDensity(this.qualityStep.plants);
+    this.frozenWind = this.qualityStep.animation === 'still' ? this.windTime() : null;
+    if (this.liquidSpriteB && this.qualityStep.animation !== 'full') this.liquidSpriteB.visible = false;
+    if (this.app) this.app.renderer.resize(this.viewport.width, this.viewport.height, this.dpr * this.qualityStep.resolution);
+    this.dirtyScene = true;
+    this.emitStats(true);
   }
 
   private emitStats(force: boolean): void {
