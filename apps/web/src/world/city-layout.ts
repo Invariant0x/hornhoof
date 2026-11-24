@@ -93,6 +93,9 @@ export type RoadTile = {
   grandAvenue: boolean;
   /* Set on the tiles of an avenue, whose tier is 'avenue'. */
   avenue?: AvenueLine;
+  /* Set on an avenue's lane tile laid on open land, where no street was: a route of the residents' trips takes it only
+     where no other street leads, so laying lanes never moves a route (road-traffic.ts). */
+  lane?: boolean;
 };
 
 export type RelocationStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';

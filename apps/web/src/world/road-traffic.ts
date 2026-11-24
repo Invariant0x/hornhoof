@@ -26,8 +26,8 @@ import type { GeneratedWorldMap } from './terrain-engine';
 export type Trip = Readonly<{ from: TileCoord; to: TileCoord; walks: number }>;
 
 /* A straight stretch of at least AVENUE_RUN tiles, each this busy, widens into the avenue. */
-export const AVENUE_TRAFFIC = 200;
-export const AVENUE_RUN = 4;
+export const AVENUE_TRAFFIC = 400;
+export const AVENUE_RUN = 5;
 
 /* The search order of the four steps, fixed so the same streets always give the same route. */
 const STEPS = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
@@ -85,8 +85,9 @@ export function recordTrips(city: CityState, snapshot: Pick<WorldLiveSnapshot, '
   ];
 }
 
-/* Every road tile reached from a door, with the tile it was reached from: a breadth-first search in STEPS order. */
-function routesFrom(city: CityState, from: TileCoord): ReadonlyMap<string, string | null> {
+/* Every road tile reached from a door over the roads `over` lets through, with the tile it was reached from: a
+   breadth-first search in STEPS order. */
+function routesFrom(city: CityState, from: TileCoord, over: (road: RoadTile) => boolean): ReadonlyMap<string, string | null> {
   const start = tileKey(from.col, from.row);
   const parent = new Map<string, string | null>();
   if (!city.roads.has(start)) return parent;
@@ -96,7 +97,8 @@ function routesFrom(city: CityState, from: TileCoord): ReadonlyMap<string, strin
     const road = city.roads.get(queue[i]!)!;
     for (const [dc, dr] of STEPS) {
       const k = tileKey(road.col + dc, road.row + dr);
-      if (parent.has(k) || !city.roads.has(k)) continue;
+      const next = city.roads.get(k);
+      if (parent.has(k) || !next || !over(next)) continue;
       parent.set(k, queue[i]!);
       queue.push(k);
     }
@@ -104,17 +106,29 @@ function routesFrom(city: CityState, from: TileCoord): ReadonlyMap<string, strin
   return parent;
 }
 
+/* The searches from one door: over the streets as they were before any lane was laid, and over the lanes too. */
+type Searches = { streets: ReadonlyMap<string, string | null>; withLanes?: ReadonlyMap<string, string | null> };
+
+/* The search that reaches a goal from a door: over the streets alone, so a lane laid since never moves a route, and
+   over the lanes too only for a goal the streets alone do not reach. */
+function searchReaching(city: CityState, searched: Map<string, Searches>, from: TileCoord, goal: string): ReadonlyMap<string, string | null> | null {
+  const fromKey = tileKey(from.col, from.row);
+  const s = searched.get(fromKey) ?? { streets: routesFrom(city, from, road => !road.lane) };
+  searched.set(fromKey, s);
+  if (s.streets.has(goal)) return s.streets;
+  s.withLanes ??= routesFrom(city, from, () => true);
+  return s.withLanes.has(goal) ? s.withLanes : null;
+}
+
 /* How many trips pass over each road tile, by tile key: every trip over the shortest road route between its doors.
    A trip whose doors no road joins passes over nothing. */
 export function movementTraffic(city: CityState, trips: readonly Trip[]): Map<string, number> {
   const traffic = new Map<string, number>();
-  const searched = new Map<string, ReadonlyMap<string, string | null>>();
+  const searched = new Map<string, Searches>();
   for (const trip of trips) {
-    const fromKey = tileKey(trip.from.col, trip.from.row);
-    const parent = searched.get(fromKey) ?? routesFrom(city, trip.from);
-    searched.set(fromKey, parent);
     const goal = tileKey(trip.to.col, trip.to.row);
-    if (!parent.has(goal)) continue;
+    const parent = searchReaching(city, searched, trip.from, goal);
+    if (!parent) continue;
     for (let k: string | null = goal; k !== null; k = parent.get(k) ?? null) traffic.set(k, (traffic.get(k) ?? 0) + trip.walks);
   }
   return traffic;
@@ -150,29 +164,37 @@ function laneOpen(city: CityState, map: GeneratedWorldMap, col: number, row: num
   return !road.bridge && !road.grandAvenue && road.tier !== 'avenue';
 }
 
-type Lane = Readonly<{ from: number; to: number; side: -1 | 1 }>;
+type Part = Readonly<{ from: number; to: number }>;
 
-/* The longest part of a stretch, at least AVENUE_RUN tiles, whose lane on one side is open all along it: the +1 side
-   first, so the choice is the same every time. */
-function laneBeside(city: CityState, map: GeneratedWorldMap, run: readonly RoadTile[], axis: AvenueLine['axis']): Lane | null {
-  let best: Lane | null = null;
-  for (const side of [1, -1] as const) {
-    const [dc, dr] = axis === 'u' ? [0, side] : [side, 0];
-    let from = 0;
-    for (let i = 0; i <= run.length; i++) {
-      if (i < run.length && laneOpen(city, map, run[i]!.col + dc, run[i]!.row + dr)) continue;
-      if (i - from >= AVENUE_RUN && (!best || i - from > best.to - best.from + 1)) best = { from, to: i - 1, side };
-      from = i + 1;
-    }
+/* The parts of a stretch, each at least AVENUE_RUN tiles and not an avenue yet, whose lane on one side is open all
+   along them. */
+function openParts(city: CityState, map: GeneratedWorldMap, run: readonly RoadTile[], axis: AvenueLine['axis'], side: -1 | 1): Part[] {
+  const [dc, dr] = axis === 'u' ? [0, side] : [side, 0];
+  const parts: Part[] = [];
+  let from = 0;
+  for (let i = 0; i <= run.length; i++) {
+    if (i < run.length && run[i]!.tier !== 'avenue' && laneOpen(city, map, run[i]!.col + dc, run[i]!.row + dr)) continue;
+    if (i - from >= AVENUE_RUN) parts.push({ from, to: i - 1 });
+    from = i + 1;
   }
-  return best;
+  return parts;
+}
+
+/* Widens every part of a busy stretch that has an open lane: onto the +1 side first, then onto the -1 side where it
+   is still a street, so the same stretch always widens the same way and a second look finds nothing more. */
+function widenStretch(city: CityState, map: GeneratedWorldMap, run: readonly RoadTile[], axis: AvenueLine['axis']): void {
+  for (const side of [1, -1] as const) {
+    for (const part of openParts(city, map, run, axis, side)) layAvenue(city, map, run.slice(part.from, part.to + 1), axis, side);
+  }
 }
 
 /* Makes a stretch and its lane an avenue. */
 function layAvenue(city: CityState, map: GeneratedWorldMap, run: readonly RoadTile[], axis: AvenueLine['axis'], side: -1 | 1): void {
   const [dc, dr] = axis === 'u' ? [0, side] : [side, 0];
   for (const road of run) {
-    const lane = city.roads.get(tileKey(road.col + dc, road.row + dr)) ?? setRoadTile(city, map, road.col + dc, road.row + dr, { trafficDelta: 0 });
+    const street = city.roads.get(tileKey(road.col + dc, road.row + dr));
+    const lane = street ?? setRoadTile(city, map, road.col + dc, road.row + dr, { trafficDelta: 0 });
+    if (!street) lane.lane = true;
     road.tier = 'avenue';
     road.avenue = { axis, side };
     lane.tier = 'avenue';
@@ -189,8 +211,7 @@ function widenBusyStretches(city: CityState, map: GeneratedWorldMap, movement: R
       if (!widens(city, movement, t.col, t.row) || widens(city, movement, t.col - dc, t.row - dr)) continue;
       const run: RoadTile[] = [];
       for (let i = 0; widens(city, movement, t.col + dc * i, t.row + dr * i); i++) run.push(city.roads.get(tileKey(t.col + dc * i, t.row + dr * i))!);
-      const lane = run.length >= AVENUE_RUN ? laneBeside(city, map, run, axis) : null;
-      if (lane) layAvenue(city, map, run.slice(lane.from, lane.to + 1), axis, lane.side);
+      widenStretch(city, map, run, axis);
     }
   }
 }
