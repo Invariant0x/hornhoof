@@ -145,6 +145,9 @@ export async function themeFileBytes(files: Pick<Files, 'bytes'>, db: Reader, sh
     return kept;
   }
   const bytes = await files.bytes(db, sha256);
+  /* Another viewer that asked for it meanwhile may have kept it already: it is counted once. */
+  const raced = opened.get(sha256);
+  if (raced) return raced;
   if (bytes.length > OPENED_FILE_BYTES) return bytes;
   opened.set(sha256, bytes);
   openedBytes += bytes.length;
