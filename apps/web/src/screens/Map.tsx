@@ -694,6 +694,8 @@ type Props = {
   onOpenTab?(tab: 'subscriptions' | 'machines'): void;
   onHire?(dept: Department): void;
   onHome?: () => void;
+  /* Behind another tab: a world stays mounted, hidden and paused (#1947 item 3); nothing else of the map shows. */
+  parked?: boolean;
 };
 
 /* inside: a department's view is open over the map, which stays flown into it until the view closes. */
@@ -714,6 +716,7 @@ export function MapScreen({
   onOpenTab,
   onHire,
   onHome,
+  parked = false,
 }: Props) {
   useRenderGuard('map');
   const world = useWorld();
@@ -928,13 +931,15 @@ export function MapScreen({
   }
 
   const standIn = mapStandIn(t, failure, mapLoad, onHome);
-  if (standIn || !org || !arr) return standIn ?? <div className="map" aria-busy="true"><MapVersion /></div>;
+  if (parked && world === 'standard') return null;
+  if (standIn || !org || !arr) return parked ? null : (standIn ?? <div className="map" aria-busy="true"><MapVersion /></div>);
 
   if (world !== 'standard') {
     return (
-      <Suspense fallback={<div className="map" aria-busy="true"><MapVersion /></div>}>
+      <Suspense fallback={parked ? null : <div className="map" aria-busy="true"><MapVersion /></div>}>
         <WorldMapScreen
           world={world}
+          parked={parked}
           me={me}
           org={org}
           inside={inside}

@@ -16,13 +16,13 @@ import {
 import { SPACE_TERRAIN_RECIPE, SPACE_TILE_KINDS } from './recipe';
 
 const SPACE_ROLE_LOOKS: Readonly<Record<string, PackRoleLookSpec>> = {
-  ruler: { id: 'space-admiral', label: { en: 'Fleet Admiral', ru: 'Адмирал флота' }, tunicColor: '#1E2A44', trimColor: '#F2C14E', prop: 'staff', headgear: 'crown', insignia: true },
-  head: { id: 'space-officer', label: { en: 'Deck Officer', ru: 'Офицер палубы' }, tunicColor: '#2E3F63', trimColor: '#7FD1FF', prop: 'staff', headgear: 'circlet', insignia: true },
-  checker: { id: 'space-inspector', label: { en: 'Systems Inspector', ru: 'Инспектор систем' }, tunicColor: '#D9DEE8', trimColor: '#3D7BD9', prop: 'scroll', headgear: 'cap' },
-  builder: { id: 'space-engineer', label: { en: 'Module Engineer', ru: 'Инженер модулей' }, tunicColor: '#E07B39', trimColor: '#3A3F4A', prop: 'tool', headgear: 'helm' },
-  gate_guard: { id: 'space-security', label: { en: 'Security Officer', ru: 'Офицер безопасности' }, tunicColor: '#3B3F4C', trimColor: '#E04F4F', prop: 'spear_shield', headgear: 'helm' },
-  turnkey_specialist: { id: 'space-pilot', label: { en: 'Test Pilot', ru: 'Пилот-испытатель' }, tunicColor: '#F2F2F2', trimColor: '#E5B85C', prop: 'banner', headgear: 'helm', insignia: true },
-  day_laborer: { id: 'space-contractor', label: { en: 'Dock Contractor', ru: 'Докер по контракту' }, tunicColor: '#8C8F99', trimColor: '#5C606B', prop: 'stone', headgear: 'cap' },
+  ruler: { id: 'space-admiral', label: { en: 'Fleet Admiral', ru: 'Адмирал флота' }, prop: 'staff', headgear: 'crown', insignia: true },
+  head: { id: 'space-officer', label: { en: 'Deck Officer', ru: 'Офицер палубы' }, prop: 'staff', headgear: 'circlet', insignia: true },
+  checker: { id: 'space-inspector', label: { en: 'Systems Inspector', ru: 'Инспектор систем' }, prop: 'scroll', headgear: 'cap' },
+  builder: { id: 'space-engineer', label: { en: 'Module Engineer', ru: 'Инженер модулей' }, prop: 'tool', headgear: 'helm' },
+  gate_guard: { id: 'space-security', label: { en: 'Security Officer', ru: 'Офицер безопасности' }, prop: 'spear_shield', headgear: 'helm' },
+  turnkey_specialist: { id: 'space-pilot', label: { en: 'Test Pilot', ru: 'Пилот-испытатель' }, prop: 'banner', headgear: 'helm', insignia: true },
+  day_laborer: { id: 'space-contractor', label: { en: 'Dock Contractor', ru: 'Докер по контракту' }, prop: 'stone', headgear: 'cap' },
 };
 
 const SPACE_CLASS_FALLBACKS: Readonly<Record<ResidentRoleClass, PackRoleLookSpec>> = {
@@ -124,20 +124,6 @@ export const SPACE_WORLD_PACK: WorldPackManifest = {
   roleLooks: SPACE_ROLE_LOOKS,
   classFallbackLooks: SPACE_CLASS_FALLBACKS,
   constructionStages: SPACE_CONSTRUCTION_STAGES,
-  constructionPalette: {
-    scaffoldWood: '#C9CED8',
-    rampEarth: '#6B7383',
-    dustColor: '#B9C6E0',
-    smokeColor: '#7A8296',
-    waterColor: '#7FD1FF',
-    awningPrimary: '#3D7BD9',
-    awningSecondary: '#E6ECF5',
-    capstoneColor: '#7FD1FF',
-    celebrationPrimary: '#F2C14E',
-    celebrationSecondary: '#7FD1FF',
-    statueBaseColor: '#7D8796',
-    statueFinishedColor: '#B8E4FF',
-  },
   tiles: SPACE_TILE_KINDS.map(k => ({ id: k.id, fill: k.color, stroke: k.color, buildable: k.buildable, walkable: k.walkable })),
   materials: SPACE_MATERIALS,
   /* Building lots are bare deck plate; an empty lot is refitted with the deck around it in two days. */

@@ -124,10 +124,13 @@ test('the button asks the server at once, before the page asks by itself', async
     await page.goto(front.url + '/tasks');
     const button = page.getByRole('button', { name: EN.reload });
     await expect(button).toBeVisible();
-    /* The page's own refresh is 5 s away: a request within 2 s of the click is the button's. */
-    const asked = page.waitForRequest(request => request.isNavigationRequest() && request.url().endsWith('/tasks'), { timeout: 2000 });
+    /* The page's own refresh is 5 s away: a request within 2 s of the click is the button's. No time limit on the
+       wait itself (#59): the elapsed time is checked instead. */
+    const asked = page.waitForRequest(request => request.isNavigationRequest() && request.url().endsWith('/tasks'));
+    const clicked = Date.now();
     await button.click();
     await asked;
+    expect(Date.now() - clicked).toBeLessThan(2000);
   } finally {
     await front.stop();
   }
