@@ -11,6 +11,7 @@ import { MIGRATIONS } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { Files, type FilesDb } from '../src/modules/files/files.js';
 import { moveOldFiles } from '../src/modules/files/mover.js';
+import { dropDue, markUnused, UNUSED_MS } from '../src/modules/files/sweep.js';
 import { fileBytes } from '../src/modules/tasks/attachments.js';
 import { TEST_SECRET } from './helpers-basic.js';
 import { createTestDb, freshPglite, ownDatabases } from './helpers-db.js';
@@ -151,6 +152,100 @@ describe('the files of an installation from before the store', () => {
     await moveOldFiles({ db, config, files: new Files(config) });
     expect(rowsOf<{ sha256: string }>(await db.execute(sql`SELECT sha256 FROM attachments WHERE id = ${elsewhere.id}`))[0]!.sha256).toBe(sha(elsewhere.bytes));
     expect((await fileBytes(ctx, elsewhere.id)).equals(elsewhere.bytes)).toBe(true);
+  });
+});
+
+const withBytes = async (db: FilesDb) => rowsOf<{ n: number }>(await db.execute(sql`SELECT count(*)::int AS n FROM attachments WHERE bytes IS NOT NULL`))[0]!.n;
+const nameOf = async (db: FilesDb, id: string) => rowsOf<{ sha256: string | null }>(await db.execute(sql`SELECT sha256 FROM attachments WHERE id = ${id}`))[0]!.sha256;
+/* Another machine the company has, picked to keep its files, which keeps none of them yet. */
+const holder = async (db: FilesDb) => {
+  const machine = randomUUID();
+  await db.execute(sql`INSERT INTO net.file_holders (machine_id) VALUES (${machine})`);
+  return { keeps: (sha256: string) => db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id) VALUES (${sha256}, ${machine})`) };
+};
+
+describe('the mover', () => {
+  it('leaves the bytes in Postgres while the server has no FILES_DIR to keep them in, and says so once', async () => {
+    const file: Old = { id: randomUUID(), bytes: randomBytes(5000) };
+    const { db } = await upgraded([file], folder());
+    const config = { secret: Buffer.from(TEST_SECRET, 'base64') } as Config;
+    const files = new Files(config);
+    expect(await moveOldFiles({ db, config, files })).toEqual({ moved: 0, waiting: 0, finished: false, stays: 'no_files_dir' });
+    expect(await moveOldFiles({ db, config, files })).toEqual({ moved: 0, waiting: 0, finished: false });
+    expect([await withBytes(db), await columnsOf(db), await nameOf(db, file.id)]).toEqual([1, ['bytes', 'sha256'], null]);
+    expect((await fileBytes({ db, config, files }, file.id)).equals(file.bytes)).toBe(true);
+  });
+
+  it('clears no row of its bytes until a second machine keeps the file, and then each as its file is kept', async () => {
+    const filesDir = folder();
+    const [one, two]: Old[] = [{ id: randomUUID(), bytes: randomBytes(3000) }, { id: randomUUID(), bytes: randomBytes(4000) }];
+    const { db } = await upgraded([one!, two!], filesDir);
+    const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
+    const ctx = { db, config, files: new Files(config) };
+    const other = await holder(db);
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 2, finished: false });
+    expect(await withBytes(db)).toBe(2);
+    expect((await ctx.files.store().list()).map(file => file.sha256).sort()).toEqual([sha(one!.bytes), sha(two!.bytes)].sort());
+    await other.keeps(sha(one!.bytes));
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 1, waiting: 1, finished: false });
+    expect([await nameOf(db, one!.id), await nameOf(db, two!.id), await withBytes(db)]).toEqual([sha(one!.bytes), null, 1]);
+    await other.keeps(sha(two!.bytes));
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 1, waiting: 0, finished: true });
+    expect(await columnsOf(db)).toEqual(['sha256']);
+    for (const file of [one!, two!]) expect((await fileBytes(ctx, file.id)).equals(file.bytes)).toBe(true);
+  });
+
+  it('keeps what it stored for a second machine that is away for more than a day, and moves it once that machine has it', async () => {
+    const filesDir = folder();
+    const file: Old = { id: randomUUID(), bytes: randomBytes(6000) };
+    const { db } = await upgraded([file], filesDir);
+    const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
+    const ctx = { db, config, files: new Files(config) };
+    const other = await holder(db);
+    const start = Date.now();
+    expect(await moveOldFiles(ctx)).toMatchObject({ moved: 0, waiting: 1 });
+    /* The store's round and the mover's go on each minute while the other machine is away. */
+    for (const at of [start, start + UNUSED_MS / 2, start + UNUSED_MS + 60_000, start + 2 * UNUSED_MS]) {
+      await markUnused(db, new Date(at));
+      await dropDue(ctx, new Date(at));
+      expect(await moveOldFiles(ctx)).toMatchObject({ moved: 0, waiting: 1 });
+    }
+    expect(ctx.files.store().has(sha(file.bytes))).toBe(true);
+    await other.keeps(sha(file.bytes));
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 1, waiting: 0, finished: true });
+    expect((await fileBytes(ctx, file.id)).equals(file.bytes)).toBe(true);
+  });
+
+  it('clears no row of its bytes for a content the store is letting go, though a second machine kept it', async () => {
+    const filesDir = folder();
+    const file: Old = { id: randomUUID(), bytes: randomBytes(2000) };
+    const { db } = await upgraded([file], filesDir);
+    const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
+    /* The store's round gives the content its time to go just as the second machine says it keeps it. */
+    class Going extends Files {
+      override async settled(on: FilesDb, sha256: string): Promise<boolean> {
+        await on.execute(sql`UPDATE net.files SET drop_at = now() WHERE sha256 = ${sha256}`);
+        return true;
+      }
+    }
+    expect(await moveOldFiles({ db, config, files: new Going(config) })).toEqual({ moved: 0, waiting: 0, finished: false });
+    expect([await withBytes(db), await nameOf(db, file.id)]).toEqual([1, null]);
+  });
+
+  it('keeps in the store a content a row came to name after the store gave it its time to go', async () => {
+    const filesDir = folder();
+    const { db } = await upgraded([], filesDir);
+    const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
+    const ctx = { db, config, files: new Files(config) };
+    const kept = await ctx.files.putBytes(db, Buffer.from('a content no row names yet'));
+    const start = Date.now();
+    await markUnused(db, new Date(start));
+    expect(await markUnused(db, new Date(start + UNUSED_MS + 60_000))).toBe(1);
+    /* A row names it now, as a moved file's row does, before the store's round removes it. */
+    await db.execute(sql`INSERT INTO attachments (id, company_id, agent_id, media_type, size, sha256) VALUES (${randomUUID()}, ${COMPANY}, ${AGENT}, 'text/plain', ${kept.size}, ${kept.sha256})`);
+    expect(await dropDue(ctx, new Date(start + UNUSED_MS + 120_000))).toBe(0);
+    expect(ctx.files.store().has(kept.sha256)).toBe(true);
+    expect(rowsOf<{ drop_at: string | null; unused_since: string | null }>(await db.execute(sql`SELECT drop_at, unused_since FROM net.files WHERE sha256 = ${kept.sha256}`))).toEqual([{ drop_at: null, unused_since: null }]);
   });
 });
 
