@@ -138,6 +138,21 @@ describe('errorText', () => {
     expect(errorText(ru, unavailableProducer)).toBe(ru.errors.source_producer_unavailable);
   });
 
+  it('says until when GitHub holds requests back, and plainly where it named no time, in both languages', () => {
+    const limited = (details?: Record<string, unknown>) => Object.assign(new ApiFailure(409, 'conflict', 'x', 'github_rate_limited'), { details });
+    expect(errorText(en, limited({ resetTime: '23:45' }))).toBe("GitHub did not answer. The account's request limit is used up until 23:45 UTC. Try again after that.");
+    expect(errorText(ru, limited({ resetTime: '23:45' }))).toBe('GitHub не ответил. Лимит запросов аккаунта исчерпан до 23:45 UTC. Повторите после этого времени.');
+    expect(errorText(en, limited({ resetTime: null }))).toBe("GitHub did not answer. The account's request limit is used up. Try again later.");
+    expect(errorText(ru, limited())).toBe('GitHub не ответил. Лимит запросов аккаунта исчерпан. Повторите позже.');
+  });
+
+  it('fills a reason that names a machine with the host the server sent, and falls back where it sent none', () => {
+    const leader = (details?: Record<string, unknown>) => Object.assign(new ApiFailure(409, 'conflict', 'Server text.', 'leader'), { details });
+    expect(errorText(ru, leader({ host: 'a-host' }))).toBe(ru.errors.leader('a-host'));
+    expect(errorText(en, leader({ host: '' }))).toBe('Server text.');
+    expect(errorText(ru, leader())).toBe(ru.errors.codes.conflict);
+  });
+
   it('streams bytes across arrayBuffer fallback and content-length headers', async () => {
     vi.stubGlobal(
       'fetch',

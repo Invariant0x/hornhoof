@@ -13,6 +13,7 @@ import { DepartmentMark } from '../ui/TrackerMarks';
 import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
 import { Busy, Hold, LoadState, noneYet, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
 import { MachineAway } from '../ui/MachineAway';
+import { failureCards, GitHubLimitCards } from '../ui/FailureCards';
 import { MergeCard } from '../ui/MergeCard';
 import { Requests, wordsAnswer } from '../ui/Requests';
 import { StaffCard } from '../ui/StaffCard';
@@ -522,8 +523,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const waitsOnWho = waitingOn(all, recipient);
   const waitsOnPeople = waitingOnPeople(all);
   const failures = all.filter(task => boardStatus(task) === 'failure');
-  const machinesAway = decisions?.machinesAway ?? [];
-  const githubLimits = decisions?.githubLimits ?? [];
+  const { machinesAway, githubLimits } = failureCards(decisions);
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
   /* The department where the person is: its work, or its goals. */
   const departmentId = section.kind === 'department' ? section.id : section.kind === 'goals' ? place.department : undefined;
@@ -732,12 +732,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
               {section.kind === 'failures' && (
                 <>
                   <MachineAway machines={machinesAway} />
-                  {githubLimits.map(({ repository, resetAt }) => (
-                    <section className="machine-away" key={repository} aria-label={t.tasks.githubLimit(repository)}>
-                      <h3 dir="auto">{t.tasks.githubLimit(repository)}</h3>
-                      <p>{resetAt === null ? t.tasks.githubLimitUnknown : t.tasks.githubLimitRetry(new Date(resetAt).toISOString().slice(11, 16))}</p>
-                    </section>
-                  ))}
+                  <GitHubLimitCards cards={githubLimits} />
                 </>
               )}
               {makeHere}

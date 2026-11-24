@@ -3,6 +3,7 @@ import type { RepoAddress } from './refs.js';
 
 export type RateLimit = { remaining: 0; resetAt: number | null };
 export const resetTime = (limit: RateLimit): string | null => limit.resetAt === null ? null : new Date(limit.resetAt).toISOString().slice(11, 16);
+export const resetIso = (limit: RateLimit): string | null => limit.resetAt === null ? null : new Date(limit.resetAt).toISOString();
 
 export class GitHubRateLimited extends Error {
   constructor(readonly limit: RateLimit) {
@@ -19,10 +20,14 @@ export function githubRateLimit(response: Response): RateLimit | null {
   return { remaining: 0, resetAt: Number.isFinite(at) ? at : null };
 }
 
+function trustedHost(at: URL): boolean {
+  return at.protocol === 'https:' && at.host === 'github.com' && !at.username && !at.password && !at.search && !at.hash;
+}
+
 export function githubName(url: string): string | null {
   try {
     const at = new URL(url);
-    if (at.protocol !== 'https:' || at.host !== 'github.com' || at.username || at.password || at.search || at.hash) return null;
+    if (!trustedHost(at)) return null;
     const parts = at.pathname.replace(/^\/|\/$/g, '').replace(/\.git$/i, '').split('/');
     return parts.length === 2 && parts.every(p => /^[a-z0-9][a-z0-9_.-]*$/i.test(p)) ? parts.join('/') : null;
   } catch { return null; }
@@ -30,8 +35,11 @@ export function githubName(url: string): string | null {
 
 const account = ({ token }: RepoAddress) => createHash('sha256').update(token).digest('hex');
 const RETRY_WITHOUT_RESET_MS = 60_000;
+/* Until when a limit holds requests back: its reset, or a minute where GitHub named none or one this clock has passed. */
+const untilOf = (limit: RateLimit, now: number): number => limit.resetAt !== null && limit.resetAt > now ? limit.resetAt : now + RETRY_WITHOUT_RESET_MS;
 type Window = { limit: RateLimit; until: number; repositories: Map<string, boolean> };
 type Card = { repository: string; resetAt: number | null };
+const hasCards = (window: Window): boolean => [...window.repositories.values()].includes(true);
 
 /* One warning per credential and reset window. A second refusal puts the repository in Failures. */
 export class GitHubLimits {
@@ -60,15 +68,28 @@ export class GitHubLimits {
     const name = githubName(repo.url)?.toLowerCase();
     if (!name) return;
     const key = account(repo), prior = this.windows.get(key);
-    if (!prior || prior.limit.resetAt !== limit.resetAt || prior.until <= this.now()) {
-      this.windows.set(key, { limit, until: limit.resetAt ?? this.now() + RETRY_WITHOUT_RESET_MS, repositories: new Map([[name, false]]) });
-      this.warn(limit);
-      if (prior && [...prior.repositories.values()].includes(true)) this.changed();
-    } else if (prior.repositories.get(name) !== true) {
-      const repeated = prior.repositories.has(name);
-      prior.repositories.set(name, repeated);
-      if (repeated) this.changed();
-    }
+    if (prior && this.holds(prior, limit)) this.again(prior, name);
+    else this.open(key, limit, name, prior);
+  }
+
+  /* The window this refusal belongs to: the same reset, not yet over. */
+  private holds(window: Window, limit: RateLimit): boolean {
+    return window.limit.resetAt === limit.resetAt && window.until > this.now();
+  }
+
+  /* A new window warns once. The cards of the one it replaces go. */
+  private open(key: string, limit: RateLimit, name: string, prior: Window | undefined): void {
+    this.windows.set(key, { limit, until: untilOf(limit, this.now()), repositories: new Map([[name, false]]) });
+    this.warn(limit);
+    if (prior && hasCards(prior)) this.changed();
+  }
+
+  /* A repository refused again in its window gets its card. */
+  private again(window: Window, name: string): void {
+    if (window.repositories.get(name) === true) return;
+    const repeated = window.repositories.has(name);
+    window.repositories.set(name, repeated);
+    if (repeated) this.changed();
   }
 
   cards(): Card[] {
@@ -85,7 +106,7 @@ export class GitHubLimits {
     for (const [key, window] of this.windows) {
       if (window.until > this.now()) continue;
       this.windows.delete(key);
-      changed ||= [...window.repositories.values()].includes(true);
+      changed ||= hasCards(window);
     }
     if (changed) this.changed();
   }

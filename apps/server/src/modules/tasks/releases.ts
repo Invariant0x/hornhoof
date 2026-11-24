@@ -519,13 +519,19 @@ export async function releaseRound(ctx: Reader): Promise<void> {
     .where(and(eq(turns.status, 'open'), isNull(departments.parentId), isNotNull(departments.repoUrl)));
   for (const { turns: turn } of open) {
     try {
-      const target = await integrationTarget(ctx, { companyId: turn.companyId, productId: null, departmentId: turn.departmentId });
-      if (target?.turn?.id === turn.id) await releaseOne(ctx, turn, target.repo);
+      await releaseIfOpen(ctx, turn);
     } catch (err) {
+      /* A line GitHub could not prove now is looked at again next minute, with no error. */
       if (err instanceof BranchProofUnavailable) continue;
       ctx.log?.error({ error: loggable(err), companyId: turn.companyId, turn: turn.number }, 'Looking for the release of a turn failed.');
     }
   }
+}
+
+/* The release of a turn that is still its department's open one. */
+async function releaseIfOpen(ctx: Reader, turn: Turn): Promise<void> {
+  const target = await integrationTarget(ctx, { companyId: turn.companyId, productId: null, departmentId: turn.departmentId });
+  if (target?.turn?.id === turn.id) await releaseOne(ctx, turn, target.repo);
 }
 
 export type { Release };

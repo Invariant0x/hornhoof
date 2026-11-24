@@ -83,18 +83,22 @@ export function useLanguage(): { language: Language; setLanguage: (l: Language) 
    error it was. */
 export function errorText(t: Messages, err: unknown): string {
   if (!(err instanceof ApiFailure)) return t.errors.codes.internal;
-  if (err.reason === 'github_rate_limited') {
-    const time = err.details?.resetTime;
-    return t.errors.github_rate_limited(typeof time === 'string' ? time : null);
-  }
   const reasons: Record<string, unknown> = t.errors;
   const known = err.reason && err.reason !== 'codes' ? reasons[err.reason] : undefined;
   if (typeof known === 'string') return known;
-  const host = err.details?.host;
-  if (typeof known === 'function' && typeof host === 'string' && host) return (known as (host: string) => string)(host);
+  const detail = detailOf(err);
+  if (typeof known === 'function' && detail !== undefined) return (known as (detail: string | null) => string)(detail);
   if (t === en && err.message) return err.message;
   const codes: Record<string, string> = t.errors.codes;
   return codes[err.code] ?? t.errors.codes.internal;
+}
+
+/* What a reason's words are filled with: the time GitHub's request limit comes back, which GitHub may not have named, or the
+   host a machine's reason names. None where such a reason came without its host. */
+function detailOf(err: ApiFailure): string | null | undefined {
+  const { resetTime, host } = err.details ?? {};
+  if (err.reason === 'github_rate_limited') return typeof resetTime === 'string' ? resetTime : null;
+  return typeof host === 'string' && host ? host : undefined;
 }
 
 /* How a restore ended. The server writes its own line in English, so that is shown in English alone, as with a failure

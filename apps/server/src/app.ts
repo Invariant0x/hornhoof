@@ -101,7 +101,7 @@ import type { Db } from './db/client.js';
 
 import { githubReaders, type CompareReader, type MergeReader, type TreeReader } from './modules/testruns/compare.js';
 import { readGitAncestry, type GitAncestryReader } from './modules/testruns/git-ancestry.js';
-import { GitHubLimits } from './modules/testruns/github-limit.js';
+import { GitHubLimits, resetIso } from './modules/testruns/github-limit.js';
 import { companies } from './db/schema.js';
 import { idOnly } from './db/selections.js';
 import { createOnGitHub } from './modules/departments/github-create.js';
@@ -228,6 +228,20 @@ const RESTORE_RETRY_MS = 10_000;
 /* For how long a connection that has sent nothing is waited for once the app closes. */
 const SILENT_CONNECTION_MS = 1000;
 
+/* One request limit for every GitHub REST reader of the server. The first refusal of a window is a line in the log; a card
+   that comes or goes under Failures refreshes the requests of every company. */
+function githubLimitsFor(clock: () => number, db: Db, log: FastifyBaseLogger, bus: EventBus): GitHubLimits {
+  return new GitHubLimits(clock,
+    limit => log.warn({ remaining: limit.remaining, resetAt: resetIso(limit) }, 'GitHub REST request limit exhausted.'),
+    () => refreshRequests(db, log, bus));
+}
+
+function refreshRequests(db: Db, log: FastifyBaseLogger, bus: EventBus): void {
+  void db.select(idOnly(companies)).from(companies).then(rows => {
+    for (const { id } of rows) bus.publish(id, { type: 'requests', spot: { departmentId: null, parentId: null } });
+  }).catch((error: unknown) => log.error({ error: loggable(error) }, 'Refreshing GitHub limit cards failed.'));
+}
+
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? false, logController: new LogController({ disableRequestLogging: true }) });
   const web = hasWebApp(deps.config.webDist);
@@ -239,13 +253,8 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
   const bus = new EventBus();
-  const githubLimits = new GitHubLimits(deps.clock ?? Date.now,
-    limit => app.log.warn({ remaining: limit.remaining, resetAt: limit.resetAt === null ? null : new Date(limit.resetAt).toISOString() }, 'GitHub REST request limit exhausted.'),
-    () => {
-      void deps.db.select(idOnly(companies)).from(companies).then(rows => {
-        for (const { id } of rows) bus.publish(id, { type: 'requests', spot: { departmentId: null, parentId: null } });
-      }).catch((error: unknown) => app.log.error({ error: loggable(error) }, 'Refreshing GitHub limit cards failed.'));
-    });
+  /* The clock is read when asked, so a test that sets ctx.clock moves the guard too. */
+  const githubLimits = githubLimitsFor(() => ctx.clock(), deps.db, app.log, bus);
   const ctx = {
     startedAt: new Date(),
     readCommit,

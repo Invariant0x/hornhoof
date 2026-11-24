@@ -6,7 +6,7 @@ import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { repoAt } from '../departments/repository.js';
 import { refuse, type Task, type Tx } from './state.js';
-import { heldLineage } from '../testruns/compare.js';
+import { heldLineage, type CompareResult } from '../testruns/compare.js';
 import { githubName, GitHubRateLimited, resetTime, type RateLimit } from '../testruns/github-limit.js';
 import { ensureOpenTurn, openTurnOf } from './turn-department.js';
 import { newerVersion, versionsNewestFirst } from './turn-tags.js';
@@ -65,21 +65,30 @@ export async function branchHolds(ctx: BranchProofReader, repo: Repo, head: stri
 }
 
 async function restHolds(ctx: BranchProofReader, repo: Repo, head: string, commit: string): Promise<boolean> {
+  let holds: boolean | null = null;
   try {
-    const merged = await ctx.readMerged?.(repo, { base: head, head: commit }, PROOF_TIMEOUT_MS);
-    if (merged !== undefined && merged !== null) return merged;
-    const compared = await ctx.readCompare?.(repo, { base: commit, head }, PROOF_TIMEOUT_MS);
-    if (compared && heldLineage(compared, commit, head)) return true;
-    if (compared && !compared.complete) {
-      if (compared.rateLimit) throw new GitHubRateLimited(compared.rateLimit);
-      if (compared.reason === 'not-an-ancestor') return false;
-    }
+    holds = await restAnswer(ctx, repo, head, commit);
   } catch (error) {
-    if (error instanceof GitHubRateLimited) {
-      throw new BranchProofUnavailable(error.message, error.limit);
-    }
+    if (error instanceof GitHubRateLimited) throw new BranchProofUnavailable(error.message, error.limit);
   }
+  if (holds !== null) return holds;
   throw new BranchProofUnavailable(githubName(repo.url) ? "GitHub didn't answer with the commit history. Try again." : 'The repository could not confirm the commit history. Try again.');
+}
+
+/* What GitHub's REST says of the line: the merge status first, then the comparison. None where neither could tell. */
+async function restAnswer(ctx: BranchProofReader, repo: Repo, head: string, commit: string): Promise<boolean | null> {
+  const merged = await ctx.readMerged?.(repo, { base: head, head: commit }, PROOF_TIMEOUT_MS);
+  if (typeof merged === 'boolean') return merged;
+  const compared = await ctx.readCompare?.(repo, { base: commit, head }, PROOF_TIMEOUT_MS);
+  if (!compared) return null;
+  if (heldLineage(compared, commit, head)) return true;
+  return compared.complete ? null : unprovedLine(compared);
+}
+
+/* A comparison GitHub could not finish: a used-up limit stops the proof, and only a commit off the line is a no. */
+function unprovedLine(compared: Extract<CompareResult, { complete: false }>): false | null {
+  if (compared.rateLimit) throw new GitHubRateLimited(compared.rateLimit);
+  return compared.reason === 'not-an-ancestor' ? false : null;
 }
 
 /* The head of a branch as the repository says it now, or why it could not say. A tag of its name is no branch: it stands for
