@@ -230,3 +230,33 @@ describe('Antigravity execution boundaries', () => {
   });
 
 });
+
+describe('an Antigravity sub-agent', () => {
+  /* agy runs a sub-agent, such as the one that draws images, in a conversation of its own, whose hooks reach the node from
+     the agent's program; that conversation has none of the agent's tools. */
+  it.each([['resumed', 'session'], ['new', null]] as const)('leaves a %s turn in its own conversation, which the next turn resumes', async (_, launched) => {
+    const c = fixture();
+    vi.useFakeTimers();
+    c.agent.sessionId = launched;
+    vi.spyOn(c.tmux, 'programCursor').mockResolvedValue(null);
+    vi.spyOn(c.tmux, 'screen').mockResolvedValue('');
+    await c.host['hook']('agy', 'invocation', { conversationId: 'session', invocationNum: 0, lastUserInput: 'Draw the lighthouse.' });
+    await c.host['hook']('agy', 'invocation', { conversationId: 'image-agent', invocationNum: 0, lastUserInput: 'A lighthouse at dusk.' });
+    await c.host['hook']('agy', 'stop', { conversationId: 'image-agent', fullyIdle: true, terminationReason: 'NO_TOOL_CALL', error: '' });
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(c.agent.sessionId).toBe('session');
+    expect(c.agent.turn!.ending).toBeUndefined();
+
+    await c.host['hook']('agy', 'invocation', { conversationId: 'session', invocationNum: 1, lastUserInput: 'Draw the lighthouse.' });
+    c.host['agyNews'](c.agent, { type: 'PLANNER_RESPONSE', step_index: 4, status: 'DONE', content: 'The lighthouse is drawn.' });
+    await c.host['hook']('agy', 'stop', { conversationId: 'session', fullyIdle: true, terminationReason: 'NO_TOOL_CALL', error: '' });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(c.agent.turn!.ending).toEqual({ status: 'done', message: 'The lighthouse is drawn.' });
+    const told = c.host['sessionToTell'](c.agent);
+    expect(told).toBe('session');
+
+    const next = { key: 'agy', program: agyProgram, bin: 'agy', home: c.agent.home, signedOut: /signed out/, input: { jobId: 'next-job', prompt: 'Attach it.', workDir: c.agent.home, sessionId: told, model: null, secret: null, instructions: null, tools: null, timeoutMs: 120_000 } };
+    const { spec } = await c.host['launchFor'](c.agent, next);
+    expect(spec.command.slice(1, 3)).toEqual(['--conversation', 'session']);
+  });
+});
