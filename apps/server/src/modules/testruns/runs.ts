@@ -820,6 +820,9 @@ async function runOf(ctx: Ctx, job: ToolJob, number: number, kind: RunKind): Pro
 }
 
 /* How a run goes, part by part. */
+/* The end of what a part said, for one that failed or was refused. */
+const endOf = (p: Part): { end?: string } => ((p.status === 'failed' || p.status === 'refused') && p.tail ? { end: p.tail } : {});
+
 export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: RunKind = 'tests'): Promise<object> {
   const { run, task } = await runOf(ctx, job, number, kind);
   const parts = await ctx.db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
@@ -854,7 +857,7 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: Run
       log: has.has(logName(run, p.part)) ? logName(run, p.part) : null,
       ...madeView(run, p.part, has),
       ...(p.lost.length ? { ranAgain: p.lost.map(lostLine) } : {}),
-      ...((p.status === 'failed' || p.status === 'refused') && p.tail ? { end: p.tail } : {}),
+      ...endOf(p),
     })),
   };
 }
