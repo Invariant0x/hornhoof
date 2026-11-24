@@ -1,5 +1,5 @@
 import { statfsSync } from 'node:fs';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { recordFile } from './files.js';
@@ -19,6 +19,17 @@ const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (a
 /* The rows that name a content of the store: files, and a file's row a merge refused and keeps until someone picks it. */
 const NAMED = sql`(EXISTS (SELECT 1 FROM public.attachments a WHERE a.sha256 = f.sha256)
   OR EXISTS (SELECT 1 FROM net.merge_conflicts c WHERE c.tbl = 'attachments' AND c.picked IS NULL AND f.sha256 IN (c.here ->> 'sha256', c.there ->> 'sha256')))`;
+
+/* The contents a row names and no record describes, with the size the row gives, among those `which` lets through: the
+   content of a file's row, as a merge brings it, or of one a merge refused and keeps until someone picks a side. */
+export function namedUnrecorded(which: SQL): SQL {
+  return sql`SELECT n.sha256, max(n.size) AS size FROM (
+      SELECT a.sha256, a.size::bigint AS size FROM public.attachments a WHERE a.sha256 IS NOT NULL
+      UNION ALL
+      SELECT v.side ->> 'sha256', (v.side ->> 'size')::bigint FROM net.merge_conflicts c CROSS JOIN LATERAL (VALUES (c.here), (c.there)) AS v(side)
+        WHERE c.tbl = 'attachments' AND c.picked IS NULL AND v.side ->> 'sha256' IS NOT NULL
+    ) n WHERE ${which} AND NOT EXISTS (SELECT 1 FROM net.files f WHERE f.sha256 = n.sha256) GROUP BY n.sha256`;
+}
 
 /* A database a restore set aside, or one made of what a machine uploaded, may be merged back: the files its rows name
    stay while it is there, for at most the 30 days it is kept. */
@@ -89,13 +100,10 @@ export async function checkOwnCopies(ctx: Pick<Ctx, 'db' | 'files'>): Promise<nu
 export async function adoptNamed(ctx: Pick<Ctx, 'db' | 'files'>): Promise<number> {
   const { db, files } = ctx;
   const store = files.store();
-  const named = rowsOf<{ sha256: string; size: string }>(
-    await db.execute(sql`SELECT a.sha256, max(a.size) AS size FROM attachments a WHERE a.sha256 IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM net.files f WHERE f.sha256 = a.sha256) GROUP BY a.sha256 LIMIT ${DROP_BATCH}`),
-  );
+  const named = rowsOf<{ sha256: string; size: string | null }>(await db.execute(sql`${namedUnrecorded(sql`true`)} LIMIT ${DROP_BATCH}`));
   let adopted = 0;
   for (const { sha256, size } of named) {
-    if (!store.has(sha256)) continue;
+    if (size === null || !store.has(sha256)) continue;
     await recordFile(db, { sha256, size: Number(size), ...(await store.sealedFacts(sha256)) }, await files.machineId(db));
     adopted++;
   }

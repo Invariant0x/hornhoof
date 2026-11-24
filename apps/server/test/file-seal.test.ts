@@ -3,7 +3,7 @@ import { Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import { pipeline } from 'node:stream/promises';
 import { describe, expect, it } from 'vitest';
-import { SEAL_CHUNK, SEAL_HEAD, SealRefused, openSealed, seal } from '../src/modules/files/seal.js';
+import { SEAL_CHUNK, SEAL_HEAD, SealRefused, openSealed, seal, sealedSizeOf } from '../src/modules/files/seal.js';
 import { sealV1 } from './seal-v1.js';
 
 const key = randomBytes(32);
@@ -27,6 +27,7 @@ describe('a file sealed for the store', () => {
       const plain = randomBytes(length);
       const one = await sealed(plain);
       expect(one.length, `length ${length}`).toBe(SEAL_HEAD + length + 16 * Math.max(1, Math.ceil(length / SEAL_CHUNK)));
+      expect(sealedSizeOf(length), `length ${length}`).toBe(one.length);
       expect((await opened(one)).equals(plain), `length ${length}`).toBe(true);
       if (length >= 32) expect(one.includes(plain.subarray(0, 32))).toBe(false);
       const two = await sealed(plain);

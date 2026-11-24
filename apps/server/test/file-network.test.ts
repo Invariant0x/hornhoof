@@ -32,7 +32,7 @@ async function stand() {
   const c = await backupCompany();
   const leaderDir = folder();
   c.app.ctx.config.filesDir = leaderDir;
-  const leader = new LeaderFiles(c.db, join(leaderDir, 'store'), MACHINE_ID);
+  const leader = new LeaderFiles(c.db, join(leaderDir, 'store'), MACHINE_ID, () => c.app.ctx.files.key(c.db));
   const [server] = await c.db.select().from(machines).where(eq(machines.networkId, MACHINE_ID));
   /* A machine's keeper as it reaches the leader: its asks go to the leading app's routes under its id, as the peer door
      names it, and its streams to the leading keeper. */
@@ -364,6 +364,52 @@ describe('where the files of the store are kept', () => {
     if (whole.status !== 200) throw new Error(`given ${whole.status}`);
     expect(await read(whole.stream(), Infinity)).toBe(whole.length);
     expect(await gives()).toBe(1);
+  });
+
+  it('asks at most two machines online that keep a file the leading machine lacks to send it back', async () => {
+    const s = await stand();
+    const ids = [await s.worker('two'), await s.worker('three'), await s.worker('four'), await s.worker('five')];
+    await setCopies(s.db, 5, 'person:test');
+    const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(3000));
+    for (const id of ids) await s.holderOn(id).holder.lookOnce();
+    expect(await s.copiesOf(kept.sha256)).toEqual([s.server.id, ...ids].sort());
+    /* One of them is away: it is not asked, and two of those online are. */
+    await silentFor(s, ids[0]!, 10 * 60_000);
+    await s.db.execute(sql`UPDATE net.files SET wanted_at = now() WHERE sha256 = ${kept.sha256}`);
+    const asked = [];
+    for (const id of ids) {
+      const view = (await s.app.inject({ url: '/api/network/files', ...from(id) })).json() as { want: string[] };
+      if (view.want.includes(kept.sha256)) asked.push(id);
+    }
+    expect(asked.length).toBe(2);
+    expect(asked).not.toContain(ids[0]);
+  });
+
+  it('takes back a file only a refused merge still names, which no record here knows, from a machine that keeps it', async () => {
+    const s = await stand();
+    const two = await s.worker('two');
+    const bytes = randomBytes(5000);
+    const kept = await s.app.ctx.files.putBytes(s.db, bytes);
+    const { holder } = s.holderOn(two);
+    await holder.lookOnce();
+    expect(holder.store.has(kept.sha256)).toBe(true);
+    /* The record is gone and so is the leading machine's copy, as after a restore of an older database; a merge since
+       refused a row that names the file, and nobody picked a side yet. */
+    await s.db.execute(sql`DELETE FROM net.files WHERE sha256 = ${kept.sha256}`);
+    await s.app.ctx.files.store().remove(kept.sha256);
+    const [merge] = rowsOf<{ id: string }>(await s.db.execute(sql`INSERT INTO net.merges (source, label, status) VALUES ('machine:another', 'a copy', 'merged') RETURNING id`));
+    await s.db.execute(sql`INSERT INTO net.merge_conflicts (merge, tbl, key, op, kind, topic, here, there, why)
+      VALUES (${merge!.id}, 'attachments', '{"id": "00000000-0000-4000-8000-0000000000ab"}', 'insert', 'refused', 'work', NULL, ${JSON.stringify({ sha256: kept.sha256, size: bytes.length })}::jsonb, 'refused')`);
+    const said = (await s.app.inject({ method: 'POST', url: '/api/network/files', payload: { held: [kept.sha256], dropped: [] }, ...from(two) })).json();
+    expect(said).toMatchObject({ unknown: [], send: [kept.sha256] });
+    /* Sent longer than the row says, it is refused before it is opened. */
+    await s.db.execute(sql`UPDATE net.merge_conflicts SET there = jsonb_set(there, '{size}', '100') WHERE tbl = 'attachments'`);
+    await holder.census();
+    expect(s.app.ctx.files.store().has(kept.sha256)).toBe(false);
+    await s.db.execute(sql`UPDATE net.merge_conflicts SET there = jsonb_set(there, '{size}', ${String(bytes.length)}::jsonb) WHERE tbl = 'attachments'`);
+    await holder.census();
+    expect(s.app.ctx.files.store().has(kept.sha256)).toBe(true);
+    expect(rowsOf(await s.db.execute(sql`SELECT 1 FROM net.files WHERE sha256 = ${kept.sha256} AND size = ${bytes.length}`)).length).toBe(1);
   });
 
   it('seals a file uploaded again, which the leading machine let go of, under the salt its copies elsewhere have', async () => {

@@ -16,6 +16,9 @@ const TAG = 16;
 export const SEAL_HEAD = MAGIC.length + SALT;
 const KEY = 32;
 const SEALED_CHUNK = SEAL_CHUNK + TAG;
+/* How long the sealed form of a file of `size` bytes is: the head, the bytes, and the tag of each chunk, of the last one
+   too, which an empty file has as well. */
+export const sealedSizeOf = (size: number): number => SEAL_HEAD + size + TAG * Math.max(1, Math.ceil(size / SEAL_CHUNK));
 
 export class SealRefused extends Error {
   constructor() {

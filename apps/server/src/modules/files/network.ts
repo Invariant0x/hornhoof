@@ -6,8 +6,8 @@ import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
 import { keeperAsker } from '../network/via.js';
 import { DEFAULT_AREA_BYTES } from './area.js';
-import { countedNow, keptElsewhere } from './place.js';
-import { SET_ASIDE } from './sweep.js';
+import { countedNow, FRESH_MS, keptElsewhere } from './place.js';
+import { namedUnrecorded, SET_ASIDE } from './sweep.js';
 
 /* How the files of the store go between the company's machines, as the leading app keeps it: what each machine is to
    take, give back or let go of, and what each said it keeps. Which machines keep which file is placed in ./place. Only
@@ -21,6 +21,8 @@ export const VIEW_WAIT_MS = 5_000;
 const VIEW_LOOK_MS = 500;
 /* A file the leading app missed is asked of the machines that hold it for this long. */
 const WANTED_MS = 600_000;
+/* How many machines that keep a file the leading machine lacks are asked to send it back at once. */
+const WANT_FROM = 2;
 
 const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 type Tx = Pick<Db, 'execute'>;
@@ -72,9 +74,15 @@ export async function fileView(db: Tx, machineId: string, now = new Date(), lead
     await db.execute(sql`SELECT c.sha256 FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256 WHERE c.machine_id = ${machineId}
       AND (${due} OR ${notPicked}) ORDER BY c.sha256 LIMIT ${VIEW_FILES}`),
   ).map(row => row.sha256);
+  /* A file the leading machine lacks is asked of two machines that keep it and are online, the first by id, not of all. */
+  const fresh = sql`${new Date(now.getTime() - FRESH_MS).toISOString()}::timestamptz`;
   const want = rowsOf<{ sha256: string }>(
     await db.execute(sql`SELECT c.sha256 FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256 WHERE c.machine_id = ${machineId}
-      AND f.drop_at IS NULL AND f.wanted_at > ${new Date(now.getTime() - WANTED_MS).toISOString()}::timestamptz ORDER BY f.wanted_at LIMIT ${VIEW_FILES}`),
+      AND f.drop_at IS NULL AND f.wanted_at > ${new Date(now.getTime() - WANTED_MS).toISOString()}::timestamptz
+      AND EXISTS (SELECT 1 FROM machines m WHERE m.id = c.machine_id AND m.report_at > ${fresh})
+      AND (SELECT count(*) FROM net.file_copies o JOIN machines m ON m.id = o.machine_id WHERE o.sha256 = c.sha256 AND o.machine_id < c.machine_id
+        AND o.machine_id IS DISTINCT FROM ${leader} AND m.report_at > ${fresh}) < ${WANT_FROM}
+      ORDER BY f.wanted_at LIMIT ${VIEW_FILES}`),
   ).map(row => row.sha256);
   return { holds, hold, drop, want };
 }
@@ -115,10 +123,11 @@ export async function takeReport(db: Tx, machineId: string, report: FileReport):
       }
       again = given.again;
     }
-    /* A content a row names, as a merge brings it, and no record describes, is no stranger: it is to come here. */
+    /* A content a row names, as a merge brings it or keeps refused, and no record describes, is no stranger: it is to
+       come here. */
     const strangers = report.held.filter(sha256 => !known.includes(sha256));
     const named = strangers.length
-      ? rowsOf<{ sha256: string }>(await db.execute(sql`SELECT DISTINCT sha256 FROM attachments WHERE sha256 = ANY(${listOf(strangers)}::text[])`)).map(row => row.sha256)
+      ? rowsOf<{ sha256: string }>(await db.execute(namedUnrecorded(sql`n.sha256 = ANY(${listOf(strangers)}::text[])`))).map(row => row.sha256)
       : [];
     /* While a database set aside may be merged back, a file no record here knows may be one its rows name: none is
        unknown then, so no machine lets it go. */

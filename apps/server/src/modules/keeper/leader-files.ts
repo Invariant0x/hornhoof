@@ -4,9 +4,11 @@ import type { Db } from '../../db/client.js';
 import { backsUpStore } from '../files/backup.js';
 import { recordFile } from '../files/files.js';
 import { keepsFiles, pickedFor } from '../files/network.js';
+import { sealedSizeOf } from '../files/seal.js';
+import { namedUnrecorded } from '../files/sweep.js';
 import { FileStore, StoreRefused } from '../files/store.js';
 
-/* A file no record describes is taken back at most this long, sealed. */
+/* A file no record describes is taken back at most as long as the size its row names, sealed, and never longer than this. */
 const UNRECORDED_BYTES = 2 * 1024 ** 3;
 
 const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
@@ -31,15 +33,13 @@ export class LeaderFiles {
     return row?.id ?? null;
   }
 
-  /* A file a row names and no record describes, from a machine that holds the files or keeps their backup: kept once it
-     opens to its name. */
+  /* A file a row names and no record describes, as one a merge brought or keeps refused, from a machine that holds the
+     files or keeps their backup: kept once it opens to its name. */
   private async takeUnrecorded(machine: string, sha256: string, body: Readable): Promise<number> {
-    const [named] = rowsOf<{ size: string }>(
-      await this.db.execute(sql`SELECT max(a.size) AS size FROM attachments a WHERE a.sha256 = ${sha256} AND NOT EXISTS (SELECT 1 FROM net.files f WHERE f.sha256 = ${sha256}) HAVING count(*) > 0`),
-    );
-    if (!named || !this.key || !((await keepsFiles(this.db, machine)) || (await backsUpStore(this.db, machine, sha256)))) return 403;
+    const [named] = rowsOf<{ size: string | null }>(await this.db.execute(namedUnrecorded(sql`n.sha256 = ${sha256}`)));
+    if (!named || named.size === null || !this.key || !((await keepsFiles(this.db, machine)) || (await backsUpStore(this.db, machine, sha256)))) return 403;
     try {
-      await this.store.takeOpened(sha256, body, await this.key(), UNRECORDED_BYTES);
+      await this.store.takeOpened(sha256, body, await this.key(), Math.min(UNRECORDED_BYTES, sealedSizeOf(Number(named.size))));
     } catch (err) {
       if (err instanceof StoreRefused) return 400;
       throw err;
