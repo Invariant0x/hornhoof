@@ -311,4 +311,17 @@ describe('a refusal for one class of check', () => {
     client.beforeRefusing = async () => { throw new Error('du failed'); };
     expect(await outcome(client.acquire())).toBe('Builds wait.');
   });
+
+  it('refuses all the same once looking again takes longer than it may, and at once when the check is called off', async () => {
+    const client = granting();
+    client.refuse(null, 'Builds wait.');
+    client.beforeRefusing = () => new Promise(() => {});
+    client.lookAgainMs = 20;
+    expect(await outcome(client.acquire())).toBe('Builds wait.');
+    client.lookAgainMs = 60_000;
+    const stop = new AbortController();
+    const check = outcome(client.acquire({ signal: stop.signal }));
+    stop.abort(new Error('Called off.'));
+    expect(await check).toBe('Called off.');
+  });
 });

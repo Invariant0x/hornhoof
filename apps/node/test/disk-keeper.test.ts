@@ -122,6 +122,16 @@ describe("a part's cleaning that fails", () => {
     expect(report?.parts.recordings).toBeUndefined();
     expect(lines.some(line => line.includes('recordings') && line.includes('no access'))).toBe(true);
   });
+
+  it('still empties the folder of runs when the leftovers of the test helpers could not be cleaned, and says why', async () => {
+    const dir = folder(), lines: string[] = [];
+    fill(join(dir, 'runs', 'part-1', 'x'), 2 * MB);
+    const leftovers = { size: async () => 0, clean: () => Promise.reject(new Error('no look at the processes')) };
+    const keeper = new DiskKeeper({ disk: diskOf(dir), settings: NEEDS_3_MB, cleaners: [checkTemp(dir, () => false, leftovers)], now: () => at, log: line => lines.push(line) });
+    await keeper.pass();
+    expect(await folderBytes(join(dir, 'runs'))).toBeLessThan(MB / 10);
+    expect(lines.some(line => line.includes('checkTemp') && line.includes('no look at the processes'))).toBe(true);
+  });
 });
 
 describe('what a cleaning leaves because it cannot come back', () => {

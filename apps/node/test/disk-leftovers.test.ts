@@ -1,9 +1,9 @@
-import { chmodSync, chownSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, closeSync, constants, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { LEFTOVER_GRACE_MS, LEFTOVER_IDLE_MS, OWNER_FILE, removalRights, removeAs, testLeftovers, type Remover } from '../src/disk/leftovers.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { LEFTOVER_GRACE_MS, LEFTOVER_IDLE_MS, OWNER_FILE, removalRights, removeAs, runAs, testLeftovers, type Remover } from '../src/disk/leftovers.js';
 
 const MINUTE = 60_000;
 const uid = process.getuid?.() ?? 0;
@@ -44,8 +44,8 @@ function folder(name: string, ageMs: number, owner?: string): string {
   return dir;
 }
 
-const cleaner = (options: { checking?: boolean; owners?: number[]; remove?: Remover } = {}) =>
-  testLeftovers({ tmp, owners: options.owners ?? [uid], checking: () => options.checking ?? false, proc, now: () => clock, ...(options.remove ? { remove: options.remove } : {}) });
+const cleaner = (options: { checking?: boolean; owners?: number[]; remove?: Remover; lookMs?: number } = {}) =>
+  testLeftovers({ tmp, owners: options.owners ?? [uid], checking: () => options.checking ?? false, proc, now: () => clock, ...(options.remove ? { remove: options.remove } : {}), ...(options.lookMs ? { lookMs: options.lookMs } : {}) });
 const HOUR = 60 * MINUTE;
 
 describe('the leftovers of test runs in the temporary folder', () => {
@@ -326,6 +326,86 @@ for (;;) for (let i = 0; i < Number(count); i++) {
     expect(readFileSync(join(theirs, 'data'), 'utf8')).toBe('keep');
     expect(existsSync(join(dir, 'inner'))).toBe(false);
   });
+});
+
+/* What a user of the node can make its own processes hold, so that a look at them costs much or never ends. */
+describe('a look at processes that hold much or do not answer', () => {
+  it('still judges the folders though a process has a command line and an environment of a hundred thousand words and more', async () => {
+    processes({ pid: 10 });
+    writeFileSync(join(proc, '10', 'cmdline'), '\0'.repeat(200_000));
+    writeFileSync(join(proc, '10', 'environ'), 'A=\0'.repeat(80_000));
+    const dir = folder('hh-test-db-AbCd12', HOUR);
+    expect(await cleaner().clean()).toBeGreaterThan(0);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it('keeps no more of what the processes hold than one read, however much each holds', async () => {
+    const big = join(root, 'environ');
+    writeFileSync(big, Buffer.alloc(4 * 1024 * 1024, 0x41));
+    for (let pid = 10; pid < 130; pid++) {
+      processes({ pid });
+      rmSync(join(proc, String(pid), 'environ'));
+      linkSync(big, join(proc, String(pid), 'environ'));
+    }
+    const dir = folder('hh-test-db-AbCd12', HOUR);
+    const base = process.memoryUsage().heapUsed;
+    let peak = base;
+    const sample = setInterval(() => { peak = Math.max(peak, process.memoryUsage().heapUsed); }, 1);
+    try { await cleaner().clean(); } finally { clearInterval(sample); }
+    peak = Math.max(peak, process.memoryUsage().heapUsed);
+    expect(peak - base).toBeLessThan(64 * 1024 * 1024);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it('still sees a folder a process names in its environment, behind much else', async () => {
+    processes({ pid: 10 });
+    const dir = folder('hh-test-db-AbCd12', HOUR);
+    writeFileSync(join(proc, '10', 'environ'), `${'A=x\0'.repeat(20_000)}DB=${dir}/data\0`);
+    expect(await cleaner().clean()).toBe(0);
+    expect(existsSync(dir)).toBe(true);
+  });
+
+  it('does not look at the processes while the temporary folder holds nothing to judge', async () => {
+    processes({ pid: 10 });
+    const fifo = join(proc, '10', 'cmdline');
+    rmSync(fifo); execFileSync('mkfifo', [fifo]);
+    const started = Date.now();
+    expect(await cleaner({ lookMs: 60_000 }).clean()).toBe(0);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it('removes nothing when a read of a process does not come back in time, nor while that read still hangs', async () => {
+    processes({ pid: 10 });
+    const fifo = join(proc, '10', 'cmdline');
+    rmSync(fifo); execFileSync('mkfifo', [fifo]);
+    const dir = folder('hh-test-db-AbCd12', HOUR);
+    const started = Date.now();
+    expect(await cleaner({ lookMs: 200 }).clean()).toBe(0);
+    expect(await cleaner({ lookMs: 60_000 }).clean()).toBe(0);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(existsSync(dir)).toBe(true);
+    /* The read comes back at last; with a plain process there the folder goes again. */
+    closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+    rmSync(fifo); writeFileSync(fifo, 'node\0');
+    await vi.waitFor(async () => { await cleaner().clean(); expect(existsSync(dir)).toBe(false); }, { timeout: 5_000, interval: 50 });
+  }, 20_000);
+
+  it('starts no removal once a cleaning had its time, and gives each removal no more than the time left', async () => {
+    processes({ pid: 10 });
+    for (let i = 0; i < 10; i++) folder(`hh-test-db-Bud${String(i).padStart(3, '0')}`, HOUR);
+    let now = clock;
+    const limits: number[] = [];
+    const leftovers = testLeftovers({ tmp, owners: [uid], checking: () => false, proc, now: () => now, cleanMs: 5 * MINUTE,
+      remove: async (_path, _as, ms) => { limits.push(ms); now += MINUTE; return true; } });
+    await leftovers.clean();
+    expect(limits).toEqual([5, 4, 3, 2, 1].map(minutes => minutes * MINUTE));
+  });
+
+  it('kills a removal its owner stopped once its time is over, and counts it as failed', async () => {
+    const started = Date.now();
+    expect(await runAs('sh', ['-c', 'kill -STOP $$; exit 0'], { uid, gid: process.getgid?.() ?? 0 }, 300)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  }, 20_000);
 });
 
 describe('a node that cannot look', () => {
