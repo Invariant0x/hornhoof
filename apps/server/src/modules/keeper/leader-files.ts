@@ -1,4 +1,4 @@
-import type { Readable } from 'node:stream';
+import { pipeline, Transform, type Readable } from 'node:stream';
 import { sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { backsUpStore } from '../files/backup.js';
@@ -49,8 +49,9 @@ export class LeaderFiles {
     return 201;
   }
 
-  /* A file for a machine picked to keep it, recorded as given so its word that it keeps it counts; or for the machine
-     that keeps the store's backup, which takes no copy's place. */
+  /* A file for a machine picked to keep it, recorded as given once its whole stream went out, so its word that it keeps
+     it counts: a stream cut short, or one the machine let go of unread, records nothing. Or for the machine that keeps the
+     store's backup, which takes no copy's place. */
   async give(machine: string, sha256: string): Promise<{ status: 200; length: number; stream(): Readable } | { status: 403 | 404 }> {
     const picked = await pickedFor(this.db, machine, sha256);
     if (!picked && !(await backsUpStore(this.db, machine, sha256))) return { status: 403 };
@@ -59,8 +60,25 @@ export class LeaderFiles {
       await this.db.execute(sql`UPDATE net.files SET wanted_at = now() WHERE sha256 = ${sha256}`);
       return { status: 404 };
     }
-    if (picked) await this.db.execute(sql`INSERT INTO net.file_gives (sha256, machine_id) VALUES (${sha256}, ${machine}) ON CONFLICT (sha256, machine_id) DO UPDATE SET at = now()`);
-    return { status: 200, length: sealed.length, stream: sealed.stream };
+    if (!picked) return { status: 200, length: sealed.length, stream: sealed.stream };
+    const given = () => this.db.execute(sql`INSERT INTO net.file_gives (sha256, machine_id) VALUES (${sha256}, ${machine}) ON CONFLICT (sha256, machine_id) DO UPDATE SET at = now()`);
+    return {
+      status: 200,
+      length: sealed.length,
+      stream: () => {
+        /* Counted on the way out, without starting the file's flow before the one it goes to reads it. */
+        let sent = 0;
+        const counted = new Transform({
+          transform(chunk: Buffer, _encoding, done) {
+            sent += chunk.length;
+            done(null, chunk);
+          },
+        });
+        counted.once('end', () => void (sent === sealed.length && given().catch(() => undefined)));
+        pipeline(sealed.stream(), counted, () => undefined);
+        return counted;
+      },
+    };
   }
 
   /* A file sent back: one the leading app asked for, from a machine that keeps it, or one the store's backup restores,

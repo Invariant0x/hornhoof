@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { z } from 'zod';
 import { FileStore } from '../files/store.js';
@@ -154,10 +155,20 @@ export class FileHolder {
   /* A file this machine keeps already and was not given, as one it kept from before it was picked for it: it asks the
      leading keeper for it, so its word that it keeps it counts on its next look. */
   private async askAgain(sha256: string): Promise<void> {
+    let body: Readable | null = null;
     try {
-      (await this.opts.link.stream('GET', `${FILE_PATH}${sha256}`)).body.destroy();
+      const answer = await this.opts.link.stream('GET', `${FILE_PATH}${sha256}`);
+      body = answer.body;
+      if (answer.status !== 200) return;
+      /* Read whole, as the leading keeper records a file as given only once all of it went out. A copy here that is not
+         the same bytes goes, and the next look fetches the one the record names. */
+      const hash = createHash('sha256');
+      for await (const chunk of body) hash.update(chunk as Buffer);
+      if ((await this.store.sealedFacts(sha256)).sealedSha256 !== hash.digest('hex')) await this.store.remove(sha256);
     } catch (err) {
       this.say('fetch', `Could not fetch a file of the company: ${reasonOf(err)}`);
+    } finally {
+      body?.destroy();
     }
   }
 

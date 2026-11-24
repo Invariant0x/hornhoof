@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { readFile, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -325,6 +326,44 @@ describe('where the files of the store are kept', () => {
     await holder.lookOnce();
     expect(await s.copiesOf(kept.sha256)).toEqual([s.server.id, three].sort());
     expect(rowsOf(await s.db.execute(sql`SELECT 1 FROM net.file_gives`)).length).toBe(0);
+  });
+
+  it('records a file as given only once its whole stream went out, so a machine that cut it short has nothing to show', async () => {
+    const s = await stand();
+    const two = await s.worker('two', { path: 'relay' });
+    const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(300_000));
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id, two].sort());
+    const gives = async () => rowsOf(await s.db.execute(sql`SELECT 1 FROM net.file_gives WHERE sha256 = ${kept.sha256} AND machine_id = ${two}`)).length;
+    const read = (stream: Readable, upTo: number) =>
+      new Promise<number>(resolve => {
+        let got = 0;
+        stream.on('data', (chunk: Buffer) => {
+          got += chunk.length;
+          if (got >= upTo) stream.destroy();
+        });
+        stream.on('close', () => resolve(got));
+      });
+
+    const cut = await s.leader.give(two, kept.sha256);
+    if (cut.status !== 200) throw new Error(`given ${cut.status}`);
+    expect(await read(cut.stream(), 1)).toBeLessThan(cut.length);
+    expect(await gives()).toBe(0);
+    expect((await s.app.inject({ method: 'POST', url: '/api/network/files', payload: { held: [kept.sha256], dropped: [] }, ...from(two) })).json()).toMatchObject({ again: [kept.sha256] });
+
+    /* A file that came out shorter than it was when it was given, as one cut on the disk meanwhile, is not given either. */
+    const path = join(s.leaderDir, 'store', kept.sha256.slice(0, 2), kept.sha256);
+    const short = await s.leader.give(two, kept.sha256);
+    if (short.status !== 200) throw new Error(`given ${short.status}`);
+    const sealed = await readFile(path);
+    await truncate(path, 1000);
+    expect(await read(short.stream(), Infinity)).toBe(1000);
+    expect(await gives()).toBe(0);
+    await writeFile(path, sealed);
+
+    const whole = await s.leader.give(two, kept.sha256);
+    if (whole.status !== 200) throw new Error(`given ${whole.status}`);
+    expect(await read(whole.stream(), Infinity)).toBe(whole.length);
+    expect(await gives()).toBe(1);
   });
 
   it('seals a file uploaded again, which the leading machine let go of, under the salt its copies elsewhere have', async () => {
