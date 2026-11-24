@@ -266,37 +266,27 @@ describe('the updater of a worker that is given the data', () => {
     const env = { ...WORKER, HORNHOOF_ROLE: 'data' };
     const s = stand(copy);
     request(s);
-    const r = await runOnce(s, null, { ...env, STUB_POLICY_ROLES: 'acme_reader|acme_auditor' });
-    /* Asked of the leader through the keeper's door, as the role that only reads, before the schema is read. */
-    const roles = r.calls.findIndex(c => c === "docker exec -e PGPASSWORD dbcid psql -h keeper -p 7432 -U hornhoof_replica -d hornhoof -At -c SELECT DISTINCT r FROM pg_policies, unnest(roles) AS r WHERE r <> 'public' ORDER BY 1");
-    expect(roles).toBeGreaterThan(-1);
-    expect(roles).toBeLessThan(r.calls.findIndex(c => c.includes(' pg_dump ')));
+    const roles = ['test_reader', 'Test "Auditor"'].map(name => Buffer.from(name).toString('hex'));
+    const r = await runOnce(s, null, { ...env, STUB_SCHEMA_ROLES: roles.join('\n') });
+    const looked = r.calls.findIndex(c => c.includes('FROM pg_catalog.pg_policy'));
+    expect(looked).toBeGreaterThan(-1);
+    expect(looked).toBeLessThan(r.calls.findIndex(c => c.includes(' pg_dump ')));
     expect(r.calls.filter(c => c === 'psql had its password')).toHaveLength(1);
-    expect(readFileSync(join(s.dir, 'loaded'), 'utf8')).toBe(
-      [
-        'DO $roles$ BEGIN',
-        `IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'acme_reader') THEN CREATE ROLE "acme_reader" NOLOGIN; END IF;`,
-        `IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'acme_auditor') THEN CREATE ROLE "acme_auditor" NOLOGIN; END IF;`,
-        'END $roles$;',
-        '-- the schema of hornhoof',
-        '-- the rows of drizzle.__drizzle_migrations',
-        'REVOKE ALL ON ALL FUNCTIONS IN SCHEMA net FROM PUBLIC;',
-        '',
-      ].join('\n'),
-    );
+    const loaded = readFileSync(join(s.dir, 'loaded'), 'utf8');
+    expect(loaded).toContain(`pg_catalog.string_to_array('${roles.join(',')}', ',')`);
+    expect(loaded).toContain("pg_catalog.format('CREATE ROLE %I NOLOGIN NOINHERIT', wanted)");
+    expect(loaded.indexOf('END $roles$;')).toBeLessThan(loaded.indexOf('-- the schema of hornhoof'));
     expect(r.calls).toContain('docker exec -i dbcid psql -U hornhoof -1 -v ON_ERROR_STOP=1 -d hornhoof_next');
     expect(readdirSync(join(s.control, 'schema'))).toEqual(['3.done']);
     expect([r.out, ...r.calls].join('\n').includes(password)).toBe(false);
 
-    /* A name that is not a plain role's stands in no statement: nothing is loaded, and the line says why. */
-    for (const odd of ['acme" SUPERUSER; --', 'Acme', 'a reader', `x${'y'.repeat(63)}`]) {
-      const bad = stand(copy);
-      request(bad);
-      const refused = await runOnce(bad, null, { ...env, STUB_POLICY_ROLES: `acme_reader|${odd}` });
-      expect(readFileSync(join(bad.control, 'schema', '3.failed'), 'utf8').trim(), odd).toBe("The company server's schema names a role that is not a plain name.");
-      expect(refused.calls.some(c => c.includes(' pg_dump ') || c.includes('ON_ERROR_STOP')), odd).toBe(false);
-      expect(existsSync(join(bad.dir, 'loaded')), odd).toBe(false);
-    }
+    const bad = stand(copy);
+    request(bad);
+    const refused = await runOnce(bad, null, { ...env, STUB_SCHEMA_ROLES: `${roles[0]}\ninvalid hex` });
+    expect(readFileSync(join(bad.control, 'schema', '3.failed'), 'utf8').trim()).toBe("The company server's schema returned an invalid role name.");
+    expect(refused.calls.some(c => c.includes(' pg_dump ') || c.includes('ON_ERROR_STOP=1 -d'))).toBe(false);
+    expect(existsSync(join(bad.dir, 'loaded'))).toBe(false);
+
     /* The leader that cannot be asked leaves the line of a schema that could not be read. */
     const deaf = stand(copy);
     request(deaf);

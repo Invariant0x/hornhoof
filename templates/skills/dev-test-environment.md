@@ -1,7 +1,5 @@
 ---
 id: dev-test-environment
-title: { en: "Product test environments", ru: "Тестовая среда продукта" }
-description: { en: "Use when a product repository arrives or its dependencies, services, migrations or test runner change.", ru: "Используй при появлении репозитория продукта или изменении зависимостей, служб, миграций и запуска тестов." }
 kind: procedure
 sources: []
 ---

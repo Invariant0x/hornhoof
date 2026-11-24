@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { DICTIONARIES, LANGUAGES, type Language } from '../../src/i18n';
+import { LANGUAGES, type ShippedLanguage } from '../../src/i18n';
+import { DICTIONARIES } from '../../src/i18n/dictionaries';
 import type { WaitingRequest } from '../../src/types';
 import { captureWith } from '../capture';
 import { MAX_QUESTION, QUESTION, servePeopleWaits, serveTasksBoard, TASKS } from './api';
@@ -9,7 +10,7 @@ const LONG_QUESTION = 'Какой текст показать покупател
 const LAST_QUESTION = 'Can we send the receipts on Monday?';
 const PREVIEW = 'https://acme.test/checkout-preview';
 
-async function openQueue(page: Page, lang: Language, skin: string, width: number, rtl: boolean) {
+async function openQueue(page: Page, lang: ShippedLanguage, skin: string, width: number, rtl: boolean) {
   await page.setViewportSize({ width, height: width === 375 ? 1260 : 1100 });
   await page.addInitScript(({ lang, skin, rtl }) => {
     localStorage.setItem('hh-lang', lang);
@@ -59,7 +60,7 @@ async function fits(region: Locator) {
   expect(overflow.document).toBeLessThanOrEqual(0);
 }
 
-async function choosePeople(page: Page, t: typeof DICTIONARIES[Language], width: number) {
+async function choosePeople(page: Page, t: typeof DICTIONARIES[ShippedLanguage], width: number) {
   const side = page.getByRole('navigation', { name: t.tracker.side.label });
   if (width === 375) await page.getByRole('button', { name: t.tracker.side.open, exact: true }).click();
   await side.getByRole('button', { name: new RegExp(`^${t.tracker.peopleWaits.title}`) }).click();

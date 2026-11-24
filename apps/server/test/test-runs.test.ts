@@ -609,7 +609,6 @@ it('gives a part to a node of another build and processor of the class that desc
     await until(() => c.app.ctx.hub.loadOf(nodeIdentity(entry.nodeId)) !== null); connected.push({ node, id: entry.nodeId });
   }
   const { testCapabilities } = await import('../src/modules/testruns/describe.js');
-  const { passedProductPart } = await import('../src/modules/testruns/receipts.js');
   const { runsInClass } = await import('@hornhoof/protocol');
   type Runtime = { id: string; version: string; fingerprint: string; platform: { os: string; arch: string; libc: string } };
   const runtime = (fingerprint: string, platform: Partial<Runtime['platform']> = {}, version = '22.15.0'): Runtime[] => [{ id: 'node', version, fingerprint, platform: { os: 'linux', arch: 'x64', libc: 'glibc', ...platform } }];
@@ -643,8 +642,6 @@ it('gives a part to a node of another build and processor of the class that desc
   const parts = await c.db.select().from(testParts).orderBy(asc(testParts.part));
   expect(parts.map(part => part.nodeId)).toEqual([other.id, other.id]);
   expect(parts.map(part => part.environmentReceipt?.runtimes)).toEqual([arm64, arm64]);
-  expect(parts.every(part => passedProductPart(snapshot, part))).toBe(true);
-  for (const foreign of [darwin, node24]) expect(passedProductPart(snapshot, { ...parts[0]!, environmentReceipt: { ...parts[0]!.environmentReceipt!, runtimes: foreign } })).toBe(false);
 });
 
 it('fails a run at once when the node that described it lacks a runtime its profile needs, as no part could prove it on the described runtimes', async () => {

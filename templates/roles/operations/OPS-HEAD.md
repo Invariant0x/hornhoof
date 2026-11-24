@@ -2,8 +2,6 @@
 id: OPS-HEAD
 department: operations
 kind: head
-title: { en: "Head of operations", ru: "Руководитель операционного отдела" }
-description: { en: "Leader for company operations and operational reliability.", ru: "Руководитель операционной работы компании и ее надежности." }
 tier: standard
 effort: medium
 perProduct: false

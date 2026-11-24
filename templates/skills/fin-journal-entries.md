@@ -1,7 +1,5 @@
 ---
 id: fin-journal-entries
-title: { en: "Journal entries", ru: "Бухгалтерские проводки" }
-description: { en: "Drafts journal entries with their supporting documents so a human can check and post them.", ru: "Готовит проводки с подтверждающими документами, чтобы человек мог проверить и провести их." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins finance/skills/journal-entry-prep/SKILL.md, anthropics/knowledge-work-plugins finance/skills/journal-entry/SKILL.md, msitarzewski/agency-agents finance/finance-bookkeeper-controller.md]
 ---

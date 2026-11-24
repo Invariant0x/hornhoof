@@ -14,7 +14,7 @@ import { attachmentBytesForPerson } from '../tasks/attachments.js';
 import { downloadFile, getUpdates, sendDocument, sendText, sendTyping, splitForTelegram, TelegramError, type TelegramUpdate } from './api.js';
 import { transcribe } from './transcribe.js';
 import { receive } from './inbox.js';
-import { agentName, WORDS } from './words.js';
+import { agentName, botWords } from './words.js';
 
 type BotRow = typeof telegramBots.$inferSelect;
 type ReplyRow = typeof telegramReplies.$inferSelect;
@@ -188,7 +188,7 @@ class Listener {
       const file = await attachmentBytesForPerson(this.ctx.db, person, pic.id);
       if (!file) continue;
       /* A bot sends no file over 50 MB: a big one goes as its link. */
-      if (file.big) await this.say(row.chatId, WORDS[row.lang].bigFile(file.name, fileLink(this.ctx.config.secret, await publicUrl(this.ctx.db, this.ctx.config), file.id)));
+      if (file.big) await this.say(row.chatId, botWords(row.lang).bigFile(file.name, fileLink(this.ctx.config.secret, await publicUrl(this.ctx.db, this.ctx.config), file.id)));
       else await sendDocument(
         this.ctx.config.telegramApiUrl,
         this.token,
@@ -262,7 +262,7 @@ class Listener {
       if (job?.status === 'done') await this.sayAnswer(person, row);
       if (job?.status === 'failed') {
         const [agent] = await db.select({ kind: agents.kind, name: agents.name }).from(agents).where(eq(agents.id, this.bot.agentId));
-        if (agent) await this.say(row.chatId, WORDS[row.lang].noAnswer(agentName(agent, row.lang)));
+        if (agent) await this.say(row.chatId, botWords(row.lang).noAnswer(agentName(agent, row.lang)));
       }
     } catch (err) {
       if (!chatGone(err)) throw err;

@@ -2,8 +2,6 @@
 id: DEV-FE
 department: development
 kind: member
-title: { en: "Interface developer", ru: "Разработчик интерфейсов" }
-description: { en: "Engineer of user interfaces and application interactions.", ru: "Инженер пользовательских интерфейсов и взаимодействия с приложением." }
 tier: standard
 effort: xhigh
 perProduct: false

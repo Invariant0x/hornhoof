@@ -3,6 +3,7 @@ import { useLanguage, useT } from '../i18n';
 import type { AgentCardView, PlanFallback, SubView } from '../types';
 import { FallbackIcon } from './icons';
 import { servingLabel } from './StaffCard';
+import { formatTagOf } from '@hornhoof/protocol';
 
 const planLabel = (s: SubView) => servingLabel({ kind: s.kind, label: s.label, provider: s.provider, owner: s.owner.name });
 
@@ -230,6 +231,6 @@ export function FallbackLine({ card }: { card: Pick<AgentCardView, 'fallback' | 
   const t = useT();
   const { language } = useLanguage();
   if (!card.fallback || !card.subscription) return null;
-  const until = card.fallback.until ? new Date(card.fallback.until).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' }) : null;
+  const until = card.fallback.until ? new Date(card.fallback.until).toLocaleString(formatTagOf(language), { dateStyle: 'short', timeStyle: 'short' }) : null;
   return <p className="warn-line" role="status">{t.agent.onFallback(planLabel(card.subscription), planLabel(card.fallback.home), until)}</p>;
 }

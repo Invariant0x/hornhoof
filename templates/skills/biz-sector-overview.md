@@ -1,7 +1,5 @@
 ---
 id: biz-sector-overview
-title: { en: "Sector overview", ru: "Обзор отрасли" }
-description: { en: "Explains how an industry works, who earns the money and what is changing, for a decision on a new market.", ru: "Объясняет, как устроена отрасль, кто в ней зарабатывает и что меняется, для решения о новом рынке." }
 kind: procedure
 sources: [anthropics/financial-services plugins/agent-plugins/market-researcher]
 ---

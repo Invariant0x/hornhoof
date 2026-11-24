@@ -1,7 +1,5 @@
 ---
 id: mkt-telegram-vk
-title: { en: "Messages for each social network", ru: "Сообщения для каждой соцсети" }
-description: { en: "Adapts messages to a social network and its audience.", ru: "Адаптирует сообщения к соцсети и ее аудитории." }
 kind: procedure
 sources: []
 ---

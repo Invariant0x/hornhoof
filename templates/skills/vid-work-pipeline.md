@@ -1,7 +1,5 @@
 ---
 id: vid-work-pipeline
-title: { en: "Set up and run video production", ru: "Настроить выпуск видео" }
-description: { en: "Connects video tools and tracks the brief, shots, checks and cost.", ru: "Помогает подключить инструменты и вести задание, кадры, проверки и расходы." }
 kind: procedure
 sources: []
 ---
