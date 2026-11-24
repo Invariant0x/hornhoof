@@ -33,6 +33,11 @@ import { useWorld } from '../skins/use-skin';
 /* The world map, its packs and PixiJS load only for a theme with a world (#1973). */
 const WorldMapScreen = lazy(() => import('./WorldMapScreen'));
 
+/* While the world's chunk downloads: the busy map, or nothing behind another tab. */
+function MapBusy({ parked }: Readonly<{ parked: boolean }>) {
+  return parked ? null : <div className="map" aria-busy="true"><MapVersion /></div>;
+}
+
 export { deptLayout, type DeptSpot } from '../map-arrange';
 
 /* The gauge of working agents runs over the top of the hub, 6 degrees clear of each end of its middle line. */
@@ -936,7 +941,7 @@ export function MapScreen({
 
   if (world !== 'standard') {
     return (
-      <Suspense fallback={parked ? null : <div className="map" aria-busy="true"><MapVersion /></div>}>
+      <Suspense fallback={<MapBusy parked={parked} />}>
         <WorldMapScreen
           world={world}
           parked={parked}
