@@ -8,6 +8,7 @@ import { tileCenterToWorld } from '../src/world/coords';
 import { DEFAULT_ISOMETRIC_PROJECTION } from '../src/world/manifest';
 import { runFiveYearSimulation } from '../src/world/simulator';
 import { createHornhoofLiveFixture, syncLiveSnapshotToCity } from '../src/world/live-sync';
+import { createResidentSimulation, stepResidentSimulation } from '../src/world/residents';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../src/world/terrain-engine';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 
@@ -126,6 +127,32 @@ describe("a city's roads over water", () => {
       expect(waterRoads(city, map), seed).toEqual([]);
       const joined = reachable(city);
       for (const b of city.buildings) expect(joined.has(`${b.door.col},${b.door.row}`), `${seed} ${b.id} door`).toBe(true);
+    }
+  });
+
+  /* Residents walk the streets alone, so with no bridge pictures no step of theirs is on water, and once the pack
+     has them they cross on the drawn bridge and nowhere else. */
+  it('keep residents off the water while the pack has no bridge pictures, and on the bridge alone once it has them', () => {
+    for (const seed of SEEDS) {
+      const fixture = createHornhoofLiveFixture();
+      const live = { ...fixture, company: { ...fixture.company, seed } };
+      const map = mapOf(seed);
+      const site = bridgeSite(map)!;
+      const wetSteps = (bridge: BridgeSite | null): Set<string> => {
+        const { city } = syncLiveSnapshotToCity(EGYPT_WORLD_PACK, map, live, null, bridge);
+        const sim = createResidentSimulation(EGYPT_WORLD_PACK, city, live);
+        const wet = new Set<string>();
+        for (let t = 0; t < 600; t++) {
+          stepResidentSimulation(sim, 0.5);
+          for (const r of sim.residents) if (map.isLiquid(Math.round(r.col), Math.round(r.row))) wet.add(`${Math.round(r.col)},${Math.round(r.row)}`);
+        }
+        return wet;
+      };
+      expect([...wetSteps(null)], `${seed} with no bridge`).toEqual([]);
+      const crossed = wetSteps(site);
+      expect(crossed.size, `${seed} residents cross by the bridge`).toBeGreaterThan(0);
+      const onBridge = new Set(bridgeTiles(site).map(t => `${t.col},${t.row}`));
+      expect([...crossed].filter(k => !onBridge.has(k)), `${seed} off the bridge`).toEqual([]);
     }
   });
 
