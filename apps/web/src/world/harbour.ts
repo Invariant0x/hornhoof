@@ -40,7 +40,14 @@ type Step = Readonly<{ dc: number; dr: number }>;
 
 /* Where a resident stands on the yard to take a stone or put one back, reached from the road at approach. */
 export type YardSpot = Readonly<{ col: number; row: number; approach: TileCoord; facing: Direction8 }>;
-export type HarbourYard = Readonly<{ col: number; row: number; span: number; spots: readonly YardSpot[] }>;
+export type HarbourYard = Readonly<{
+  col: number;
+  row: number;
+  span: number;
+  spots: readonly YardSpot[];
+  /* Free shore between the quay and the yard, part of the harbour's ground. */
+  shore: readonly TileCoord[];
+}>;
 export type HarbourPier = Readonly<{
   /* From the quay out over the water: the root first, the head last. */
   tiles: readonly TileCoord[];
@@ -154,6 +161,22 @@ function groundOf(pack: WorldPackManifest, map: GeneratedWorldMap, city: CitySta
       );
     },
   };
+}
+
+/* Every tile the harbour stands on, as "col,row": quay, piers, the shore behind, the yard, or the gate. Plants leave
+   them while the harbour is drawn. */
+export function harbourGround(plan: HarbourPlan): ReadonlySet<string> {
+  const tiles: TileCoord[] = [...plan.yard.shore];
+  for (let c = plan.yard.col; c < plan.yard.col + plan.yard.span; c++) {
+    for (let r = plan.yard.row; r < plan.yard.row + plan.yard.span; r++) tiles.push({ col: c, row: r });
+  }
+  if (plan.kind === 'river') {
+    tiles.push(...plan.quay);
+    for (const pier of plan.piers) tiles.push(...pier.tiles);
+  } else {
+    for (let c = plan.gate.col; c < plan.gate.col + 2; c++) for (let r = plan.gate.row; r < plan.gate.row + 2; r++) tiles.push({ col: c, row: r });
+  }
+  return new Set(tiles.map(t => key(t.col, t.row)));
 }
 
 /* The harbour of a pack that has art slots for one; a pack without them never shows a harbour, so none is planned. */
@@ -287,7 +310,7 @@ function yardBehind(g: Ground, quay: readonly TileCoord[], water: Step, along: S
       if (!tiles.every(t => g.free(t.col, t.row)) || !between.every(t => g.shore(t.col, t.row))) continue;
       const yard = lotOf(tiles);
       const spots = yardSpots(g, yard);
-      if (spots.length > 0) return { ...yard, spots };
+      if (spots.length > 0) return { ...yard, spots, shore: between };
     }
   }
   return null;
@@ -374,7 +397,7 @@ function yardBeside(g: Ground, gate: TileCoord, span: number): HarbourYard | nul
     if (!touches) continue;
     const yard = { col: o.col, row: o.row, span };
     const spots = yardSpots(g, yard);
-    if (spots.length > 0) return { ...yard, spots };
+    if (spots.length > 0) return { ...yard, spots, shore: [] };
   }
   return null;
 }

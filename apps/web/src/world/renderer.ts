@@ -71,7 +71,7 @@ import {
   type ResidentSimulation,
 } from './residents';
 import { renderResidentsFallback2D, renderResidentsToPixi, type ResidentArtContext } from './residents-renderer';
-import { boatCargoMaxOf, type HarbourPlan } from './harbour';
+import { boatCargoMaxOf, harbourGround, type HarbourPlan } from './harbour';
 import { harbourArtReady } from './harbour-renderer';
 import { PlantRenderer, type PlantStats } from './plant-renderer';
 import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas, smoothPixelsToCanvas, startSmoothChunkBake, type SmoothChunkBake } from './smooth-terrain-baker';
@@ -230,6 +230,9 @@ export class IsometricWorldEngine {
   /* Artist pictures and sheets from the pack's art folder; empty until art-index.json loads. */
   private artLibrary: WorldArtLibrary = WorldArtLibrary.none();
   private harbourArtCheck: Readonly<{ index: ArtIndex | null; plan: HarbourPlan; ready: boolean }> | null = null;
+  /* The tiles plants leave: the city's, and the harbour's while it is drawn, known by its tile list (#2006). */
+  private cityPlantCover: ((col: number, row: number) => boolean) | null = null;
+  private harbourCover: Readonly<{ plan: HarbourPlan | null; key: string; tiles: ReadonlySet<string> | null }> = { plan: null, key: '', tiles: null };
   private buildingArtPool: DisplayRunPool | null = null;
   private residentArtPool: DisplayRunPool | null = null;
   private loopArtPool: DisplayRunPool | null = null;
@@ -997,12 +1000,28 @@ export class IsometricWorldEngine {
     this.lotClearing = ground.clearing;
     this.chunkLotKeys.reset(ground.clearing);
     this.dirtyScene = true;
-    this.coverPlants(ground.cover);
+    this.cityPlantCover = ground.cover;
+    this.coverPlants();
   }
 
-  /* Plants leave the tiles the city covers. */
-  private coverPlants(cover: ((col: number, row: number) => boolean) | null): void {
-    this.plantRenderer?.setCityCover(cover);
+  /* Plants leave the tiles the city covers, and the harbour's while it is drawn. */
+  private coverPlants(): void {
+    const city = this.cityPlantCover;
+    const harbour = this.harbourCover.tiles;
+    /* A plant stands at a point; the tile it roots in is the one under it, as cityPlantCover reads it. */
+    this.plantRenderer?.setCityCover(
+      harbour ? (col, row) => harbour.has(`${Math.floor(col)},${Math.floor(row)}`) || (city?.(col, row) ?? false) : city,
+    );
+  }
+
+  /* The harbour drawn now, or null; plants are moved again only when the tiles it stands on change. */
+  private coverHarbour(plan: HarbourPlan | null): void {
+    if (plan === this.harbourCover.plan) return;
+    const tiles = plan ? harbourGround(plan) : null;
+    const key = tiles ? [...tiles].sort().join('|') : '';
+    const changed = key !== this.harbourCover.key;
+    this.harbourCover = { plan, key, tiles };
+    if (changed) this.coverPlants();
   }
 
   setSelectedResidentId(residentId: string | null): void {
@@ -1344,6 +1363,7 @@ export class IsometricWorldEngine {
       /* The harbour shows, and its carriers walk from the yard, once its art is in (#2006). */
       const harbour = this.residentSim.harbour;
       if (harbour) harbour.shown = this.harbourArtIn(harbour.plan);
+      this.coverHarbour(harbour?.shown ? harbour.plan : null);
       stepResidentSimulation(this.residentSim, dtMs / 1000);
       residentsAnimated = true;
       if (this.pack.art) {

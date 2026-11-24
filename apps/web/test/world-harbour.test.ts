@@ -5,6 +5,7 @@ import {
   YARD_FILL_STEPS,
   boatCargoMaxOf,
   harbourAt,
+  harbourGround,
   planHarbour,
   scheduleBoats,
   yardFillStage,
@@ -69,6 +70,18 @@ describe('The harbour where the work comes from (#2006)', () => {
       expect(Math.round(s.col) >= yard.col && Math.round(s.col) < yard.col + yard.span, 'the spot is on the yard').toBe(true);
       expect(Math.round(s.row) >= yard.row && Math.round(s.row) < yard.row + yard.span).toBe(true);
     }
+  });
+
+  it('names the ground it stands on, so plants leave it: quay, piers, the shore behind and the yard', () => {
+    const { map, city } = cityOf(EGYPT_WORLD_PACK, createHornhoofLiveFixture());
+    const plan = riverPlan(planHarbour(EGYPT_WORLD_PACK, map, city));
+    const ground = harbourGround(plan);
+    for (const t of [...plan.quay, ...plan.piers.flatMap(p => p.tiles), ...plan.yard.shore]) expect(ground.has(k(t.col, t.row)), `${t.col},${t.row}`).toBe(true);
+    for (let c = plan.yard.col; c < plan.yard.col + plan.yard.span; c++) {
+      for (let r = plan.yard.row; r < plan.yard.row + plan.yard.span; r++) expect(ground.has(k(c, r))).toBe(true);
+    }
+    for (const t of plan.yard.shore) expect(map.isLiquid(t.col, t.row) || city.roads.has(k(t.col, t.row))).toBe(false);
+    expect(ground.has(k(plan.piers[0]!.berth.col, plan.piers[0]!.berth.row)), 'the berth stays open water').toBe(false);
   });
 
   it('grows with the city: a longer quay and more piers in a bigger one', () => {
