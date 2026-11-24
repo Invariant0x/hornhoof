@@ -54,7 +54,7 @@ function openChunk(key: Buffer, n: number, last: boolean, sealed: Buffer): Buffe
 export function seal(key: Buffer): Transform {
   const salt = randomBytes(SALT);
   const k = fileKey(key, salt);
-  let held = Buffer.alloc(0);
+  let held: Buffer = Buffer.alloc(0);
   let n = 0;
   let started = false;
   const start = (out: Transform) => {
@@ -84,7 +84,7 @@ export function seal(key: Buffer): Transform {
 export function openSealed(key: Buffer): Transform {
   if (key.length !== KEY) throw new Error('The store key is 32 bytes.');
   let k: Buffer | null = null;
-  let held = Buffer.alloc(0);
+  let held: Buffer = Buffer.alloc(0);
   let n = 0;
   return new Transform({
     transform(chunk: Buffer, _encoding, done: TransformCallback) {

@@ -236,7 +236,8 @@ describe('computer volume isolation', () => {
     { variant: 'server', services: compose.services },
     { variant: 'worker', services: workerServices },
   ])('isolates the computer volume in the $variant compose', ({ services }) => {
-    expect(services.keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper', 'computer:/keeper/computer-control']);
+    /* The keeper shares the store of the company's files with the app, as it sends them to the other machines. */
+    expect(services.keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper', 'computer:/keeper/computer-control', 'files:/files']);
     expect(services.updater!.volumes).toContain('computer:/computer');
     expect(services.app!.volumes).toEqual([
       'control:/control',

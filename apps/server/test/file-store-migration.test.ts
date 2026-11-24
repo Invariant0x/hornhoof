@@ -40,7 +40,7 @@ async function upgraded(files: Old[], filesDir: string) {
   const client = await freshPglite();
   onTestFinished(() => client.close());
   const db = drizzle(client, { schema });
-  await migrate(db, { migrationsFolder: await migrationsUpTo(TURN_43) });
+  await migrate(drizzle(client), { migrationsFolder: await migrationsUpTo(TURN_43) });
   await client.exec(`
     insert into companies (id, name) values ('${COMPANY}', 'Acme');
     insert into agents (id, company_id, kind, name, model) values ('${AGENT}', '${COMPANY}', 'worker', 'Developer', '');
@@ -52,7 +52,7 @@ async function upgraded(files: Old[], filesDir: string) {
     if (file.disk) writeFileSync(join(filesDir, file.id), file.bytes);
   }
   const sizeBefore = rowsOf<{ n: string }>(await db.execute(sql`SELECT pg_total_relation_size('attachments') AS n`))[0]!.n;
-  await migrate(db, { migrationsFolder: MIGRATIONS });
+  await migrate(drizzle(client), { migrationsFolder: MIGRATIONS });
   return { client, db: db as unknown as Db, sizeBefore: Number(sizeBefore) };
 }
 
@@ -83,7 +83,7 @@ describe('the files of an installation from before the store', () => {
     ];
     const { db, sizeBefore } = await upgraded(old, filesDir);
     expect(await columnsOf(db)).toEqual(['bytes', 'sha256']);
-    const config = { secret: TEST_SECRET, filesDir } as Config;
+    const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
 
     /* The app stops right after it stored a file and before its row gave up the bytes. */
     class Stopping extends Files {
@@ -139,7 +139,7 @@ describe('the files of an installation from before the store', () => {
     const { db } = await upgraded([elsewhere, empty], filesDir);
     /* The disk file is on another machine: this one's folder lacks it. */
     rmSync(join(filesDir, elsewhere.id));
-    const config = { secret: TEST_SECRET, filesDir } as Config;
+    const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
     const ctx = { db, config, files: new Files(config) };
     /* The column holds no byte of either, so it went with the migration. */
     expect(await columnsOf(db)).toEqual(['sha256']);
@@ -158,7 +158,7 @@ describe('the store key', () => {
   it('is never used once the transaction that made it was rolled back', async () => {
     const db = await createTestDb();
     const filesDir = folder();
-    const config = { secret: TEST_SECRET, filesDir } as Config;
+    const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
     const files = new Files(config);
     await expect(
       db.transaction(async tx => {

@@ -7,7 +7,7 @@ import { TEST_SECRET } from './helpers-basic.js';
 
 /* What a test with no app keeps its files under: the tests' secret, so an app on the same database opens the same store
    key, and a store of its own. */
-const LOOSE = { secret: TEST_SECRET } as Config;
+const LOOSE = { secret: Buffer.from(TEST_SECRET, 'base64') } as Config;
 
 /* The store a test with no app reads and writes. */
 export const looseFiles = () => filesFor(LOOSE);

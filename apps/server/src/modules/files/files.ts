@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Readable } from 'node:stream';
+import { Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import { sql } from 'drizzle-orm';
 import type { Config } from '../../config.js';
@@ -110,9 +110,9 @@ export class Files {
   /* Keeps bytes that are here whole already; once more when the same content was leaving the store as they came. */
   async putBytes(db: FilesDb, bytes: Buffer | Uint8Array): Promise<Kept> {
     try {
-      return await this.put(db, [Buffer.from(bytes)]);
+      return await this.put(db, Readable.from([Buffer.from(bytes)]));
     } catch (err) {
-      if (err instanceof ApiError && err.reason === 'file_retry') return this.put(db, [Buffer.from(bytes)]);
+      if (err instanceof ApiError && err.reason === 'file_retry') return this.put(db, Readable.from([Buffer.from(bytes)]));
       throw err;
     }
   }

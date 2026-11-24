@@ -474,7 +474,7 @@ describe('GET /api/assistant/attachments/:id', () => {
     /* hh-attach keeps no backslash or line break in a name; one already in the database still goes out escaped. */
     const [odd] = await c.db
       .insert(attachments)
-      .values({ companyId: c.owner.companyId, jobId: run.jobId, agentId: agent.id, name: 'a\\b\r\nX-Injected: 1\u2028\ud800.txt', mediaType: 'application/octet-stream', bytes: BYTES, size: BYTES.length })
+      .values({ companyId: c.owner.companyId, jobId: run.jobId, agentId: agent.id, name: 'a\\b\r\nX-Injected: 1\u2028\ud800.txt', mediaType: 'application/octet-stream', sha256: await stored(c.db, BYTES, c.app.ctx.config), size: BYTES.length })
       .returning();
     const got = await download(c, ava.key, odd!.id);
     expect(got.statusCode).toBe(200);

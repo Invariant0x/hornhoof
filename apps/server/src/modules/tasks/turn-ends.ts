@@ -16,7 +16,7 @@ import { branchHolds } from './turn-integration.js';
    result already, moved by hand, and only a release recorded before main moved releases it. Nothing opens a turn in its
    place: the next result accepted into the department opens one, and a department without a repository never gets one. */
 
-type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readBranches' | 'readMerged' | 'readCompare' | 'log'>>;
+type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readBranches' | 'readMerged' | 'readCompare' | 'log' | 'files'>>;
 type Turn = typeof turns.$inferSelect;
 type Department = typeof departments.$inferSelect;
 

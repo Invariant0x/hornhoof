@@ -61,13 +61,13 @@ async function company(env: NodeJS.ProcessEnv = {}) {
 
 describe('a file sent to a head through its Telegram bot', () => {
   it('reaches the agent as a file it downloads and keeps in its repository, with the words under it', async () => {
-    const { tg, db, builtin, orchestrator } = await company();
+    const { tg, app, db, builtin, orchestrator } = await company();
     tg.files.set('zip-1', ZIP);
     tg.send(TOKEN, IVAN, { document: { file_id: 'zip-1', file_name: 'brief.zip', file_size: ZIP.length, mime_type: 'application/zip' }, caption: 'Материалы к запуску' });
     const run = await nextOf(builtin, 'job.run');
     const [kept] = await db.select().from(attachments).where(eq(attachments.agentId, orchestrator.id));
     expect(kept).toMatchObject({ name: 'brief.zip', mediaType: 'application/octet-stream', size: ZIP.length });
-    expect(Buffer.from(kept!.bytes!)).toEqual(ZIP);
+    expect(await app.ctx.files.bytes(db, kept!.sha256!)).toEqual(ZIP);
     expect(run.prompt).toContain('Материалы к запуску');
     expect(run.prompt).toContain(`brief.zip: hh-fetch message ${kept!.id}`);
     expect(run.prompt).toContain('A file came with this message');
