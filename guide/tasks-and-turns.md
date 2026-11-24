@@ -192,6 +192,15 @@ The files live in the company's file store, not in the database. Every machine t
 - The logs and files of a test or work run go 30 days after the run ends.
 - A file that no task, message or run names any more leaves the machines a day later.
 
+## How do files leave the database after an update from 0.43?
+
+After the update the server copies each file of the database into the store while it serves, checks each one there by its hash, and reads it from the store from then on. It deletes nothing by itself: the bytes stay in the database until the CEO says yes.
+
+- Once every file on the server is copied, the server writes a reconciliation in its log: how many files, distinct contents and bytes, how many files are not on this server (a big file kept on another machine's disk, or one lost before), the size of the database, and a digest of the list of every file's id, sha256 and size.
+- The CEO, or the orchestrator for him, reads it with `GET /api/files/move` and says yes with `POST /api/files/move/approve` and that digest. Nobody else can.
+- Only then does the server clear the bytes of exactly the files on that list, each only while the database still finds them the bytes the store keeps. It then drops the old column, gives the database's room back and writes its size before and after.
+- Until then the two rules that came with the store wait too: the files of tasks outside any turn and of old runs stay. The files of turns closed 30 days ago go as before.
+
 A comment, message, report or reason that carries a file pasted as a long run of base64 or hex is refused. The refusal says how to put the file on the task instead.
 
 ## How does an agent read a page that scripts build?

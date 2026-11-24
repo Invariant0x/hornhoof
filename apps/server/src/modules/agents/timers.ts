@@ -14,7 +14,7 @@ import { tellOfMachinesAway } from '../nodes/machine-away.js';
 import { tellOfMachinesLow } from '../nodes/machine-low.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { storeRound } from '../files/sweep.js';
-import { moveOldFiles } from '../files/mover.js';
+import { moveOldFiles, type MoveRound } from '../files/mover.js';
 import { reconcile, waitsOnPurpose } from '../tasks/reconcile.js';
 import { retryCallBatches } from '../calls/calls.js';
 import { wakeLeftBehind } from '../tasks/wake.js';
@@ -137,10 +137,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
     dropOldFiles(ctx, now).then(() => storeRound(ctx, now)).catch(failed('removing the files of old turns failed')),
     moveOldFiles(ctx)
-      .then(round => {
-        if (round.moved > 0 || round.waiting > 0) ctx.log.info({ moved: round.moved, waiting: round.waiting, finished: round.finished }, 'Files moved from the database into the store.');
-        if (round.stays) ctx.log.warn('Files stay in the database: this server has no FILES_DIR to keep them in.');
-      })
+      .then(round => tellMoveRound(ctx, round))
       .catch(failed('moving files from the database into the store failed')),
     dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
     checkTestTimes(ctx).catch(failed('checking test run times failed')),
@@ -149,6 +146,17 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
     tellOfMachinesLow(ctx).catch(failed('telling of machines short of disk space failed')),
   ]);
+}
+
+/* What a round of the mover did, in the log of the server. */
+function tellMoveRound(ctx: Ctx, round: MoveRound): void {
+  if (round.moved > 0 || round.waiting > 0) ctx.log.info({ moved: round.moved, waiting: round.waiting }, 'Files copied from the database into the store and checked there.');
+  if (round.ready) {
+    ctx.log.warn({ ...round.ready }, 'Every file of the database on this machine is in the store and checked. Its bytes stay in the database until the CEO says yes to this reconciliation (POST /api/files/move/approve with its digest).');
+  }
+  if (round.cleared) ctx.log.info({ cleared: round.cleared }, 'Files cleared from the database, as the CEO said yes.');
+  if (round.roomBack) ctx.log.info({ databaseBytesBefore: round.roomBack.before, databaseBytesAfter: round.roomBack.after }, 'The database gave its room back.');
+  if (round.stays) ctx.log.warn('Files stay in the database: this server has no FILES_DIR to keep them in.');
 }
 
 /* What is looked at as the app starts leading, without waiting for the first minute round. */

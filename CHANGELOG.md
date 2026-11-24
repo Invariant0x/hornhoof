@@ -5,6 +5,18 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Added
+
+- The CEO, or the orchestrator for him, says yes to clearing the files moved out of the database: `GET /api/files/move` shows each reconciliation of the move (its files, distinct contents and bytes, the files whose bytes are not on the server, the size of the database, and the digest of the list of every file's id, sha256 and size), and `POST /api/files/move/approve` with that digest lets the server clear exactly the files on that list. Nobody else can do either.
+
+### Changed
+
+- Files leave Postgres: the database keeps only a file's name, size and sha256, and its bytes live sealed with AES-256-GCM in the company's file store on its machines, with a copy on a second machine where the company has one. After the update the leading server copies the files of earlier versions into the store a few at a time while it serves, checks each by its hash and reads it from the store from then on, but deletes nothing by itself: once every file on the server is copied it writes a reconciliation in its log, and only after the CEO's yes to its digest does it clear those files' bytes, each only while Postgres still finds them the bytes stored, remove their big files from the disk, drop the old column and give the database's room back, writing its size before and after. A server with no `FILES_DIR` leaves them in Postgres. A file over 50 MB is no longer kept on the disk of one machine only. Going back to 0.43 after the clearing leaves the cleared files unread there, as 0.43 reads them from Postgres: the dump made before the update holds every one of them. Migration `file_store` adds the column `attachments.sha256` and the tables `net.files`, `net.file_copies`, `net.file_holders`, `net.file_key`, `net.file_moves` and `net.file_move_rows`.
+- Backups of the database no longer hold the bytes of files once they are cleared: a file whose row and content were removed comes back from no backup, and the dump made before the update is the only copy of such a file until it is pruned. A company with one machine keeps one copy of each file. An upload is answered after at most 10 seconds even when no second machine keeps the file yet.
+- Files on a task of no turn go 30 days after the task closed, and a test or work run's logs and files 30 days after the run ended, also on a task still open. On a server updated from 0.43 these two rules wait for the CEO's yes to the move, as the old column is still there until then.
+
 ## [0.43.0] - 2026-11-23
 
 ### Fixed

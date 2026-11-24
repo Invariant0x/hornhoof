@@ -1,11 +1,19 @@
 import { randomBytes } from 'node:crypto';
+import type { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/pglite';
 import { describe, expect, it } from 'vitest';
+import type { Db } from '../src/db/client.js';
+import * as schema from '../src/db/schema.js';
 import { agents, attachments, companies, departments, jobs, subscriptions, tasks, testRuns, turns } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
+import { finishMove } from '../src/modules/files/mover.js';
 import { dropDue, markUnused } from '../src/modules/files/sweep.js';
 import { dropOldFiles } from '../src/modules/tasks/attachments.js';
-import { setUpCompany, testApp } from './helpers.js';
+import { ownDatabases, setUpCompany, testApp } from './helpers.js';
+
+/* One test puts the old column back, which a shared database would carry into the next. */
+ownDatabases();
 
 /* What the store keeps and lets go of by itself, and what Postgres keeps of a file: only its name, size and hash. */
 
@@ -74,6 +82,28 @@ describe('the store lets go of files by itself', () => {
     for (const row of kept) expect(store.has(row.sha256!)).toBe(true);
     const left = rowsOf<{ sha256: string }>(await c.db.execute(sql`SELECT sha256 FROM net.files ORDER BY sha256`)).map(row => row.sha256);
     expect(left).toEqual([...new Set(kept.map(row => row.sha256!))].sort());
+  });
+
+  it('lets go of no file by the rules of this version while the database still holds bytes of earlier ones, only by those of 0.43', async () => {
+    const c = await company();
+    /* An installation of 0.43 in the middle of the move: the old column is there until the CEO's yes clears it. A database
+       of its own has not seen the column gone, as the app's saw it when it started. */
+    await c.db.execute(sql`ALTER TABLE attachments ADD COLUMN bytes bytea`);
+    const ctx = { ...c.app.ctx, db: drizzle(c.db.$client as unknown as PGlite, { schema }) as unknown as Db };
+    const now = new Date();
+    const ago = (days: number) => new Date(now.getTime() - days * DAY);
+    const ofOldTurn = await c.file((await c.task({ turnId: (await c.turn(ago(31))).id })).id, 'a.bin', randomBytes(1000));
+    const outside = await c.file((await c.task({ status: 'done', closedAt: ago(31) })).id, 'b.bin', randomBytes(1000));
+    const open = await c.task();
+    await c.run(open.id, 5, ago(31));
+    const ofRun = await c.file(open.id, 'tests-5-1.log', randomBytes(100));
+    expect(await dropOldFiles(ctx, now)).toBe(1);
+    expect(await c.ids()).not.toContain(ofOldTurn.id);
+    expect(await c.ids()).toEqual([outside.id, ofRun.id].sort());
+    /* Once the column went, as it goes after the CEO's yes, the rules of this version take their files too. */
+    expect(await finishMove(ctx)).toBe(true);
+    expect(await dropOldFiles(ctx, now)).toBe(2);
+    expect(await c.ids()).toEqual([]);
   });
 
   it('keeps a content a new upload names again before its day is over', async () => {
