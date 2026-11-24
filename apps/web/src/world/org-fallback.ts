@@ -234,6 +234,7 @@ export function snapshotFromOrg(org: Org): WorldLiveSnapshot {
     subscriptions,
     goals: [],
     activeCalls,
+    taskFlow: { open: 0, arrivals: [] },
     relocations: [],
     savedLayout: null,
     permissions: {

@@ -697,6 +697,19 @@ export type WorldLiveGoal = Readonly<{
   isPrimary: boolean;
 }>;
 
+/* Where the work comes from (#2006): how many tasks wait to be taken, and when the ones of the last
+   TASK_ARRIVAL_WINDOW_MS came, oldest first, at most TASK_ARRIVALS_MAX. Only tasks the viewer sees; a cancelled task
+   neither waits nor came. The world brings each arrival by boat (or caravan) to the yard, whose fill is the queue. */
+export const TASK_ARRIVAL_WINDOW_MS = 10 * 60_000;
+export const TASK_ARRIVALS_MAX = 40;
+
+export type WorldLiveTaskFlow = Readonly<{
+  /* Tasks with status open: created and not yet taken. */
+  open: number;
+  /* ISO creation times of the tasks that came in the window. */
+  arrivals: readonly string[];
+}>;
+
 export type WorldRelocationStatus = 'pending' | 'applied' | 'cancelled';
 
 export type WorldRelocationStored = Readonly<{
@@ -743,6 +756,7 @@ export type WorldLiveSnapshot = Readonly<{
   subscriptions: readonly WorldLiveSubscription[];
   goals: readonly WorldLiveGoal[];
   activeCalls?: readonly WorldLiveActiveCall[];
+  taskFlow: WorldLiveTaskFlow;
   relocations: readonly WorldRelocationRecord[];
   savedLayout: Record<string, unknown> | null;
   permissions: Readonly<{

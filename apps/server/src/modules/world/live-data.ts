@@ -4,6 +4,8 @@
 import {
   DEFAULT_STATUE_STAGES,
   STATUE_TASKS_PER_STAGE,
+  TASK_ARRIVALS_MAX,
+  TASK_ARRIVAL_WINDOW_MS,
   agentLevelFromAcceptedTasks,
   classifyAgentRole,
   departmentStageFromAcceptedTasks,
@@ -28,6 +30,7 @@ import {
   type WorldLiveMachine,
   type WorldLiveSnapshot,
   type WorldLiveSubscription,
+  type WorldLiveTaskFlow,
   type WorldRelocationRecord,
   type WorldRelocationStatus,
 } from '@hornhoof/protocol/world';
@@ -194,6 +197,7 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
         executorAgentId: tasks.executorAgentId,
         goalId: tasks.goalId,
         closedAt: tasks.closedAt,
+        createdAt: tasks.createdAt,
       })
       .from(tasks)
       .where(eq(tasks.companyId, companyId)),
@@ -575,6 +579,10 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
     subscriptions: liveSubscriptions,
     goals: liveGoals,
     activeCalls,
+    taskFlow: taskFlowOf(
+      taskRows.filter(t => seesTask(viewer, t)),
+      now,
+    ),
     relocations,
     savedLayout: storedLayoutRow?.layout ?? null,
     permissions: {
@@ -582,6 +590,18 @@ export async function readWorldLiveState(ctx: Ctx, me: Person): Promise<WorldLiv
       relocatableDepartmentIds,
     },
   };
+}
+
+/* The queue and the recent arrivals of the tasks a viewer sees (#2006): open ones wait in the yard; every task but a
+   cancelled one created in the window came by boat. */
+function taskFlowOf(rows: readonly { status: string; createdAt: Date }[], now: number): WorldLiveTaskFlow {
+  const arrivals = rows
+    .filter(t => t.status !== 'cancelled' && now - t.createdAt.getTime() <= TASK_ARRIVAL_WINDOW_MS)
+    .map(t => t.createdAt.getTime())
+    .sort((a, b) => a - b)
+    .slice(-TASK_ARRIVALS_MAX)
+    .map(ms => new Date(ms).toISOString());
+  return { open: rows.filter(t => t.status === 'open').length, arrivals };
 }
 
 /* Re-exported canonical level check so callers share one implementation across server and web. */

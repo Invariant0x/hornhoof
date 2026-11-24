@@ -797,4 +797,55 @@ describe('Stage 4 live read-only world API and God\'s Word relocation', () => {
     expect(state.activeCalls).toHaveLength(1);
     expect(state.activeCalls[0].callerAgentId).toBe(builder!.id);
   });
+
+  /* #2006: the harbour shows where the work comes from, read from the tasks as they stand. */
+  it('tells the world how many tasks wait to be taken and when the recent ones came, reading only', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    await db.update(companies).set({ theme: 'egypt' }).where(eq(companies.id, company!.id));
+    const before = await db.select({ status: tasks.status }).from(tasks);
+    const now = Date.now();
+    const ago = (minutes: number) => new Date(now - minutes * 60_000);
+    const row = (number: number, status: 'open' | 'working' | 'review' | 'waiting' | 'blocked' | 'done' | 'cancelled', createdAt: Date) => ({
+      companyId: company!.id,
+      number,
+      title: `Stone #${number}`,
+      status,
+      createdAt,
+      closedAt: status === 'done' || status === 'cancelled' ? createdAt : null,
+    });
+    await db.insert(tasks).values([
+      /* Two came a moment ago and one has waited half an hour: three in the queue. */
+      row(9001, 'open', ago(0.2)),
+      row(9002, 'open', ago(0.5)),
+      row(9003, 'open', ago(30)),
+      /* Came recently and already taken, in review, stuck or waiting: out of the queue, but their stones came by boat. */
+      row(9004, 'working', ago(1)),
+      row(9005, 'review', ago(3)),
+      row(9006, 'blocked', ago(2)),
+      row(9007, 'waiting', ago(4)),
+      /* Long done, and cancelled at once: neither waits nor came lately. */
+      row(9008, 'done', ago(60)),
+      row(9009, 'cancelled', ago(0.3)),
+    ]);
+    const insertSpy = vi.spyOn(db, 'insert');
+    const updateSpy = vi.spyOn(db, 'update');
+    const deleteSpy = vi.spyOn(db, 'delete');
+
+    const res = await app.inject({ url: '/api/world/state', ...as(ceo) });
+    expect(res.statusCode).toBe(200);
+    expect(insertSpy).not.toHaveBeenCalled();
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(deleteSpy).not.toHaveBeenCalled();
+    insertSpy.mockRestore();
+    updateSpy.mockRestore();
+    deleteSpy.mockRestore();
+
+    const { taskFlow } = res.json();
+    const openBefore = before.filter(t => t.status === 'open').length;
+    expect(taskFlow.open).toBe(openBefore + 3);
+    /* Oldest first, the last ten minutes. */
+    expect(taskFlow.arrivals).toEqual([ago(4), ago(3), ago(2), ago(1), ago(0.5), ago(0.2)].map(d => d.toISOString()));
+  });
 });

@@ -1045,6 +1045,7 @@ export function createHornhoofLiveFixture(): WorldLiveSnapshot {
     subscriptions,
     goals,
     activeCalls,
+    taskFlow: { open: 0, arrivals: [] },
     relocations: [],
     savedLayout: null,
     permissions: {
@@ -1090,6 +1091,7 @@ export function createEmptyCompanyFixture(): WorldLiveSnapshot {
     agents: [],
     subscriptions: [],
     goals: [],
+    taskFlow: { open: 0, arrivals: [] },
     relocations: [],
     savedLayout: null,
     permissions: { canRelocateAny: true, relocatableDepartmentIds: [] },
@@ -1157,6 +1159,7 @@ export function createNoSubscriptionFixture(): WorldLiveSnapshot {
       { id: 'sub-empty-1', label: 'No Active Plan', provider: 'claude', kind: 'personal', status: 'needs_login', fullness: 0, exhausted: true, active: false },
     ],
     goals: [],
+    taskFlow: { open: 0, arrivals: [] },
     relocations: [],
     savedLayout: null,
     permissions: { canRelocateAny: true, relocatableDepartmentIds: ['d-ops', 'd-dev', 'd-mkt'] },
