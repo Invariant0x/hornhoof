@@ -152,13 +152,6 @@ export const ru: Messages = {
     notResponding: 'Hornhoof не отвечает',
     tryAgain: 'Попробовать снова',
   },
-  connection: {
-    lost: { title: 'Нет связи с сервером', hint: 'Hornhoof подключится сам, перезагружать страницу не нужно.', long: 'Связи нет уже 2\u00a0мин. Проверьте интернет.' },
-    updating: { title: 'Сервер обновляется', hint: 'Это займет несколько минут. Hornhoof вернется сам, без перезагрузки.', long: 'Обновление идет дольше обычного.' },
-    trying: 'Пробуем снова…',
-    next: (seconds: number) => `Следующая попытка через ${seconds}\u00a0с`,
-    tryNow: 'Попробовать сейчас',
-  },
   login: {
     heading: 'Вход',
     submit: 'Войти',
@@ -1240,7 +1233,7 @@ export const ru: Messages = {
         noCore: host => `здесь Hornhoof работает без Docker; сделайте ${host} полной машиной.`,
         scope: (person, departments) =>
           `данные компании хранятся только на машинах тех, кто видит всю компанию, а ${person} ${
-            departments === undefined ? 'видит не всю' : departments === 0 ? 'не видит ни одного отдела' : departments === 1 ? 'видит один отдел' : `видит ${departments} ${plural('ru', departments, { one: 'отдел', few: 'отдела', many: 'отделов', other: 'отдела' })}`
+            departments === undefined ? 'видит не всю' : departments === 0 ? 'не видит ни одного отдела' : departments < 2 ? 'видит один отдел' : `видит ${departments} ${plural('ru', departments, { one: 'отдел', few: 'отдела', many: 'отделов', other: 'отдела' })}`
           }.`,
         noLink: 'скрытое имя компании на hornhoof.org еще не создано; Hornhoof создаст его, как только hornhoof.org ответит.',
       },
@@ -1582,13 +1575,14 @@ export const ru: Messages = {
       limitIs: (limit, unit) => `Без одобрения до ${limit}${unit ? ` ${unit}` : ''}`,
       channels: { message: 'Сообщения', price: 'Цены', publication: 'Публикации', commit: 'Коммиты', spend: 'Расходы', other: 'Все остальное' },
       autonomousRelease: 'Автономный выпуск',
-      autonomousReleaseHint: 'Когда режим включен, проверка может заменить карточку одобрения. Для точного коммита должны пройти все тесты, каждое изменение должно быть проверено, а в main коммит должен войти через fast-forward. Отдел может настроить режим через руководителя или оркестратор.',
+      autonomousReleaseHint: 'Когда режим включен, проверка может заменить карточку одобрения. Для точного коммита CI репозитория должен быть зеленым (или его нет совсем), каждое изменение должно быть проверено, а в main коммит должен войти через fast-forward. Отдел может настроить режим через руководителя или оркестратор.',
       autonomousReleaseWord: on => (on ? 'включен' : 'выключен'),
       autonomousReleaseState: on => (on ? 'Автономный выпуск: включен. Переключают люди, которые ведут этот отдел.' : 'Автономный выпуск: выключен. Переключают люди, которые ведут этот отдел.'),
       autonomousJournalTitle: 'Журнал автономного выпуска',
       autonomousJournalEmpty: 'Автоматически одобренных коммитов пока нет.',
       autonomousJournalWho: (agent, task) => `${agent} в #${task}`,
       autonomousJournalProof: (run, reviewer) => `полный прогон #${run}, PASS от ${reviewer}`,
+      autonomousJournalCi: (checks, reviewer) => (checks === null ? `CI нет, PASS от ${reviewer}` : `CI зеленый, ${checks} ${plural('ru', checks, { one: 'проверка', few: 'проверки', many: 'проверок', other: 'проверки' })}, PASS от ${reviewer}`),
     },
     structure: 'Структура отдела',
     staffMap: 'Карта сотрудников',
@@ -1763,6 +1757,10 @@ export const ru: Messages = {
     fullCommand: 'Полная команда тестов',
     fullCommandHint: 'Команда, которая запускает все тесты этого репозитория. Когда прогон именно этой команды заканчивается, Hornhoof ставит отметку на коммите в GitHub, и прошедший коммит не проверяется второй раз перед сборкой образов. Токену нужно право записывать статусы коммитов.',
     fullCommandIs: command => `Полная команда тестов: ${command}`,
+    releaseWorkflow: 'Релизный workflow',
+    releaseWorkflowHint: 'Файл workflow в GitHub Actions, полный прогон которого позволяет записать выпуск хода по CI этого репозитория, например .github/workflows/release.yml. Его называет человек: Hornhoof сам его не угадывает. Workflow принимает вход «да или нет» с именем full, который Hornhoof ставит, когда запускает его для выпуска; при full он гоняет все тесты и заканчивает название своего прогона на (full run).',
+    releaseWorkflowIs: path => `Релизный workflow: ${path}`,
+    noReleaseWorkflow: 'Релизный workflow не назван, поэтому выпуск не запишется по CI этого репозитория',
     noFullCommand: 'Полной команды тестов нет, поэтому GitHub сам проверяет каждый коммит',
     remove: 'Убрать',
     removeAsk: 'Убрать репозиторий? Клоны у агентов останутся, токен будет удален.',
@@ -1946,7 +1944,7 @@ export const ru: Messages = {
   companyTemplates: {
     heading: 'Начните с шаблона',
     hint: 'Шаблон сразу создает свои отделы и их сотрудников. Они начнут работать, как только вы подключите подписку. Все можно изменить позже. Выберите шаблон или начните с пустой компании.',
-    employees: n => `${n} ${n % 100 >= 11 && n % 100 <= 14 ? 'сотрудников' : n % 10 === 1 ? 'сотрудник' : n % 10 >= 2 && n % 10 <= 4 ? 'сотрудника' : 'сотрудников'}`,
+    employees: n => `${n} ${plural('ru', n, { one: 'сотрудник', few: 'сотрудника', many: 'сотрудников', other: 'сотрудника' })}`,
     departments: list => `Отделы: ${list}.`,
     empty: { name: 'Начать с пустой', description: 'Отделов пока нет. Оркестратор расспросит о компании и соберет их вместе с вами.' },
     project: { name: 'Проектная команда', description: 'Несколько человек делают один продукт.' },
@@ -2015,7 +2013,7 @@ export const ru: Messages = {
     riskClasses: { money: 'деньги', access: 'доступ', security: 'безопасность', data: 'данные', none: 'нет' },
     riskLine: (risk: string) => `риск: ${risk}`,
     keep: 'Оставить',
-    words: n => (n === 1 ? 'Исходный текст' : `Исходный текст, ${n} ${plural('ru', n, { one: 'сообщение', few: 'сообщения', many: 'сообщений', other: 'сообщения' })}`),
+    words: n => (n > 1 ? `Исходный текст, ${n} ${plural('ru', n, { one: 'сообщение', few: 'сообщения', many: 'сообщений', other: 'сообщения' })}` : 'Исходный текст'),
     table: {
       task: 'Задача',
     },
@@ -2047,11 +2045,17 @@ export const ru: Messages = {
       late: (n, what) => `Задача #${n} ждет${what ? ` ${what}` : ''} дольше срока, и решение дошло до вас.`,
       waitsFor: { after: 'другой задачи', review: 'проверки', person: 'ответа человека', run: 'прогона тестов', external: 'внешнего события' },
     },
+    copySchemaFailure: (host: string) => `Копия базы на машине ${host} не запустилась`,
+    copySchemaFailureSince: (attempt: number, at: string) => `База не загрузилась с попытки №${attempt} (${at}).`,
+    copySchemaFailureDo: 'Проверьте, что машина на связи и Docker запущен. Если сбой продолжается, попросите администратора проверить журнал обновлений на этой машине.',
     machineAway: (host: string, owner: string | null) => (owner ? `Машина ${host} (${owner}) не на связи` : `Машина ${host} не на связи`),
     machineAwaySince: (at: string, agents: number) => `Не на связи с ${at}. Агентов на ней: ${agents}.`,
     machineAwayKinds: { orchestrator: 'оркестратор', head: 'руководитель' },
     machineAwayImportant: (names: string) => `Среди них: ${names}.`,
     machineAwayDo: 'Что сделать: включите ее и поставьте на зарядку, войдите в учетную запись, проверьте, что Docker запустился.',
+    githubLimit: (repository: string) => `Лимит запросов GitHub для ${repository} исчерпан`,
+    githubLimitRetry: (time: string) => `Повторите действие после ${time} UTC.`,
+    githubLimitUnknown: 'GitHub не сообщил время сброса. Повторите действие позже.',
     machineBack: (host: string, at: string) => `Машина ${host} вернулась: ${at}.`,
     machineLow: (host, owner) => (owner ? `На машине ${host} (${owner}) мало места на диске` : `На машине ${host} мало места на диске`),
     machineLowFree: (free, total, need) => `Свободно: ${free} ГБ из ${total} ГБ. Нужно не меньше ${need} ГБ.`,
@@ -2070,6 +2074,12 @@ export const ru: Messages = {
     asksApprovalOf: agent => `${agent} просит вас это одобрить`,
     stuck: agent => `${agent} застрял`,
     asksChoice: agent => `${agent} просит выбрать`,
+    asksOther: {
+      question: agent => `${agent} спрашивает`,
+      choice: agent => `${agent} просит выбрать`,
+      approval: agent => `${agent} просит одобрить коммит`,
+      approvalOf: agent => `${agent} просит одобрить`,
+    },
     stuckText: (agent, n) =>
       `${agent} несколько ходов подряд не сдвигал задачу #${n}, и Hornhoof перестал его будить. Напишите, что ему нужно, чтобы продолжить, или отмените задачу, если она больше не нужна.`,
     inDetail: 'Подробнее',
@@ -3195,6 +3205,11 @@ export const ru: Messages = {
     no_head: 'У этого отдела еще нет руководителя. Сначала наймите его.',
     switched_off: 'Этот сотрудник сейчас выключен. Сначала включите его на схеме отдела.',
     repo_invalid: 'Нужен адрес https без имени и токена внутри, простое имя ветки, а у автора имя в одну строку и полная почта.',
+    github_rate_limited: (time: string | null) => time
+      ? `GitHub не ответил. Лимит запросов аккаунта исчерпан до ${time} UTC. Повторите после этого времени.`
+      : 'GitHub не ответил. Лимит запросов аккаунта исчерпан. Повторите позже.',
+    commit_history_unavailable: 'Репозиторий не подтвердил историю коммитов. Повторите попытку.',
+    repo_release_workflow_invalid: 'Назовите релизный workflow по пути к его файлу, например .github/workflows/release.yml.',
     repo_command_invalid: 'Если полная команда тестов называет свою часть через {part}, она должна назвать и число частей через {parts}.',
     repo_folder_taken: 'У другого репозитория этого отдела адрес кончается тем же именем. Агенты держат каждый репозиторий в папке с этим именем, поэтому в одном отделе не может быть обоих.',
     product_taken: 'В этом отделе уже есть продукт с таким названием. Выберите другое название или подключите репозиторий к этому продукту в списке выше.',
@@ -3234,3 +3249,5 @@ export const ru: Messages = {
     telegram_person_taken: 'Этот Telegram уже указан у другого человека.',
   },
 };
+
+export default ru;

@@ -1,7 +1,5 @@
 ---
 id: dev-deploy-rollback
-title: { en: "Deploy and roll back", ru: "Развертывание и откат" }
-description: { en: "Ships a build with a backup, a health check and a tested way back.", ru: "Выкатывает сборку с резервной копией, проверкой здоровья и проверенным путем назад." }
 kind: checklist
 sources: [anthropics/knowledge-work-plugins engineering/skills/deploy-checklist/SKILL.md, addyosmani/agent-skills skills/shipping-and-launch/SKILL.md, affaan-m/ECC skills/docker-patterns/SKILL.md]
 ---

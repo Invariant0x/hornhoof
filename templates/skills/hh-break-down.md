@@ -1,7 +1,5 @@
 ---
 id: hh-break-down
-title: { en: "Break work down", ru: "Разбить работу на задачи" }
-description: { en: "Keeps connected work with one owner and splits only independent parts so the department stays loaded.", ru: "Оставляет связанную работу у одного исполнителя и отдельно запускает только независимые части, чтобы отдел оставался загруженным." }
 kind: procedure
 sources: [obra/superpowers skills/writing-plans/SKILL.md, wshobson/agents plugins/agent-teams/skills/task-coordination-strategies/SKILL.md, addyosmani/agent-skills skills/planning-and-task-breakdown/SKILL.md]
 ---

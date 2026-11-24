@@ -1,7 +1,5 @@
 ---
 id: sup-reproduce-issue
-title: { en: "Reproduce the issue", ru: "Воспроизведение проблемы" }
-description: { en: "Turns a customer's description into exact steps that make the problem happen again.", ru: "Превращает описание клиента в точные шаги, которые снова вызывают проблему." }
 kind: procedure
 sources: [obra/superpowers skills/systematic-debugging/SKILL.md]
 ---

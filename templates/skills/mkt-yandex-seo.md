@@ -1,7 +1,5 @@
 ---
 id: mkt-yandex-seo
-title: { en: "Search visibility by market", ru: "Видимость в поиске по рынкам" }
-description: { en: "Checks how pages appear in the search service the audience uses.", ru: "Проверяет, как страницы видны в поиске, которым пользуется аудитория." }
 kind: procedure
 sources: []
 ---

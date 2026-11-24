@@ -1,7 +1,5 @@
 ---
 id: dev-cleanup
-title: { en: "Removing what is not needed", ru: "Уборка лишнего" }
-description: { en: "Before work is handed in, takes out what the change added or left behind and no longer needs, and proves nothing else moved.", ru: "Перед сдачей работы убирает то, что изменение добавило или оставило и что больше не нужно, и доказывает, что остальное не сдвинулось." }
 kind: checklist
 sources: [affaan-m/ECC agents/refactor-cleaner.md, addyosmani/agent-skills skills/code-simplification/SKILL.md]
 ---

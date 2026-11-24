@@ -1,7 +1,5 @@
 ---
 id: biz-competitive-landscape
-title: { en: "Competitive landscape", ru: "Конкурентный анализ" }
-description: { en: "Maps competitors and alternatives, compares them on what customers decide on, and finds the gaps.", ru: "Описывает конкурентов и альтернативы, сравнивает их по тому, что важно клиентам, и находит пробелы." }
 kind: procedure
 sources: [anthropics/financial-services plugins/agent-plugins/market-researcher/skills/competitive-analysis/SKILL.md, wshobson/agents plugins/startup-business-analyst]
 ---

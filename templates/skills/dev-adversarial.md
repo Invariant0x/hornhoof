@@ -1,7 +1,5 @@
 ---
 id: dev-adversarial
-title: { en: "Breaking it on purpose", ru: "Проверка на прочность" }
-description: { en: "Looks for where a preview build breaks: odd input, broken flows, contradictions in the logic.", ru: "Ищет, где предварительная сборка ломается: странный ввод, сломанные сценарии, противоречия в логике." }
 kind: gate
 sources: [garrytan/gstack review/specialists/red-team.md, msitarzewski/agency-agents security/security-penetration-tester.md, trailofbits/skills]
 ---

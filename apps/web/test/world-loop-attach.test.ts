@@ -113,7 +113,7 @@ const LOOP_PACK: WorldPackManifest = {
   ...STUB_DIAMOND_PACK,
   art: {
     baseUrl: '/world-art/test/',
-    buildings: { department: [{ id: 'hall', footprint: '3x3', label: { en: 'Hall', ru: 'Зал' } }] },
+    buildings: { department: [{ id: 'hall', footprint: '3x3', label: 'Hall' }] },
     loops: ['awning', 'smoke'],
   },
 };

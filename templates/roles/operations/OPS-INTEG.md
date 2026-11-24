@@ -2,8 +2,6 @@
 id: OPS-INTEG
 department: operations
 kind: member
-title: { en: "Integrations engineer", ru: "Инженер интеграций" }
-description: { en: "Engineer of service connections and tool integrations.", ru: "Инженер подключения сервисов и интеграции инструментов." }
 tier: standard
 effort: high
 perProduct: false

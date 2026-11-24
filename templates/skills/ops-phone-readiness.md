@@ -1,7 +1,5 @@
 ---
 id: ops-phone-readiness
-title: { en: "Keep company phones ready", ru: "Поддерживать готовность телефонов компании" }
-description: { en: "Checks the company's phones and restores their working settings after a restart or update.", ru: "Проверяет телефоны компании и восстанавливает рабочие настройки после перезапуска или обновления." }
 kind: procedure
 ---
 Read the phones tool or Machines, Company phones. The connected computer checks the settings when a phone joins, when the computer reconnects, after a phone session ends and every few minutes while the phone is idle. Use the latest reading, including any line that says which setting could not be verified. Look again after an update or restart and make sure the phone is ready before giving work that depends on it.

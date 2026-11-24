@@ -1,7 +1,5 @@
 ---
 id: dev-plan-review
-title: { en: "Design note", ru: "Записка о дизайне" }
-description: { en: "Writes a short design note for a new feature or a change that reshapes the architecture. Small or local work needs none.", ru: "Пишет короткую записку о дизайне новой функции или изменения, меняющего архитектуру. Мелкая или локальная работа обходится без нее." }
 kind: procedure
 sources: [garrytan/gstack plan-eng-review/SKILL.md.tmpl, affaan-m/ECC agents/architect.md, affaan-m/ECC skills/architecture-decision-records/SKILL.md]
 ---

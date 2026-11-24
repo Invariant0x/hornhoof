@@ -1,7 +1,5 @@
 ---
 id: mkt-product-context
-title: { en: "Product marketing context", ru: "Маркетинговый контекст продукта" }
-description: { en: "Keeps one shared document on who the product is for, what it does and how the company talks about it.", ru: "Ведет общий документ о том, для кого продукт, что он делает и как компания о нем говорит." }
 kind: procedure
 sources: [coreyhaines31/marketingskills skills/product-marketing/SKILL.md]
 ---

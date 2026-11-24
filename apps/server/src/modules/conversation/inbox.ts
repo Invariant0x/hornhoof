@@ -7,6 +7,7 @@ import { agentInbox, agents, companies, departments, jobs, type InboxMode, type 
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import type { MessageParty } from '../events/parties.js';
 import { appendEvent } from '../events/store.js';
+import { saying } from '../../locales/index.js';
 
 type Reader = Pick<Db, 'select'>;
 type Writer = Pick<Db, 'update' | 'insert' | 'select' | 'delete'>;
@@ -276,7 +277,6 @@ export async function markMail(db: Pick<Db, 'select' | 'update'>, agentId: strin
 export type MarkedBy = { party: MessageParty & { kind: 'agent' | 'person'; id: string }; reason: string };
 
 const letters = (n: number) => `${n} ${n === 1 ? 'letter' : 'letters'}`;
-const MARKED_RU = { read: 'прочитано', done: 'разобрано' } as const;
 
 /* Letters someone else marked go in the employee's log, so it sees who took what away and why: never a word to its
    program, a turn or a letter of its own. The reason is cleaned of secrets. */
@@ -290,7 +290,7 @@ export async function logMarked(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, agen
     kind: 'message',
     data: {
       text: `${name} marked ${letters(count)} ${status} in this inbox. Why: ${reason}`,
-      notification: { source: 'inbox_marked', tasks: [], detail: { en: `${status}: ${count}`, ru: `${MARKED_RU[status]}: ${count}` } },
+      notification: { source: 'inbox_marked', tasks: [], detail: saying(words => words.notices.markedCount(words.notices.marked[status], count)) },
       actor: by.party,
       inboxMarked: { by: { kind, id, name }, status, count, reason },
     },

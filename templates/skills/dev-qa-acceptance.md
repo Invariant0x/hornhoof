@@ -1,7 +1,5 @@
 ---
 id: dev-qa-acceptance
-title: { en: "Acceptance as a first user", ru: "Приемка глазами первого пользователя" }
-description: { en: "Checks an assigned candidate against its requirements as a new user and reports an evidence-based acceptance verdict.", ru: "Проверяет версию из задания по требованиям глазами нового пользователя и дает заключение по доказательствам." }
 kind: gate
 sources: [msitarzewski/agency-agents testing/testing-reality-checker.md, msitarzewski/agency-agents testing/testing-evidence-collector.md, garrytan/gstack qa/SKILL.md.tmpl]
 ---

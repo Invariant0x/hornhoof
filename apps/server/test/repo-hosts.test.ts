@@ -126,7 +126,7 @@ describe('a repository Hornhoof creates', () => {
       place: { id: c.sales.id, name: 'Marketing' },
       product: false,
       page: 'https://github.com/acme/marketing',
-      repository: { url: 'https://github.com/acme/marketing.git', branch: 'main', tokenLast4: '1111', author, testMemoryGb: 4, fullTestCommand: null },
+      repository: { url: 'https://github.com/acme/marketing.git', branch: 'main', tokenLast4: '1111', author, testMemoryGb: 4, fullTestCommand: null, releaseWorkflow: null },
     });
     const row = await deptOf(c, c.sales.id);
     expect(row).toMatchObject({ repoUrl: 'https://github.com/acme/marketing.git', repoBranch: 'main', repoTokenLast4: '1111' });

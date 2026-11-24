@@ -13,6 +13,7 @@ import {
   type ResidentArt,
 } from './art';
 import { parseArtTint, type DisplayRunPool, type WorldArtLibrary } from './art-runtime';
+import { residentDepthY } from './bridge-site';
 import type { CityBuilding, CityState } from './city-layout';
 import { tileCenterToWorld, tileTopVertexToWorld } from './coords';
 import type { WorldPackManifest } from './manifest';
@@ -146,11 +147,17 @@ function buildingExtrudedHeight(b: CityBuilding): number {
 
 function isOccludedByFrontBuilding(r: ResidentEntity, posX: number, posY: number): boolean {
   const sampleY = posY - 18;
+  /* The resident's ground point on the grid of tile edges the boxes use: a tile's centre lies half a tile in. */
+  const x = r.col + 0.5;
+  const y = r.row + 0.5;
   for (let i = 0; i < visibleBuildingBoxes.length; i++) {
     const b = visibleBuildingBoxes[i]!;
-    /* In 2:1 isometric painter's order, building b sits in front of (r.col, r.row) iff
-       r.col < b.maxCol and r.row < b.maxRow (not strictly South or East of the footprint). */
-    if (r.col < b.maxCol - 0.15 && r.row < b.maxRow - 0.15) {
+    /* A resident on a building's own lot, or stepping onto it, stands at its front edge at work there (#2001): in
+       front of it, not behind. */
+    if (x >= b.minCol && x <= b.maxCol && y >= b.minRow && y <= b.maxRow) continue;
+    /* In 2:1 isometric painter's order, building b sits in front of the resident iff its ground point is short of
+       the footprint's south-east and south-west edges. */
+    if (x < b.maxCol - 0.15 && y < b.maxRow - 0.15) {
       if (posX > b.minX + 6 && posX < b.maxX - 6 && sampleY > b.minY + 4 && sampleY < b.maxY - 6) {
         return true;
       }
@@ -206,6 +213,11 @@ function drawAltarArtPixi(ctx: ResidentArtContext, index: ArtIndex, sim: Residen
   sprite.scale.set(s);
   sprite.position.set(ctr.x, ctr.y);
   return true;
+}
+
+/* The depth a resident's feet stand at: over the deck it walks on where it is on the city's bridge, else its tile's centre. */
+function feetDepth(city: CityState | null, r: Readonly<{ col: number; row: number }>, tileH: number): number {
+  return residentDepthY(city?.bridge ?? null, r.col, r.row, tileH);
 }
 
 const PLACEHOLDER_ALPHA = 0.9;
@@ -310,7 +322,7 @@ export function renderResidentsToPixi(
     const selected = r.id === selectedResidentId;
     if (art) {
       /* Through the pool, art or placeholder, at the depth of the feet among buildings and plants. */
-      art.pool.depth = tileCenterToWorld(r.col, r.row, tileW, tileH).y;
+      art.pool.depth = feetDepth(city, r, tileH);
       const resolved = artIndex ? resolveResidentArt(pack, artIndex, r, sim.timeSec) : null;
       if (!resolved || !drawResidentArtPixi(art, resolved, r, pack, tileW, tileH, selected)) {
         drawResidentPlaceholderPixi(art.pool.graphics(), r, pack, tileW, tileH, selected);

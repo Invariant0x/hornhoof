@@ -26,7 +26,7 @@ function exec(command, extra = {}) {
 
 async function choose() {
   const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8'));
-  const found = await provedBase({ name: env.GITHUB_EVENT_NAME, event, sha: env.GITHUB_SHA }, { git, proved: async sha => (await proved(sha)).proved });
+  const found = await provedBase({ name: env.GITHUB_EVENT_NAME, event, sha: env.GITHUB_SHA, full: env.FULL_RUN === 'true' }, { git, proved: async sha => (await proved(sha)).proved });
   say(found.why);
   if (!found.base) return null;
   const { changes, moved } = changesSince(found.base, env.GITHUB_SHA, git);

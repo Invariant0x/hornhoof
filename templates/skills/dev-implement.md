@@ -1,7 +1,5 @@
 ---
 id: dev-implement
-title: { en: "Implementing a task", ru: "Выполнение задачи" }
-description: { en: "Takes a brief from start to a proved, committed result in small increments.", ru: "Доводит задание от начала до проверенного и закоммиченного результата небольшими шагами." }
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/implementer-prompt.md, addyosmani/agent-skills skills/incremental-implementation/SKILL.md, addyosmani/agent-skills skills/source-driven-development/SKILL.md]
 ---

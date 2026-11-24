@@ -11,6 +11,7 @@ import { lastTurnSigns } from '../tasks/turn-signs.js';
 import { notStep } from '../tools/steps.js';
 import type { NamedTurn, UpdateCalledOff, UpdateRequest, UpdateWaiting } from './control.js';
 import { holdTurns } from './drain.js';
+import { saying } from '../../locales/index.js';
 
 /* While an update waits for the agents, the working count is checked when it changes and this often besides. */
 const IDLE_CHECK_MS = 30_000;
@@ -67,7 +68,7 @@ function calledOffText(called: UpdateCalledOff, wait: Wait): string {
 async function tellOrchestrator(ctx: Ctx, companyId: string, text: string): Promise<void> {
   const [orchestrator] = await ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
   if (!orchestrator) return;
-  const detail = { en: 'update called off', ru: 'обновление отменено' };
+  const detail = saying(words => words.notices.updateCalledOff);
   await enqueueTurn(ctx, { companyId, agentId: orchestrator.id, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'service', tasks: [], detail } } });
 }
 

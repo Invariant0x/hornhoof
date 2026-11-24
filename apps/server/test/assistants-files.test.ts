@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agents, assistants, attachments, companies, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { disposition, fileLink } from '../src/modules/assistants/files.js';
 import { callSkill } from '../src/modules/assistants/skills.js';
-import { WORDS } from '../src/modules/assistants/words.js';
+import { REFUSAL_LANGUAGES, refusalWords } from '../src/modules/assistants/words.js';
 import { signedToken } from '../src/crypto/tokens.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
 import { as } from './helpers.js';
@@ -154,16 +154,16 @@ describe('a link to one file, for its owner to open on a phone', () => {
     for (const link of wrong) {
       const got = await opened(c, `https://ann.hornhoof.org/api/files/${link}`);
       expect(got.statusCode).toBe(404);
-      expect(got.json()).toEqual({ error: { code: 'not_found', message: WORDS.attachment_unknown!.en, reason: 'attachment_unknown' } });
+      expect(got.json()).toEqual({ error: { code: 'not_found', message: refusalWords('en').attachment_unknown!, reason: 'attachment_unknown' } });
     }
     await c.db.delete(attachments).where(eq(attachments.id, kept.id));
     expect((await opened(c, url)).statusCode).toBe(404);
   });
 });
 
-it('words every refusal as one neutral reason that reads after "<file name> did not come: ", in both languages', () => {
-  const said = Object.values(WORDS).flatMap(words => [words!.en, words!.ru]);
-  expect(said).toHaveLength(32);
+it('words every refusal as one neutral reason that reads after "<file name> did not come: ", in every language', () => {
+  const said = REFUSAL_LANGUAGES.flatMap(language => Object.values(refusalWords(language)));
+  expect(said).toHaveLength(16 * REFUSAL_LANGUAGES.length);
   for (const words of said) {
     expect(words).toMatch(/^(?:\p{Ll}|Hornhoof )/u);
     expect(words).not.toMatch(/[\u2013\u2014\u0401\u0451]|did not come|did not go|не дошел|не ушло|(?<!\p{L})(?:I|me|my|я|мне|меня|мой)(?!\p{L})/u);

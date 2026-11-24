@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { LANGUAGES, type Language, type Messages } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../src/i18n';
 import type { BuiltinView, MachineView, Org, PersonView, SubView } from '../src/types';
 import { ME, brokenHeaderWords, serveApi } from './api';
 
@@ -61,7 +61,7 @@ const SCREENS: Screen[] = [
 const ROWS = '.dt > tbody > tr.rm, .ptable > tbody > tr';
 const TABLE = 'table.dt, table.ptable';
 
-async function messagesFor(language: Language): Promise<Messages> {
+async function messagesFor(language: ShippedLanguage): Promise<Messages> {
   const dictionary = await import(`../src/i18n/${language}.ts`) as Record<string, Messages>;
   return dictionary[language]!;
 }
@@ -79,7 +79,7 @@ async function serve(page: Page, subs = SUBS) {
   await page.route(only('/api/people'), route => route.fulfill({ json: { people: PEOPLE } }));
 }
 
-async function open(page: Page, screen: Screen, language: Language, theme: 'light' | 'dark', dir: 'ltr' | 'rtl') {
+async function open(page: Page, screen: Screen, language: ShippedLanguage, theme: 'light' | 'dark', dir: 'ltr' | 'rtl') {
   await page.evaluate(({ language, theme }) => { localStorage.setItem('hh-lang', language); localStorage.setItem('hh-theme', theme); }, { language, theme });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.evaluate(direction => { document.documentElement.dir = direction; }, dir);
@@ -144,8 +144,8 @@ async function shoot(page: Page, info: TestInfo, name: string) {
 }
 
 /* The languages from the longest to the shortest on a screen, by the letters its table shows. */
-async function rank(page: Page, screen: Screen): Promise<Language[]> {
-  const ranked: { id: Language; letters: number }[] = [];
+async function rank(page: Page, screen: Screen): Promise<ShippedLanguage[]> {
+  const ranked: { id: ShippedLanguage; letters: number }[] = [];
   for (const { id } of LANGUAGES) {
     await open(page, screen, id, 'dark', 'ltr');
     ranked.push({ id, letters: await shownLength(page) });
@@ -155,7 +155,7 @@ async function rank(page: Page, screen: Screen): Promise<Language[]> {
 
 /* One look of a screen at every width: closed, and with the first row's card open on a sorting table. A desk shows the
    rows as a table. */
-async function every(page: Page, info: TestInfo, browserName: string, screen: Screen, language: Language, dir: 'ltr' | 'rtl') {
+async function every(page: Page, info: TestInfo, browserName: string, screen: Screen, language: ShippedLanguage, dir: 'ltr' | 'rtl') {
   const modes: Record<number, boolean> = {};
   for (const width of WIDTHS) {
     const place = `${screen.key} ${language} ${dir} ${width} ${browserName}`;
