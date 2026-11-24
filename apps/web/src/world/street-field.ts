@@ -1,10 +1,11 @@
-/* The city's streets baked into the ground (#1985). Each tier's streets are one strip with one soft edge: a pixel is
-   as opaque as the street nearest to it, so where streets cross, meet in a T or bend, their edges merge into one
-   outline instead of strips laid over each other doubling the light edge. A straight street is one run from its first
-   tile to its last. Across a street the pack's strip runs by the distance from its middle line, along it by the tile
-   axis, anchored to the world, so a straight street shows no seam; round a bend its ruts follow the turn, and where a
-   street ends with nothing meeting it they run straight on and fade out. The higher tier lies over the lower. A street runs into the bridge up to the water's tile edge, under the
-   bridge's first piece. Knows no world: the strips come from the pack. */
+/* The city's streets baked into the ground (#1985). All the streets are one field with one soft edge: a pixel is as
+   opaque as the street nearest to it, its colour mostly that street's, so where streets cross, meet in a T or bend,
+   their edges merge into one outline instead of strips laid over each other doubling the light edge. A straight street
+   is one run from its first tile to its last. Across a street its tier's strip runs by the distance from its middle
+   line, along it by the tile axis, anchored to the world, so a straight street shows no seam; round a bend its ruts
+   follow the turn, and where a street ends with nothing meeting it they run straight on and fade out. A lower street
+   runs into a higher one's edge, not across its middle, so the higher keeps its look. A street runs into the bridge up
+   to the water's tile edge, under the bridge's first piece. Knows no world: the strips come from the pack. */
 
 import type { RoadTier } from './city-layout';
 import type { ArtPixels } from './terrain-art';
@@ -31,7 +32,8 @@ export function paintsEveryStreet(strips: StreetStrips | undefined): boolean {
    one no street meets from the side: past it the strip keeps its rows straight instead of turning round the end. */
 type Piece = Readonly<{ axis: 'u' | 'v'; across: number; from: number; to: number; half: number; openFrom: boolean; openTo: boolean }>;
 type TierPiece = Readonly<{ tier: RoadTier; piece: Piece }>;
-type TierField = { strip: ArtPixels; half: number; byTile: Map<number, Piece[]> };
+/* A run with the strip it is painted with. */
+type FieldPiece = Piece & Readonly<{ strip: ArtPixels }>;
 
 /* The four neighbours of a tile: along which axis and to which side. */
 const NEIGHBOURS = [
@@ -52,13 +54,25 @@ function metFromSide(at: StreetsAt, col: number, row: number, axis: 'u' | 'v'): 
   return at.has(keyOf(col + dc, row + dr)) || at.has(keyOf(col - dc, row - dr));
 }
 
-/* The piece from a street tile toward its neighbour, under the lower tier of the two: to the neighbour's centre, or
-   to the edge of a bridge tile. Between two streets only the one on the lower side lays it. */
+/* Where the piece from a street tile toward its neighbour starts and ends, in tiles from the tile's centre: centre to
+   centre between streets of one tier; at a higher street's edge where it meets one, so the lower street runs into the
+   higher one's edge and not across its middle; to the edge of a bridge tile. */
+function pieceSpan(t: StreetTile, next: StreetTile, halfOf: (tier: RoadTier) => number): readonly [number, number] {
+  if (next.bridge) return [0, 0.5];
+  const step = TIER_ORDER[t.tier] - TIER_ORDER[next.tier];
+  if (step > 0) return [halfOf(t.tier), 1];
+  return step < 0 ? [0, 1 - halfOf(next.tier)] : [0, 1];
+}
+
+/* The piece from a street tile toward its neighbour, under the lower tier of the two. Between two streets only the
+   one on the lower side lays it. */
 function pieceToward(t: StreetTile, next: StreetTile, n: (typeof NEIGHBOURS)[number], halfOf: (tier: RoadTier) => number, at: StreetsAt): TierPiece | null {
   if (!next.bridge && n.side < 0) return null;
   const tier = next.bridge ? t.tier : lower(t.tier, next.tier);
-  const [along, across] = n.axis === 'u' ? [t.col + 0.5, t.row + 0.5] : [t.row + 0.5, t.col + 0.5];
-  const far = along + n.side * (next.bridge ? 0.5 : 1);
+  const [centre, across] = n.axis === 'u' ? [t.col + 0.5, t.row + 0.5] : [t.row + 0.5, t.col + 0.5];
+  const [start, end] = pieceSpan(t, next, halfOf);
+  const along = centre + n.side * start;
+  const far = centre + n.side * end;
   const openHere = !metFromSide(at, t.col, t.row, n.axis);
   const openThere = !metFromSide(at, next.col, next.row, n.axis);
   const [openFrom, openTo] = n.side > 0 ? [openHere, openThere] : [openThere, openHere];
@@ -104,7 +118,7 @@ function piecesOf(tiles: readonly StreetTile[], halfOf: (tier: RoadTier) => numb
 }
 
 /* Files a piece under every tile its strip can reach, so a pixel looks only at the pieces near it. */
-function indexPiece(byTile: Map<number, Piece[]>, p: Piece): void {
+function indexPiece(byTile: Map<number, FieldPiece[]>, p: FieldPiece): void {
   for (let a = Math.floor(p.from - p.half); a <= Math.floor(p.to + p.half); a++) {
     for (let b = Math.floor(p.across - p.half); b <= Math.floor(p.across + p.half); b++) {
       const k = p.axis === 'u' ? keyOf(a, b) : keyOf(b, a);
@@ -130,43 +144,25 @@ function signedDistance(p: Piece, u: number, v: number): number {
   return Math.sign(side || 1) * Math.hypot(past, side);
 }
 
-/* The tiers that have pieces and a strip, lowest first, each with its pieces filed by tile. */
-function tierFields(tiles: readonly StreetTile[], strips: StreetStrips, texelsPerTile: number): TierField[] {
+/* The runs that have a strip, each with its strip. */
+function fieldPieces(tiles: readonly StreetTile[], strips: StreetStrips, texelsPerTile: number): FieldPiece[] {
   const halfOf = (tier: RoadTier): number => (strips[tier]?.height ?? 0) / texelsPerTile / 2;
-  const fields = new Map<RoadTier, TierField>();
-  for (const { tier, piece } of piecesOf(tiles, halfOf)) {
+  return piecesOf(tiles, halfOf).flatMap(({ tier, piece }) => {
     const strip = strips[tier];
-    if (!strip) continue;
-    const f = fields.get(tier) ?? { strip, half: piece.half, byTile: new Map<number, Piece[]>() };
-    fields.set(tier, f);
-    indexPiece(f.byTile, piece);
-  }
-  return TIERS.flatMap(t => fields.get(t) ?? []);
+    return strip ? [{ ...piece, strip }] : [];
+  });
 }
 
 /* Builds the field of a set of street tiles, or null when none of them has a strip to be painted with. */
 export function streetField(tiles: readonly StreetTile[], strips: StreetStrips, texelsPerTile: number): StreetField | null {
-  const order = tierFields(tiles, strips, texelsPerTile);
-  if (order.length === 0) return null;
-  const tierOut = [0, 0, 0, 0];
-  return { at: (u, v, out) => compositeAt(order, texelsPerTile, u, v, out, tierOut) };
+  const pieces = fieldPieces(tiles, strips, texelsPerTile);
+  if (pieces.length === 0) return null;
+  const byTile = new Map<number, FieldPiece[]>();
+  for (const p of pieces) indexPiece(byTile, p);
+  return { at: (u, v, out) => fieldAt(byTile.get(keyOf(Math.floor(u), Math.floor(v))) ?? NO_PIECES, u, v, texelsPerTile, out) };
 }
 
-const NO_PIECES: readonly Piece[] = [];
-
-/* The tiers at (u, v), each over the ones below it, into out (straight colour and opacity). */
-function compositeAt(order: readonly TierField[], tpt: number, u: number, v: number, out: number[], tierOut: number[]): void {
-  out.fill(0, 0, 4);
-  const key = keyOf(Math.floor(u), Math.floor(v));
-  for (const f of order) {
-    const a = tierAt(f, f.byTile.get(key) ?? NO_PIECES, u, v, tpt, tierOut);
-    for (let i = 0; i < 3; i++) out[i] = out[i]! * (1 - a) + tierOut[i]! * a;
-    out[3] = out[3]! + a * (1 - out[3]!);
-  }
-  /* The colour so far is premultiplied by the opacity: give it back straight. */
-  const alpha = out[3]!;
-  for (let i = 0; i < 3 && alpha > 0; i++) out[i] = out[i]! / alpha;
-}
+const NO_PIECES: readonly FieldPiece[] = [];
 
 const stripRow = (strip: ArtPixels, offset: number, tpt: number): number => Math.min(strip.height - 1, Math.max(0, Math.floor(strip.height / 2 + offset * tpt)));
 
@@ -183,23 +179,20 @@ function stripPixel(strip: ArtPixels, sd: number, rowAt: number, along: number, 
 
 const pixel = [0, 0, 0];
 
-/* One tier at (u, v) into out, its opacity returned (0 where it lies not): as opaque as its most opaque piece there,
-   its colour taken mostly from the pieces whose middle is nearest, so the light edge of one street never shows across
-   another's middle. */
-function tierAt(f: TierField, near: readonly Piece[], u: number, v: number, tpt: number, out: number[]): number {
-  let alpha = 0;
+/* The streets at (u, v) into out: as opaque as the most opaque run there, the colour taken mostly from the runs whose
+   middle is nearest, so the light edge of one street never shows across another's middle. */
+function fieldAt(near: readonly FieldPiece[], u: number, v: number, tpt: number, out: number[]): void {
   let weights = 0;
-  out.fill(0, 0, 3);
+  out.fill(0, 0, 4);
   for (const p of near) {
     const sd = signedDistance(p, u, v);
-    const core = 1 - Math.abs(sd) / f.half;
+    const core = 1 - Math.abs(sd) / p.half;
     if (core <= 0) continue;
-    const a = stripPixel(f.strip, sd, rowOffset(p, u, v, sd), p.axis === 'u' ? u * tpt : v * tpt + V_AXIS_TEXEL_OFFSET, tpt, pixel);
+    const a = stripPixel(p.strip, sd, rowOffset(p, u, v, sd), p.axis === 'u' ? u * tpt : v * tpt + V_AXIS_TEXEL_OFFSET, tpt, pixel);
     const w = a * core ** 4 + 1e-6;
     for (let i = 0; i < 3; i++) out[i] = out[i]! + pixel[i]! * w;
     weights += w;
-    alpha = Math.max(alpha, a);
+    out[3] = Math.max(out[3]!, a);
   }
   for (let i = 0; i < 3 && weights > 0; i++) out[i] = out[i]! / weights;
-  return alpha;
 }
