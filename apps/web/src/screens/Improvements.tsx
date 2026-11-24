@@ -9,6 +9,7 @@ import { BusyLabel } from '../ui/BusyLabel';
 import { LoadFailure } from '../ui/LoadFailure';
 import { Markdown } from '../ui/Markdown';
 import { Feedback, type FeedbackStart } from './Feedback';
+import { formatTagOf } from '@hornhoof/protocol';
 
 function TaskLinks({ item, onTask }: { item: Improvement; onTask: (taskId: string) => void }) {
   const t = useT();
@@ -147,7 +148,7 @@ function RepeatsPress({ id, repeats, onChanged }: { id: string; repeats: number;
 function Fate({ id, sent, onChanged }: { id: string; sent: SentFate; onChanged: () => void }) {
   const t = useT();
   const { language } = useLanguage();
-  const when = new Date(sent.at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+  const when = new Date(sent.at).toLocaleString(formatTagOf(language), { dateStyle: 'medium', timeStyle: 'short' });
   const issue = sent.issue && ISSUE_PAGE.test(sent.issue.url) ? sent.issue : null;
   return (
     <div className="imp-fate">

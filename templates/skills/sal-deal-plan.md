@@ -1,7 +1,5 @@
 ---
 id: sal-deal-plan
-title: { en: "Deal plan", ru: "План сделки" }
-description: { en: "Maps the buyer's people and steps to a signed deal and keeps the plan current.", ru: "Описывает людей и шаги со стороны клиента до подписания и поддерживает план в актуальном виде." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins, msitarzewski/agency-agents sales/sales-deal-strategist.md]
 ---

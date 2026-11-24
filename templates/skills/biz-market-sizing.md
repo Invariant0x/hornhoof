@@ -1,7 +1,5 @@
 ---
 id: biz-market-sizing
-title: { en: "Market sizing", ru: "Оценка размера рынка" }
-description: { en: "Estimates the total, reachable and winnable market from the bottom up, with every input cited.", ru: "Оценивает общий, доступный и достижимый рынок снизу вверх, со ссылкой на каждый показатель." }
 kind: procedure
 sources: [wshobson/agents plugins/startup-business-analyst/skills/market-sizing-analysis/SKILL.md]
 ---

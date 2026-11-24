@@ -1,7 +1,5 @@
 ---
 id: home-smart-control
-title: { en: "Smart home care", ru: "Уход за умным домом" }
-description: { en: "Keeps smart devices updated and tuned and looks after scenes under the home notebook.", ru: "Держит умные устройства обновленными и настроенными и следит за сценариями по правилам дома." }
 kind: procedure
 ---
 1. **Read the devices**: within existing access, read what is connected, device metadata, firmware, and which need an update or are offline. This state check needs no action approval; it does not include camera streams, microphone content or recordings.

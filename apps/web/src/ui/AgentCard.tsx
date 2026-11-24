@@ -16,6 +16,7 @@ import { useNow } from './reset';
 import { AgentState, clockAt, type AgentLive } from './AgentState';
 import { byProvider, servingLabel } from './StaffCard';
 import { employeeKind, WorkerMark } from './WorkerMark';
+import { say, sayIf, formatTagOf } from '@hornhoof/protocol';
 
 /* live and serverNow: what its program does and the server's alarm, as the map read them, and the server's clock then. */
 /* onRemoved: the agent is gone, and so is what stood for it. */
@@ -272,7 +273,7 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
   const effortName = (level: string) => t.agent.efforts[level] ?? level;
   const where = [card.department?.name, card.product?.name].filter(Boolean).join(', ');
   const dirty = rawDraft !== null ? rawDraft !== card.raw : Object.keys(drafts).length > 0;
-  const when = (at: string | number) => new Date(at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
+  const when = (at: string | number) => new Date(at).toLocaleString(formatTagOf(language), { dateStyle: 'short', timeStyle: 'short' });
   const editable = card.canEdit;
   const stateAgent = liveState(card, live);
   const assignmentPart = card.parts.find(p => p.kind === 'assignment');
@@ -312,7 +313,7 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
     <PanelFrame label={t.window.cardOf(title)} heading={title} onClose={onClose}>
         <header className="ac-head">
           <h3>{title}</h3>
-          {card.role && card.role.title[language] !== card.name && <p>{card.role.title[language]}</p>}
+          {card.role && say(card.role.title, language) !== card.name && <p>{say(card.role.title, language)}</p>}
           {where && <p className="muted">{where}</p>}
           <p className="ac-state">
             {card.kind === 'worker' || card.kind === 'head'
@@ -394,8 +395,8 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
               <label key={s.id} className={s.locked ? 'lock' : ''}>
                 <input type="checkbox" checked={s.on || s.locked} disabled={!editable || s.locked} onChange={e => void change({ skills: { [s.id]: e.target.checked } })} />
                 <span>
-                  <b>{s.title[language]}</b>
-                  <small>{s.description[language]}</small>
+                  <b>{say(s.title, language)}</b>
+                  <small>{say(s.description, language)}</small>
                 </span>
                 {s.templateChanged && s.overridden && <em className="t-card-tag">{t.agent.templateChanged}</em>}
               </label>
@@ -454,7 +455,7 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
                 </div>
               ) : (
                 <div key={keyOf(p)} className="ac-part">
-                  <label htmlFor={`${id}-${keyOf(p)}`}>{p.title?.[language] ?? p.id}</label>
+                  <label htmlFor={`${id}-${keyOf(p)}`}>{sayIf(p.title, language) ?? p.id}</label>
                   {p.templateChanged && p.overridden && <em className="t-card-tag">{t.agent.templateChanged}</em>}
                   <textarea
                     id={`${id}-${keyOf(p)}`}

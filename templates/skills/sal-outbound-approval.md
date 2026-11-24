@@ -1,7 +1,5 @@
 ---
 id: sal-outbound-approval
-title: { en: "Writing to people", ru: "Письма людям" }
-description: { en: "Writes letters and messages itself from the department's mailbox and marks each one in the department's git, so any colleague can go on.", ru: "Сам пишет письма и сообщения из ящика отдела и отмечает каждое в git отдела, чтобы любой коллега мог продолжить." }
 kind: gate
 sources: []
 ---

@@ -3,7 +3,7 @@ import { unisolated } from './bidi';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { LANGUAGES, LanguageProvider, type Language, type Messages } from '../src/i18n';
+import { LANGUAGES, LanguageProvider, type ShippedLanguage, type Messages } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { Shell } from '../src/screens/Shell';
@@ -29,7 +29,7 @@ const REPO = { url: 'https://github.com/acme/app.git', branch: 'main', tokenLast
 const LENA = { id: 'p6', name: 'Lena', email: 'lena@acme.com', title: 'Product lead', status: 'active' as const, isOwner: false, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] } };
 const listed = (id: string, name: string): Me => ({ ...ME, person: { ...ME.person, id, name, scopeKind: 'listed', isOwner: false } });
 
-const messages: Record<Language, Messages> = { en, ru };
+const messages: Record<ShippedLanguage, Messages> = { en, ru };
 /* The shortest and the longest shipped language by the words of a route, and every right to left one. */
 const routeLocales = LANGUAGES.map(({ id }) => {
   const route = messages[id].pipelineCatalog['development-changes'];

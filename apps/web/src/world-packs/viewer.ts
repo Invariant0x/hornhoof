@@ -20,36 +20,15 @@ import {
   type ViewerArtMode,
   type ViewerLang,
 } from './viewer-core';
+import { SOURCE_LOCALE } from '@hornhoof/protocol';
+import type { ViewerCopy } from './viewer-locales/en';
 
-const COPY: Record<
-  ViewerLang,
-  { title: string; zoomIn: string; zoomOut: string; reset: string; overview: string; overviewHint: string; close: string; seed: string; hint: string; loading: string }
-> = {
-  ru: {
-    title: 'Карта Египта',
-    zoomIn: 'Приблизить',
-    zoomOut: 'Отдалить',
-    reset: 'Масштаб 100%',
-    overview: 'Вид сверху',
-    overviewHint: 'Нажмите на место, куда перейти',
-    close: 'Закрыть',
-    seed: 'Карта',
-    hint: 'Тяните карту мышью или пальцем. Колесо или щипок меняет масштаб, стрелки и WASD двигают карту.',
-    loading: 'Карта строится…',
-  },
-  en: {
-    title: 'Egypt map',
-    zoomIn: 'Zoom in',
-    zoomOut: 'Zoom out',
-    reset: 'Zoom to 100%',
-    overview: 'Overview',
-    overviewHint: 'Tap the place to go to',
-    close: 'Close',
-    seed: 'Map',
-    hint: 'Drag the map with the mouse or a finger. The wheel or a pinch zooms, arrows and WASD move the map.',
-    loading: 'Building the map…',
-  },
-};
+/* The words of the viewer in the language asked, from the file of its id in viewer-locales/, brought when it is asked for. */
+const COPY_FILES = import.meta.glob<{ default: ViewerCopy }>(['./viewer-locales/??.ts', './viewer-locales/??-*.ts']);
+async function copyIn(language: ViewerLang): Promise<ViewerCopy> {
+  const own = COPY_FILES[`./viewer-locales/${language}.ts`];
+  return (await (own ?? COPY_FILES[`./viewer-locales/${SOURCE_LOCALE}.ts`]!)()).default;
+}
 
 const ART_MODE = (import.meta.env.VITE_WORLD_VIEWER_ART as ViewerArtMode | undefined) ?? 'own';
 const PACK = viewerPack(EGYPT_WORLD_PACK, ART_MODE, window.location.href);
@@ -97,7 +76,7 @@ function button(text: string, label: string, testId: string, onClick: () => void
 }
 
 class WorldViewer {
-  private readonly t: (typeof COPY)[ViewerLang];
+  private readonly t: ViewerCopy;
   private readonly host = el('div', { className: 'world' });
   private readonly loading = el('div', { className: 'loading' });
   private readonly zoomLabel: HTMLButtonElement;
@@ -116,8 +95,8 @@ class WorldViewer {
   private pinch: { from: readonly [Point2D, Point2D]; ids: readonly [number, number]; camera: CameraState } | null = null;
   private gesture: { zoom: number } | null = null;
 
-  constructor(lang: ViewerLang, seed: string) {
-    this.t = COPY[lang];
+  constructor(lang: ViewerLang, copy: ViewerCopy, seed: string) {
+    this.t = copy;
     this.seed = seed;
     document.documentElement.lang = lang;
     document.title = this.t.title;
@@ -404,4 +383,5 @@ class WorldViewer {
 }
 
 const query = readViewerQuery(window.location.search, navigator.language || 'en');
-void new WorldViewer(query.lang, query.seed).open(query.seed);
+const copy = await copyIn(query.lang);
+void new WorldViewer(query.lang, copy, query.seed).open(query.seed);

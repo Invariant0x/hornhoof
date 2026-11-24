@@ -2,8 +2,6 @@
 id: DSN-UI
 department: design
 kind: member
-title: { en: "Product UI designer", ru: "Дизайнер интерфейса продукта" }
-description: { en: "Designer of product interfaces and user interactions.", ru: "Дизайнер интерфейсов продукта и взаимодействия с пользователем." }
 tier: standard
 effort: high
 perProduct: true

@@ -32,14 +32,14 @@ import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, attachments, companies, jobs, people, requests, taskEvents, tasks, type DecisionTopic, type RequestOption } from '../../db/schema.js';
+import { agentEvents, agents, attachments, companies, jobs, people, requests, taskEvents, tasks, type DecisionTopic, type RequestOption, type SubtaskReason } from '../../db/schema.js';
 import { clearlyAnswered, flat, holds } from './direct-words.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
 import { incomingWords } from '../conversation/turn-words.js';
-import { commitProof, proofLine } from '../testruns/commit-proof.js';
+import { proofSaid, type Said } from './release-ci.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
 import { handOff } from './pulses.js';
 import { recordCause } from './notification-cause.js';
@@ -139,6 +139,8 @@ export type NewTask = {
   afterPlans?: AfterPlans;
   independentPart?: IndependentPartInput;
   independentNone?: string;
+  /* Why a task under another is made; the tools and routes that keep the tree rules ask for it, tree-rules.ts. */
+  subtaskReason?: SubtaskReason;
   workKind?: Task['workKind'];
   riskClass?: Task['riskClass'];
   /* Of a task with nothing above it; one under a task is what that task is. */
@@ -171,6 +173,7 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
     urgent: parent.urgent,
     /* A part of the same work answers to the same person and serves its whole's goal. */
     responsiblePersonId: parent.responsiblePersonId,
+    askedByPersonId: parent.askedByPersonId,
     dueAt: parent.dueAt,
     createdByPersonId: actor.personId ?? null,
     createdByAgentId: actor.agentId ?? null,
@@ -226,6 +229,7 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   const declaration = checkIndependent(input.after ?? [], input.independentPart, input.independentNone, null);
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
   await requireNewCleanup(ctx, actor, assignee.companyId, input);
+  await requireNewAsker(ctx, actor, assignee.companyId, input);
   await requireNewReviewer(ctx, assignee, input);
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
@@ -234,6 +238,17 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   const plan = await departmentStages(ctx, input.departmentId, tracker.pipelineId);
   const architect = await resolveArchitect(ctx, assignee, input, plan);
   return { assignee, architect, parent, declaration, plan, tracker };
+}
+
+/* Who asked for work is named by a person for their own request, or by the orchestrator for a person's: never by a head or a worker. */
+async function requireNewAsker(ctx: Ctx, actor: Actor, companyId: string, input: NewTask): Promise<void> {
+  if (!input.askedByPersonId) return;
+  if (actor.personId) {
+    if (input.askedByPersonId !== actor.personId) throw refuse(403, 'task_not_yours', 'A person can name only themselves as the one who asked.');
+    return;
+  }
+  const by = actor.agentId ? await liveAgent(ctx.db, companyId, actor.agentId) : null;
+  if (by?.kind !== 'orchestrator') throw refuse(403, 'task_not_yours', 'Only the orchestrator names the person whose request work carries out.');
 }
 
 async function requireNewCleanup(ctx: Ctx, actor: Actor, companyId: string, input: NewTask): Promise<void> {
@@ -285,6 +300,7 @@ function newTaskValues(actor: Actor, input: NewTask, { assignee, architect, pare
         riskClass: input.riskClass,
         urgent: position.urgent,
         small: input.small === true,
+        subtaskReason: parent ? input.subtaskReason ?? null : null,
         createdByPersonId: actor.personId ?? null,
         createdByAgentId: actor.agentId ?? null,
         updatedAt: new Date(),
@@ -1105,12 +1121,12 @@ const approveOrDecline = (r: Pick<Request, 'commit'>) => (r.commit ? 'Approve or
 /* What the note on an answer says it let through: only an approval has one. */
 const answeredWork = (r: Pick<Request, 'kind' | 'commit' | 'approvalChannel' | 'approvalKind'>) => (r.kind === 'approval' ? approvedWhat(r) : r.commit);
 /* The test run that proves an approved commit, as the release rests on that commit. */
-const proofWords = async (db: Db, task: Task, found: Request, a: Answer) => (a.approve && found.commit ? ` ${proofLine(await commitProof(db, task, found.commit))}` : '');
+const proofWords = async (ctx: Said, task: Task, found: Request, a: Answer) => (a.approve && found.commit ? ` ${await proofSaid(ctx, task, found.commit)}` : '');
 
 /* An answer in words, for the one who asked and the log. */
-async function answerWords(db: Db, task: Task, found: Request, a: Answer, text: string, option: RequestOption | undefined): Promise<string> {
+async function answerWords(ctx: Said, task: Task, found: Request, a: Answer, text: string, option: RequestOption | undefined): Promise<string> {
   const more = text ? ` ${text}` : '';
-  if (found.kind === 'approval') return `${a.approve ? 'Approved' : 'Declined'} ${approvedWhat(found)}.${await proofWords(db, task, found, a)}${more}`;
+  if (found.kind === 'approval') return `${a.approve ? 'Approved' : 'Declined'} ${approvedWhat(found)}.${await proofWords(ctx, task, found, a)}${more}`;
   return option ? `Picked ${a.pick! + 1}: ${option.label}.${more}` : text || 'Try again.';
 }
 
@@ -1169,7 +1185,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     status = 'answered';
   }
   const task = await loadTask(ctx.db, found.taskId);
-  const said = await answerWords(ctx.db, task, found, a, text, option);
+  const said = await answerWords(ctx, task, found, a, text, option);
   let wakes: Wake[] = [];
   const row = await ctx.db.transaction(async tx => {
     /* The task first and then its request, in the order a cancel takes them, so the two never wait on each other. As the task

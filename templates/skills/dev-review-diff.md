@@ -1,7 +1,5 @@
 ---
 id: dev-review-diff
-title: { en: "Reviewing a change", ru: "Ревью изменения" }
-description: { en: "Reads a change against its brief and the engineering rules and finds what will break, whether the change is your own or someone else's.", ru: "Читает изменение против задания и инженерных правил и находит, что сломается, свое это изменение или чужое." }
 kind: procedure
 sources: [affaan-m/ECC agents/code-reviewer.md, obra/superpowers skills/requesting-code-review/code-reviewer.md, anthropics/claude-plugins-official plugins/pr-review-toolkit/agents/silent-failure-hunter.md, garrytan/gstack review/checklist.md]
 ---

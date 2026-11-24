@@ -2,8 +2,6 @@
 id: MKT-WRITE
 department: marketing
 kind: member
-title: { en: "Copywriter", ru: "Копирайтер" }
-description: { en: "Writer of marketing copy and product messages.", ru: "Автор маркетинговых текстов и сообщений о продукте." }
 tier: standard
 effort: high
 perProduct: false

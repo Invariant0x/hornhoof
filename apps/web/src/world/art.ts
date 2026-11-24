@@ -154,7 +154,8 @@ export type ArtBuildingStep = Readonly<{
   /* The step applies from this building stage or agent level on (houses grow by level). */
   fromStage?: number;
   fromLevel?: number;
-  label: Readonly<{ en: string; ru: string }>;
+  /* English; the words of another language are in world/pack-locales/ by this text. */
+  label: string;
   /* Drawn variants of the step, each a full set in its own folder v01, v02, ...; v01 is required, the rest optional. */
   variants?: number;
 }>;
@@ -186,6 +187,9 @@ export type WorldArtCatalog = Readonly<{
   loops?: readonly BuildingLoopKind[];
   /* Kinds whose stage pictures carry their own scaffolds and ramps: no kit module, crane or hoist goes over them. */
   ownConstruction?: readonly BuildingKind[];
+  /* The bridge over the map's water (bridge-site.ts): its pieces in both directions. Until all of them are in the
+     folder, no street crosses water. */
+  bridge?: boolean;
 }>;
 
 export const STANDARD_BUILDING_PICTURES = [
@@ -291,7 +295,16 @@ export const DIRECTION_ROWS: readonly UniqueRenderAngle5[] = ['N', 'NE', 'E', 'S
 /* The directions a sheet may draw: the west ones too, so a big carried item keeps its hand when the resident turns. */
 const DRAWABLE_DIRECTIONS: readonly Direction8[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
-export type DeclaredArtRole = 'building' | 'module' | 'altar' | 'flag' | 'capstone' | 'person' | 'cloak' | 'loop';
+export type DeclaredArtRole = 'building' | 'module' | 'altar' | 'flag' | 'capstone' | 'person' | 'cloak' | 'loop' | 'bridge';
+
+/* A bridge's pieces along one tile axis: the first over the water, any number of spans, the last (#1985). */
+export const BRIDGE_PIECES = ['start', 'span', 'end'] as const;
+export type BridgePiece = (typeof BRIDGE_PIECES)[number];
+
+/* A bridge piece's picture: one tile of the deck along axis 'u' (down right on screen) or 'v' (down left). */
+export function bridgePicturePath(axis: 'u' | 'v', piece: BridgePiece): string {
+  return `bridge/${axis}_${piece}.png`;
+}
 
 export type DeclaredArtFile = Readonly<{
   path: string;
@@ -442,7 +455,22 @@ export function declaredArtFiles(pack: WorldPackManifest): readonly DeclaredArtF
     out.push({ path: `loops/${loop}.png`, role: 'loop', passport: 'sheet', required: true });
   }
   if (art.people) out.push({ path: SLEEP_LOOP, role: 'loop', passport: 'sheet', required: false });
+  out.push(...declaredBridgeFiles(art));
   return out;
+}
+
+/* The bridge's pieces in both directions, when the catalog has a bridge. */
+function declaredBridgeFiles(art: WorldArtCatalog): DeclaredArtFile[] {
+  if (!art.bridge) return [];
+  return (['u', 'v'] as const).flatMap(axis => BRIDGE_PIECES.map(piece => ({ path: bridgePicturePath(axis, piece), role: 'bridge' as const, passport: 'picture' as const, required: true })));
+}
+
+/* The footprint a picture's passport must match: a module's from its folder, a building's from its step, a bridge
+   piece one tile; none for the rest. */
+function pictureFootprint(slot: DeclaredArtFile, path: string, footprintOf: ReadonlyMap<string, FootprintKey>): FootprintKey | null {
+  if (slot.role === 'module') return path.split('/')[1] as FootprintKey;
+  if (slot.role === 'building') return footprintOf.get(path.slice(0, path.lastIndexOf('/') + 1)) ?? null;
+  return slot.role === 'bridge' ? '1x1' : null;
 }
 
 export type ArtIndexReport = Readonly<{
@@ -706,10 +734,7 @@ export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtI
       continue;
     }
     if (slot.passport === 'picture') {
-      let fp: FootprintKey | null = null;
-      if (slot.role === 'module') fp = path.split('/')[1] as FootprintKey;
-      else if (slot.role === 'building') fp = footprintOf.get(path.slice(0, path.lastIndexOf('/') + 1)) ?? null;
-      checkPicture(pack, path, entry, fp, errors);
+      checkPicture(pack, path, entry, pictureFootprint(slot, path, footprintOf), errors);
     } else if (slot.passport === 'anchor') {
       const a = entry.passport as AnchorPassport | undefined;
       if (!a || !isPoint(a.anchor) || !pointInside(a.anchor, entry.w, entry.h)) {

@@ -2,8 +2,6 @@
 id: VID-REF
 department: video_production
 kind: member
-title: { en: "Shot reference artist", ru: "Автор образцов для кадров" }
-description: { en: "Prepares approved character, set, object and style references for the shots.", ru: "Готовит утвержденные образцы персонажей, мест, предметов и стиля для кадров." }
 tier: standard
 effort: medium
 perProduct: false

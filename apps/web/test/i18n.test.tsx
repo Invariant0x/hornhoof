@@ -2,7 +2,8 @@ import { render } from '@testing-library/react';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { api, ApiFailure } from '../src/api';
 import { ECHELON_STAGES } from '@hornhoof/protocol/echelons';
-import { detectLanguage, DICTIONARIES, errorText, LanguageProvider, LANGUAGES, plural, type Language } from '../src/i18n';
+import { detectLanguage, errorText, LanguageProvider, LANGUAGES, plural, type ShippedLanguage } from '../src/i18n';
+import { DICTIONARIES } from '../src/i18n/dictionaries';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { mockApi } from './api-mock';
@@ -71,7 +72,7 @@ describe('Russian vocabulary', () => {
 
 describe('Stage names', () => {
   /* A stage whose word a language truly spells as English does; none so far. */
-  const SAME_AS_ENGLISH: Partial<Record<Language, readonly string[]>> = {};
+  const SAME_AS_ENGLISH: Partial<Record<ShippedLanguage, readonly string[]>> = {};
 
   it('are in the own words of every shipped language, as call frames and task workflows show them', () => {
     const stages = (t: typeof en) => ({ ...Object.fromEntries(ECHELON_STAGES.map(s => [s, t.tasks.echelons.stages[s]])), ...Object.fromEntries(Object.entries(t.tasks.echelons.documentStages).map(([s, w]) => [`document.${s}`, w])) });
@@ -136,6 +137,21 @@ describe('errorText', () => {
     const unavailableProducer = new ApiFailure(503, 'unavailable', '', 'source_producer_unavailable');
     expect(errorText(en, unavailableProducer)).toBe(en.errors.source_producer_unavailable);
     expect(errorText(ru, unavailableProducer)).toBe(ru.errors.source_producer_unavailable);
+  });
+
+  it('words GitHub rate limit resets, missing commit history and named host errors in both languages', () => {
+    const timed = Object.assign(new ApiFailure(409, 'conflict', 'limit', 'github_rate_limited'), { details: { resetTime: '23:45' } });
+    expect(errorText(en, timed)).toBe(en.errors.github_rate_limited('23:45'));
+    expect(errorText(ru, timed)).toBe(ru.errors.github_rate_limited('23:45'));
+    const untimed = new ApiFailure(409, 'conflict', 'limit', 'github_rate_limited');
+    expect(errorText(en, untimed)).toBe(en.errors.github_rate_limited(null));
+    expect(errorText(ru, untimed)).toBe(ru.errors.github_rate_limited(null));
+    const unread = new ApiFailure(409, 'conflict', 'history', 'commit_history_unavailable');
+    expect(errorText(en, unread)).toBe(en.errors.commit_history_unavailable);
+    expect(errorText(ru, unread)).toBe(ru.errors.commit_history_unavailable);
+    const leader = Object.assign(new ApiFailure(409, 'conflict', 'leader', 'leader'), { details: { host: 'mac' } });
+    expect(errorText(en, leader)).toBe(en.errors.leader('mac'));
+    expect(errorText(ru, leader)).toBe(ru.errors.leader('mac'));
   });
 
   it('streams bytes across arrayBuffer fallback and content-length headers', async () => {
@@ -399,5 +415,25 @@ describe('the load given up at 30 seconds', () => {
     const said = DICTIONARIES[id].load.failed.timeout;
     expect(said).toMatch(/\d\u00a0\p{L}/u);
     expect(said).not.toMatch(/\d \p{L}/u);
+  });
+});
+
+describe('request headings for another person', () => {
+  it.each(LANGUAGES.map(l => l.id))('never addresses the viewer as you or вас in %s across every request kind', id => {
+    const other = DICTIONARIES[id].tasks.asksOther;
+    expect(Object.keys(other).sort()).toEqual(['approval', 'approvalOf', 'choice', 'question']);
+    for (const [kind, format] of Object.entries(other)) {
+      const text = format('Nadia');
+      expect(text, kind).toContain('Nadia');
+      expect(text, kind).not.toMatch(/\byou\b/i);
+      expect(text, kind).not.toMatch(/(?:^|[^\p{L}])вас(?:$|[^\p{L}])/iu);
+    }
+  });
+
+  it('keeps direct viewer phrasing on viewer-targeted strings', () => {
+    expect(en.tasks.asksChoice('Nadia')).toBe('Nadia asks you to pick one');
+    expect(en.tasks.asksApproval('Dana')).toBe('Dana asks you to approve a commit');
+    expect(en.tasks.asksApprovalOf('Bruno')).toBe('Bruno asks you to approve this');
+    expect(ru.tasks.asksApprovalOf('Bruno')).toBe('Bruno просит вас это одобрить');
   });
 });

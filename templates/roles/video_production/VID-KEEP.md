@@ -2,8 +2,6 @@
 id: VID-KEEP
 department: video_production
 kind: member
-title: { en: "Script supervisor and continuity keeper", ru: "Помощник режиссера по согласованности кадров" }
-description: { en: "Keeps continuity records and accepts the exact takes for the editor.", ru: "Ведет записи о согласованности сцен и решает, какие дубли можно монтировать." }
 tier: deep
 effort: high
 perProduct: false

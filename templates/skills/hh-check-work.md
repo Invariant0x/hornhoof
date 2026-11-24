@@ -1,7 +1,5 @@
 ---
 id: hh-check-work
-title: { en: "Checking a result", ru: "Проверка результата" }
-description: { en: "Checks a result against its task before it goes on, another's or your own: reads what was handed in, takes each claim to its source, records findings and gives a verdict.", ru: "Проверяет результат по его задаче, прежде чем он пойдет дальше, чужой или свой: читает сданное, сверяет каждое утверждение с источником, записывает замечания и сообщает результат." }
 kind: procedure
 sources: []
 ---
