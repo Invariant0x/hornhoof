@@ -1,0 +1,7 @@
+ALTER TABLE "autonomous_releases" ALTER COLUMN "test_run_number" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "autonomous_releases" ADD COLUMN "ci_state" text;--> statement-breakpoint
+ALTER TABLE "autonomous_releases" ADD COLUMN "ci_checks" integer;--> statement-breakpoint
+ALTER TABLE "turn_releases" ADD COLUMN "ci_state" text;--> statement-breakpoint
+ALTER TABLE "turn_releases" ADD COLUMN "ci_checks" integer;--> statement-breakpoint
+ALTER TABLE "autonomous_releases" ADD CONSTRAINT "autonomous_releases_proof" CHECK (("autonomous_releases"."test_run_number" IS NOT NULL AND "autonomous_releases"."ci_state" IS NULL AND "autonomous_releases"."ci_checks" IS NULL) OR ("autonomous_releases"."test_run_number" IS NULL AND (("autonomous_releases"."ci_state" = 'green' AND "autonomous_releases"."ci_checks" > 0) IS TRUE OR ("autonomous_releases"."ci_state" = 'none' AND "autonomous_releases"."ci_checks" IS NULL) IS TRUE)));--> statement-breakpoint
+ALTER TABLE "turn_releases" ADD CONSTRAINT "turn_releases_ci" CHECK (("turn_releases"."ci_state" IS NULL AND "turn_releases"."ci_checks" IS NULL) OR ("turn_releases"."run_id" IS NULL AND (("turn_releases"."ci_state" = 'green' AND "turn_releases"."ci_checks" > 0) IS TRUE OR ("turn_releases"."ci_state" = 'none' AND "turn_releases"."ci_checks" IS NULL) IS TRUE)));

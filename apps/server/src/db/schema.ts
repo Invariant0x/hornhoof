@@ -1126,9 +1126,11 @@ export const turns = pgTable(
   ],
 );
 
-/* A release of a turn as its holder asked for it before main moved: the exact commit and main under it, the full run on it,
-   the results it brings with the verdicts on them, or for turnkey work the report its holder closed it with after its own
-   review, security check and tests, and who approved it. Only the tag of a release kept here closes a turn. */
+/* A release of a turn as its holder asked for it before main moved: the exact commit and main under it, what the repository's
+   CI said of it (ciState green with the number of its checks, or none where the repository has no CI; a record from before
+   releases relied on CI names a whole run instead), the results it brings with the verdicts on them, or for turnkey work the
+   report its holder closed it with after its own review, security check and tests, and who approved it. Only the tag of a
+   release kept here closes a turn. */
 export type ReleasedTask = { taskId: string; number: number; commit: string; verdicts: string[]; report?: string };
 export const turnReleases = pgTable(
   'turn_releases',
@@ -1139,6 +1141,8 @@ export const turnReleases = pgTable(
     commit: text('commit').notNull(),
     baseCommitSha: text('base_commit_sha').notNull(),
     runId: uuid('run_id').references((): AnyPgColumn => testRuns.id),
+    ciState: text('ci_state'),
+    ciChecks: integer('ci_checks'),
     tasks: jsonb('tasks').$type<ReleasedTask[]>().notNull().default([]),
     /* The release task and, where it relied on approval, the request or the autonomous release log entry. */
     taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
@@ -1154,6 +1158,7 @@ export const turnReleases = pgTable(
     index('turn_releases_turn_id').on(t.turnId),
     check('turn_releases_commit', sql`${t.commit} ~ '^[0-9a-f]{40}$' AND ${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
     check('turn_releases_approved_once', sql`${t.approvalRequestId} IS NULL OR ${t.autonomousReleaseId} IS NULL`),
+    check('turn_releases_ci', sql`(${t.ciState} IS NULL AND ${t.ciChecks} IS NULL) OR (${t.runId} IS NULL AND ((${t.ciState} = 'green' AND ${t.ciChecks} > 0) IS TRUE OR (${t.ciState} = 'none' AND ${t.ciChecks} IS NULL) IS TRUE))`),
   ],
 );
 
@@ -2456,7 +2461,9 @@ export const computerRuns = pgTable(
 ).enableRLS();
 
 /* Each exact commit Hornhoof let go to main without a card while the CEO had autonomous release on: who asked for it,
-   the full commit SHA, the main SHA it was fast-forward from, the full test run and the independent PASS verdict. */
+   the full commit SHA, the main SHA it was fast-forward from, what the repository's CI said of it (ciState green with the number
+   of its checks, or none for a repository with no CI; an entry from before releases relied on CI names a test run instead)
+   and the independent PASS verdict. */
 export const autonomousReleases = pgTable('autonomous_releases', {
   id: id(),
   companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
@@ -2468,7 +2475,9 @@ export const autonomousReleases = pgTable('autonomous_releases', {
   commitSha: text('commit_sha').notNull(),
   baseCommitSha: text('base_commit_sha').notNull(),
   testRunId: uuid('test_run_id').references(() => testRuns.id, { onDelete: 'set null' }),
-  testRunNumber: integer('test_run_number').notNull(),
+  testRunNumber: integer('test_run_number'),
+  ciState: text('ci_state'),
+  ciChecks: integer('ci_checks'),
   reviewerAgentId: uuid('reviewer_agent_id').references(() => agents.id, { onDelete: 'set null' }),
   reviewerName: text('reviewer_name').notNull(),
   verdictEventId: bigint('verdict_event_id', { mode: 'number' }).references(() => taskEvents.id, { onDelete: 'set null' }),
@@ -2479,6 +2488,7 @@ export const autonomousReleases = pgTable('autonomous_releases', {
   index('autonomous_releases_company_commit').on(t.companyId, t.commitSha),
   check('autonomous_releases_commit_sha', sql`${t.commitSha} ~ '^[0-9a-f]{40}$'`),
   check('autonomous_releases_base_commit_sha', sql`${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
+  check('autonomous_releases_proof', sql`(${t.testRunNumber} IS NOT NULL AND ${t.ciState} IS NULL AND ${t.ciChecks} IS NULL) OR (${t.testRunNumber} IS NULL AND ((${t.ciState} = 'green' AND ${t.ciChecks} > 0) IS TRUE OR (${t.ciState} = 'none' AND ${t.ciChecks} IS NULL) IS TRUE))`),
 ]);
 
 /* The company's vault of site sign-ins. A person types them into Hornhoof's form, or gives them to an agent that saves

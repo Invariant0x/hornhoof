@@ -265,8 +265,11 @@ export type AutonomousReleaseEntry = {
   agentName: string;
   commitSha: string;
   baseCommitSha?: string;
+  /* An entry from before releases relied on CI names a test run; a later one names what the repository's CI said. */
   testRunId: string | null;
-  testRunNumber: number;
+  testRunNumber: number | null;
+  ciState: 'green' | 'none' | null;
+  ciChecks: number | null;
   reviewerAgentId: string | null;
   reviewerName: string;
   verdictStage: string;

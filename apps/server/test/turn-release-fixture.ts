@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, departments, jobs, tasks, teams, testParts, testRuns, turns } from '../src/db/schema.js';
+import { agents, departments, jobs, tasks, teams, turns } from '../src/db/schema.js';
 import { answer, ask, createTask, report, startWork, type Ask } from '../src/modules/tasks/engine.js';
 import { uncheckedInRelease } from '../src/modules/tasks/releases.js';
 import type { Task } from '../src/modules/tasks/state.js';
@@ -8,7 +8,7 @@ import type { Ctx } from '../src/app.js';
 import { testsFixture } from './development-echelons-verification.js';
 import { BASE } from './development-echelons-fixture.js';
 import { listen, mcp } from './helpers.js';
-import { PRODUCT_FILES, partReceipt, partSelection, productSnapshot } from './product-run.js';
+import type { CiAt } from '../src/modules/testruns/github-ci.js';
 
 /* What a repository says in these tests: where each branch and tag is, and which commit holds which. A commit holds itself
    and whatever holds names for it; the commits between two are what between names. made lists the branches the server made,
@@ -21,6 +21,9 @@ export type Repository = {
   cut: Set<string>;
   /* Comparisons whose files GitHub capped at 300: they prove the line and its commits, never the files. */
   capped?: Set<string>;
+  /* What the repository's CI says of each commit, by default green with three checks, and the commits the server asked it of. */
+  ci?: CiAt | ((commit: string) => CiAt);
+  asked?: string[];
   made?: { branch: string; commit: string }[];
   refusing?: string;
   hold?: () => Promise<void>;
@@ -43,6 +46,12 @@ export function serveEach(ctx: Ctx, repoAt: (url: string) => Repository): void {
     /* As git clone --branch takes a tag of the name where there is no such branch, and says so. */
     const tagged = repo.tags[branch];
     return tagged ? { branch, commitSha: tagged, tag: true } : { problem: `The repository has no branch ${branch}.`, missing: true };
+  };
+  ctx.readCi = async (at, commit) => {
+    const repo = repoAt(at.url);
+    (repo.asked ??= []).push(commit);
+    const said = repo.ci ?? { state: 'green' as const, checks: 3 };
+    return typeof said === 'function' ? said(commit) : said;
   };
   ctx.readCompare = async (at, want) => {
     const repo = repoAt(at.url);
@@ -86,8 +95,6 @@ export async function readyInTurn() {
   return { ...f, turn: turn!, branch, repo, acceptance, accept, openTurn };
 }
 
-type RunOf = { departmentId: string; taskId: string; agentId: string; jobId: string };
-
 /* An approval card of a release commit, as ask_person and request_approval open it: Hornhoof names on it, apart from its
    words, what the release brings that no check covers, which the release takes only the approval of a card naming. */
 export async function approvalCard(ctx: Ctx, task: Task, question: string, commit: string): Promise<Ask> {
@@ -95,8 +102,8 @@ export async function approvalCard(ctx: Ctx, task: Task, question: string, commi
   return { kind: 'approval', text: question, commit, ...(unchecked?.length ? { unchecked } : {}) };
 }
 
-/* The release of the open turn: a task its head holds to release it, the full run on the release commit and the person's
-   approval of it, asked through the release tool of a head. */
+/* The release of the open turn: a task its head holds to release it, what the repository's CI says of the release commit
+   (green unless a test sets repo.ci) and the person's approval of it, asked through the release tool of a head. */
 export async function releasing() {
   const f = await readyInTurn();
   await f.accept();
@@ -106,35 +113,7 @@ export async function releasing() {
   })).task];
   const R = f.finalCommit;
   f.repo.between[`${BASE}..${R}`] = [{ sha: R, parents: [BASE] }];
-  const [job] = await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: f.head.id, subscriptionId: f.head.subscriptionId!, taskId: release!.id, kind: 'conversation', prompt: 'Release', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken('release-head-tool-token-0123456789abcdef0123') }).returning();
-  let runs = 0;
-  const scope = { companyId: f.task.companyId, repositoryOwnerId: f.task.departmentId!, repoUrlHash: 'a'.repeat(64) };
-  /* A run of the turn's branch, as the machines would have finished it: of the product's full profile, each part with its receipt
-     on the commit, unless it ran a command of its own (command), which leaves neither.
-     reused: green results it took, of its release unless it is from before releases were kept (ofRelease false).
-     of: the department of another repository whose release it checks, with its release task, the agent who asked and its job. */
-  const fullRun = async (options: { commit?: string; reused?: number; ofRelease?: boolean; suite?: string; failedPart?: boolean; status?: 'passed' | 'failed'; branch?: string; parts?: number; command?: string; of?: RunOf } = {}) => {
-    const commit = options.commit ?? R, manual = options.command !== undefined;
-    const of = options.of ?? { departmentId: f.task.departmentId!, taskId: release!.id, agentId: f.head.id, jobId: job!.id };
-    const repositoryScope = { ...scope, repositoryOwnerId: of.departmentId };
-    const snapshot = await productSnapshot(repositoryScope, commit);
-    const [run] = await f.db.insert(testRuns).values({
-      companyId: f.task.companyId, number: 9000 + ++runs, taskId: of.taskId, agentId: of.agentId, jobId: of.jobId, departmentId: of.departmentId,
-      branch: options.branch ?? f.branch, commitSha: commit, command: options.command ?? '', parts: options.parts ?? 2, timeoutMs: 600000, status: options.status ?? 'passed', finishedAt: new Date(),
-      ...(manual ? {} : {
-        environmentRequest: { version: 1 as const, repositoryScope, ...(options.suite ? { suite: options.suite } : {}), requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null },
-        environmentSnapshot: snapshot, environmentHash: snapshot.description.manifestHash,
-        fileCache: { mode: options.reused ? 'cached' as const : 'full' as const, ...(options.ofRelease === false ? {} : { release: options.branch ?? f.branch }), fingerprints: [], reused: options.reused ?? 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] },
-      }),
-    }).returning();
-    const failed = (part: number) => options.failedPart === true && part === 2;
-    if (options.parts !== 0) await f.db.insert(testParts).values(PRODUCT_FILES.map((file, index) => {
-      const part = index + 1, selection = partSelection(commit, file);
-      return { companyId: f.task.companyId, runId: run!.id, part, status: failed(part) ? 'failed' as const : 'passed' as const, commit, exitCode: failed(part) ? 1 : 0, finishedAt: new Date(),
-        ...(manual ? {} : { environmentSelection: { selection, after: [] }, environmentReceipt: partReceipt(snapshot, selection, !failed(part)) }) };
-    }));
-    return run!;
-  };
+  await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: f.head.id, subscriptionId: f.head.subscriptionId!, taskId: release!.id, kind: 'conversation', prompt: 'Release', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken('release-head-tool-token-0123456789abcdef0123') });
   /* The person approves the card of commit as the release tools open it: naming what it brings that no check covers. */
   const approve = async (commit = R) => {
     const asked = await ask(f.ctx, f.head.id, release!.id, await approvalCard(f.ctx, release!, `Release turn ${f.turn.number}: main to ${commit}.`, commit));
@@ -150,7 +129,7 @@ export async function releasing() {
   };
   const recordRelease = (args: Record<string, unknown> = {}) => call('release_turn', { task: release!.number, commit: R, ...args });
   const department = async () => (await f.db.select().from(departments).where(eq(departments.id, f.task.departmentId!)))[0]!;
-  return { ...f, release: release!, R, fullRun, approve, client, call, recordRelease, department };
+  return { ...f, release: release!, R, approve, client, call, recordRelease, department };
 }
 
 type Releasing = Awaited<ReturnType<typeof releasing>>;

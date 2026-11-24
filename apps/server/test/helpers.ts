@@ -133,7 +133,7 @@ async function builtOn(client: PGlite, env: NodeJS.ProcessEnv, logger?: Deps['lo
   const db = recordSources(drizzle(client, { schema }) as unknown as Db);
   /* Tests never reach the real registry or a real CA unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ACME_DIRECTORY: 'off', ...env });
-  const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, createRepository: noGitHost, createIssue: noIssues, readModels: noApis, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }), readBranches: async () => ({ heads: {} }), createBranch: noBranches, readTags: async () => ({ tags: {} }), readMerged: async () => null }));
+  const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, createRepository: noGitHost, createIssue: noIssues, readModels: noApis, readCi: async () => ({ state: 'none', why: 'Tests reach no repository host.' }), readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }), readBranches: async () => ({ heads: {} }), createBranch: noBranches, readTags: async () => ({ tags: {} }), readMerged: async () => null }));
   return { app, db, config };
 }
 
