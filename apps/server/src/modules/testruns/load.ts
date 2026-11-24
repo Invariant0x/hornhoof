@@ -43,8 +43,9 @@ export async function machineNodes(db: Db, companyId: string) {
 
 /* A machine as these nodes of it say: online while one of them is, and how busy it is. The machines screen and the pool
    both show it from here, so they never disagree. */
-export function machineState(hub: NodeHub, ids: string[]): { online: boolean; load: NodeLoad | null } {
-  return { online: ids.some(id => hub.isOnline(nodeIdentity(id))), load: together(ids.map(id => hub.loadOf(nodeIdentity(id)))) };
+export function machineState(hub: NodeHub, ids: string[], builtin: NodeIdentity | null = null): { online: boolean; load: NodeLoad | null } {
+  const all = [...ids.map(nodeIdentity), ...(builtin ? [builtin] : [])];
+  return { online: all.some(id => hub.isOnline(id)), load: together(all.map(id => hub.loadOf(id))) };
 }
 
 type ProductRun = typeof testRuns.$inferSelect;

@@ -1,6 +1,6 @@
 # World art contract
 
-This is the agreement between the artists of a world pack and the world engine. A pack declares slots for pictures and sheets (its art catalog in `world-packs/<pack>/art.ts`); artists fill the slots with PNG files and a small passport JSON beside each; the engine draws a file as soon as it is in the pack's art folder and keeps its geometric placeholder for every slot still empty. Art can arrive one file at a time; nothing in the engine changes when it does.
+This is the agreement between the artists of a world pack and the world engine. A pack declares slots for pictures and sheets (its art catalog in `world-packs/<pack>/art.ts`); artists fill the slots with PNG files and a small passport JSON beside each; the engine draws a file as soon as it is in the pack's art folder. A slot still empty in a step that has other pictures shows the nearest drawn picture of the same line (a fill level, tier or stage next to it; at the same distance the later one), so a half-delivered step never shows a placeholder; only a step with no picture at all keeps its geometric placeholder. Art can arrive one file at a time; nothing in the engine changes when it does.
 
 Contract version: **2** (`ART_CONTRACT_VERSION` in `art.ts`). Version 2 adds a building's own construction line (`stage_01.png` to `stage_10.png`, scaffolding drawn in) and demolition (`demol_01.png`, `demol_02.png`), and layers over a picture (a shadow that darkens what is under it, props, an awning that sways); the version 1 construction pictures stay valid. Rebuild `art-index.json` with the version 2 check.
 
@@ -12,8 +12,9 @@ What is specific to one world (which buildings, which looks, its colours and sty
 * A pack's art folder is served at the pack's `art.baseUrl`, for example `/world-art/<pack>/`.
   * Local work and builds: put the folder at `apps/web/public/world-art/<pack>/`. The path is ignored by git; Vite serves it and copies it into the build.
   * A running server: put the folder at `<WEB_DIST>/world-art/<pack>/`.
-* Buildings, people, loops and flags (sections 4 to 8): the folder holds `art-index.json` at its root. The engine reads only that file at start and then downloads each picture the first time it is on screen. Without `art-index.json` they all draw on placeholders. Build and check the index with the art check command (section 10). A file the check rejects is left out of the index and keeps its placeholder; one broken file never breaks the city.
-* Ground and plants (section 9) are loaded straight from the paths the pack's manifest names, without `art-index.json`.
+* Buildings, people, loops and flags (sections 4 to 8): the folder holds `art-index.json` at its root. Without `art-index.json` they all draw on placeholders. Build and check the index with the art check command (section 10). A file the check rejects is held out of the index, and its slot shows the nearest drawn picture as if it were still empty; one broken file never breaks the city.
+* Ground and plants (section 9) are named by the pack's manifest. The index lists them too.
+* The index gives every file its byte size and a hash of its bytes. On the first visit the map downloads every file the engine draws behind its loading screen and keeps it in the browser. Later visits read the kept copies and download only the files whose hash changed. The web build writes the index of the art folders it ships from their files, so the index in a release always has the hashes; the `--dist` check fails a dist whose index lacks a hash or gives one its file does not have.
 
 ## 2. Standard sizes
 
@@ -58,8 +59,9 @@ Building footprints, square, in master pixels:
 | `wallTopLine` | no | y of the top of the walls. |
 | `roofLine` | no | y of the roof edge. |
 | `wallCutY` | no | y where a full-height wall picture may be cut to stand in for waist-high walls (section 4). |
-| `flagAnchor` | no | Foot of the flag pole on the roof. Without it the building has no flag. |
+| `flagAnchor` | no | Foot of the flag pole on the roof. Without it the building has no flag. Top loops attach here when the picture has no `topAnchor`. |
 | `awningAnchor` | no | Top edge of a swaying awning. |
+| `awningLoop` | no | `true`: the building takes the `awning` loop sheet at its `awningAnchor` (section 8), which it then must name. Leave it out on a building whose awning is painted in or comes as a layer. |
 | `topAnchor` | no | Top centre (apex, spire, chimney): where a capstone or a top loop attaches. |
 | `workSlots` | no | Up to 3 points `{ x, y, layer }` with `layer` `front` (on scaffolding, in front of walls) or `inside` (in open rooms) where workers stand. |
 | `layers` | no | Pictures drawn over this one, in order (section 4, layers). |
@@ -108,7 +110,7 @@ The door is on one of the two front walls, the walls that face the viewer: `fron
 
 ### Pictures of one step
 
-A step may come in drawn **variants** (`variants` in the pack catalog): each a full set of the step's pictures in its own folder, `<step>/v01/`, `<step>/v02/`, and so on, with the step's canvas, anchor, door row and lot. `v01` is required, the others optional. The engine gives each building one variant from its id, the same in every session; next-door buildings of the same step do not repeat one while another is free, and a variant not delivered yet gives way to the next delivered one. A step delivered with no variant folders, its pictures directly in `<step>/`, counts as its `v01`; a `v01/` folder of its own wins over it.
+A step may come in drawn **variants** (`variants` in the pack catalog): each a full set of the step's pictures in its own folder, `<step>/v01/`, `<step>/v02/`, and so on, with the step's canvas, anchor, door row and lot. `v01` is required, the others optional. The engine gives each building one variant from its id, the same in every session; next-door buildings of the same step do not repeat one while another is free, and a variant not delivered yet gives way to the next delivered one. A variant whose stages are not all drawn yet stands only as a finished building: a building under construction takes the next variant, from its own, that has every stage drawn (as its own picture or its `stage_NN`) and keeps it once built, while one torn down keeps the look it stood in. When no variant has every stage, construction shows the building's own variant with the nearest drawn picture. A step delivered with no variant folders, its pictures directly in `<step>/`, counts as its `v01`; a `v01/` folder of its own wins over it.
 
 | File | Shown when |
 |---|---|
@@ -233,7 +235,11 @@ A missing animation falls back to `walk` for moving states and to `idle` for the
 
 ## 8. Animation loops
 
-`loops/<loop>.png` with a sheet passport, one row of frames: `crane`, `hoist_block`, `dust`, `smoke`, `water`, `awning`, `celebration`, and for people `sleep_z` (section 7). On a building drawn from its picture, a loop is placed at the point named by its `attach`: `top` (the picture's `topAnchor`, or its roof line), `awning` (`awningAnchor`), `door` (`door`) or `ground` (the lot centre). Loops of buildings still on placeholders stay placeholders.
+`loops/<loop>.png` with a sheet passport, one row of frames: `crane`, `hoist_block`, `dust`, `smoke`, `water`, `awning`, `celebration`, and for people `sleep_z` (section 7). On a building drawn from its picture, a loop is placed at the point named by its `attach`: `top` (the picture's `topAnchor`; without it the foot of its flag pole, `flagAnchor`; then its roof line, its wall top, or the back corner of its lot), `awning` (`awningAnchor`), `door` (`door`) or `ground` (the lot centre). Loops of buildings still on placeholders stay placeholders.
+
+The `awning` loop is drawn only on a picture whose passport says `awningLoop: true`, at its `awningAnchor`; without the flag a building gets no awning loop, so a house with its own awning never shows two.
+
+A building site shows one lift, never both: `crane` on a lot of 3 x 3 tiles or more, its sheet drawing its own hanging block, and `hoist_block` alone on a smaller lot.
 
 ## 8a. The harbour
 
@@ -248,7 +254,7 @@ What a harbour needs before it is shown: `quay_<s>`, `pier_root_<s>`, `pier_head
 
 ## 9. Ground, roads, decals and plants
 
-The terrain and plant layers load these files straight from the pack's art folder, not through `art-index.json`. The pack names every file in its manifest: `terrainArt` for ground, transitions, roads and liquid, and the `art` list of each plant kind (one entry per drawn variant). A slot whose file is missing keeps its procedural look. The paths below are the usual layout; the manifest is what counts.
+The terrain and plant layers load the files the pack names in its manifest; the index lists them with their hash like every other file. The pack names every file in its manifest: `terrainArt` for ground, transitions, roads and liquid, and the `art` list of each plant kind (one entry per drawn variant). A slot whose file is missing keeps its procedural look. The paths below are the usual layout; the manifest is what counts.
 
 * **Ground:** one texture per ground material id of the pack's terrain recipe, `ground/<material>.png`, 1024 x 1024 px, seamless on both axes, seen from straight above, with no objects and no cast shadows. One map tile is 256 x 256 px of the texture, so one texture covers 4 x 4 tiles: tile (x, y) starts at ((x * 256) mod 1024, (y * 256) mod 1024). The engine projects it onto the 2:1 ground.
 * **Transitions:** `ground/edges/<first>_<second>.png`, 1024 x 256 px, 8-bit grey, one file per pair of material ids the pack declares. Rows run across the border, one tile deep: 255 is the first material, 0 the second. Columns wrap, so the border has no seam along its length.
@@ -275,6 +281,6 @@ npx tsx apps/web/scripts/world-art-import.ts <delivery> --to <art folder> --pack
 
 The import command takes one building as the art pipeline delivers it (its construction line, demolition, layers and the larger steps it grows into, on plot canvases) and lays it out in the art folder with passports, as this contract asks; its header lists the delivery's layout.
 
-The check prints every error with the file it is about, every file the pack has no slot for, and how many required files are still missing. It writes `art-index.json` only when there are no errors. Deliver the folder with its fresh `art-index.json`; the engine needs nothing else.
+The check prints every file it holds out with what is wrong with it (`HELD OUT <file>: ...`), every file the pack has no slot for, and how many required files are still missing. A file it rejects is held out, with any file that needs it (a cloak whose sheet is held out), and `art-index.json` is written for the rest; the command then ends with exit code 1 so the rejection is not missed. Only an error of the whole folder (another pack or contract) writes nothing. The web build holds out the same files from the index it writes. Deliver the folder with its fresh `art-index.json`; the engine needs nothing else.
 
-The `--dist` check reads a built web dist. It fails unless `<web dist>/world-art/<pack>/art-index.json` lists art the pack draws and the dist holds every file it lists with the size the index gives, so a production build can't ship the placeholder look without anyone noticing. It isn't a step of the image build yet: the first pack's painted art is licensed for Hornhoof only and may not go into the public repository or the public image, so the build has no source for it yet, and the check would stop every image from main. It joins the image build in the change that brings the art source (#1944).
+The `--dist` check reads a built web dist. It fails unless `<web dist>/world-art/<pack>/art-index.json` lists art the pack draws and the dist holds every file it lists with the size and the content hash the index gives, so a production build can't ship the placeholder look without anyone noticing. It isn't a step of the image build yet: the first pack's painted art is licensed for Hornhoof only and may not go into the public repository or the public image, so the build has no source for it yet, and the check would stop every image from main. It joins the image build in the change that brings the art source (#1944).

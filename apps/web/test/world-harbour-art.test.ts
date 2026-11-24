@@ -164,11 +164,11 @@ describe('The harbour is drawn from its art only (#2006)', () => {
     const sim = createResidentSimulation(pack, city, live, { harbour: plan });
     const everything = { minX: -1e9, maxX: 1e9, minY: -1e9, maxY: 1e9 };
     const hidden = recordingContext(fullHarbourIndex());
-    renderResidentsToPixi(new Graphics(), sim, city, pack, everything, 120, 60, 'full', null, undefined, hidden.ctx);
+    renderResidentsToPixi(new Graphics(), sim, city, pack, everything, 120, 60, null, undefined, hidden.ctx);
     expect(hidden.drawn.filter(d => d.path.startsWith('harbour/'))).toEqual([]);
     sim.harbour!.shown = true;
     const shown = recordingContext(fullHarbourIndex());
-    renderResidentsToPixi(new Graphics(), sim, city, pack, everything, 120, 60, 'full', null, undefined, shown.ctx);
+    renderResidentsToPixi(new Graphics(), sim, city, pack, everything, 120, 60, null, undefined, shown.ctx);
     expect(shown.drawn.some(d => d.path === 'harbour/quay_' + plan.side + '.png' || d.path.startsWith('harbour/quay_end_'))).toBe(true);
     expect(shown.drawn.some(d => d.path.startsWith('harbour/yard/'))).toBe(true);
   });

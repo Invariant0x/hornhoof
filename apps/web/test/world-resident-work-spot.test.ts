@@ -130,7 +130,7 @@ describe('A delivery ends at the building it is for (#2001)', () => {
         return onLastStep || (r.leg === 'inbound' && r.pose === 'building' && toSpot < 1e-6);
       });
       if (near.length === 0) continue;
-      renderResidentsToPixi(new Graphics(), sim, city, EGYPT_WORLD_PACK, everywhere, 64, 32, 'full', null, drawn);
+      renderResidentsToPixi(new Graphics(), sim, city, EGYPT_WORLD_PACK, everywhere, 64, 32, null, drawn);
       for (const r of near) {
         expect(drawn.has(r.id), `${r.name} at ${r.col.toFixed(2)}, ${r.row.toFixed(2)} by ${r.workBuildingId}`).toBe(true);
         if (r.leg === 'outbound') stepping++;
