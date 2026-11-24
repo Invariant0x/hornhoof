@@ -4,7 +4,7 @@ import { earlierWork } from '../departments/branches.js';
 import { agentTaskDetail } from './agent-sight.js';
 import { Verification } from './echelons-tests.js';
 import { AcceptanceInput } from './echelons-accept.js';
-import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
+import { isTexts, RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
 import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
 import { ECHELON_STAGES } from '@hornhoof/protocol/echelons';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
@@ -59,7 +59,7 @@ type ToolMoveResult = { text: string; moved?: Pick<Moved, 'wakes'> & { task?: Ta
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 /* Agents read role names in English, the language of their instructions. */
-const english = (_k: string, v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) && 'en' in v && 'ru' in v && Object.keys(v).length === 2 ? (v as { en: string }).en : v);
+const english = (_k: string, v: unknown) => (isTexts(v) ? v.en : v);
 const json = (value: unknown) => say(JSON.stringify(value, english));
 
 /* A task of another department a company watchdog inspects, every word of it with no credential and no private path, as

@@ -47,6 +47,7 @@ export const ru: ServerWords = {
 
   notices: {
     marked: { read: 'прочитано', done: 'разобрано' },
+    machineNoName: 'машина без имени',
     markedCount: (status, count) => `${status}: ${count}`,
     afterTurn: turn => `после хода ${turn}`,
     turn: turn => `ход ${turn}`,

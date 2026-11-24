@@ -1,4 +1,4 @@
-import { isLocaleId, say } from '@hornhoof/protocol';
+import { isLocaleId, isSourceLocale, say } from '@hornhoof/protocol';
 import type { WorldNameLanguage, WorldRenamePreview, WorldRenameResult, WorldRestoreNamesResult, WorldThemeView } from '@hornhoof/protocol/world';
 import { useEffect, useId, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import { api } from '../api';
@@ -35,7 +35,7 @@ const nameIn = (names: SkinNames, language: Language) => say(names, language);
 /* A built-in skin's name in English and in every language whose words are loaded. */
 const builtinNames = (id: BuiltinSkinId): SkinNames => ({
   en: cachedMessages('en')!.skins.names[id],
-  ...Object.fromEntries(LANGUAGES.flatMap(({ id: language }) => (language === 'en' ? [] : [[language, cachedMessages(language)?.skins.names[id]] as const])).filter(([, own]) => own !== undefined)),
+  ...Object.fromEntries(LANGUAGES.flatMap(({ id: language }) => (isSourceLocale(language) ? [] : [[language, cachedMessages(language)?.skins.names[id]] as const])).filter(([, own]) => own !== undefined)),
 });
 
 /* The tokens of a skin on its own preview only, so each card shows its skin and world colours in the same drawing. */
@@ -452,7 +452,7 @@ function WorldEraNamesPanel({
             className="btn small ghost"
             type="button"
             disabled={busy}
-            onClick={() => void openRenamePreview(language === 'ru' ? 'ru' : 'en')}
+            onClick={() => void openRenamePreview(isLocaleId(language) ? language : 'en')}
           >
             {wn.renameBtn}
           </button>

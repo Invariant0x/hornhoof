@@ -54,6 +54,7 @@ export const en = {
   /* The short line a notice carries beside its source, for the person who reads it in the window of an employee. */
   notices: {
     marked: { read: 'read', done: 'done' },
+    machineNoName: 'a machine with no name',
     markedCount: (status: string, count: number) => `${status}: ${count}`,
     afterTurn: (turn: string) => `after turn ${turn}`,
     turn: (turn: string) => `turn ${turn}`,

@@ -105,10 +105,32 @@ export function localeOfHeader(header: string | undefined, registry: readonly Lo
   return matchLocale(parseAcceptLanguage(header), registry);
 }
 
+/* The scripts a text can be written in, by the ISO 15924 code the registry gives each language, the more telling first:
+   kana says Japanese before Han does, and Han is read as Chinese only when no kana is there. */
+const WRITTEN: readonly (readonly [script: string, pattern: RegExp])[] = [
+  ['Jpan', /[\p{Script=Hiragana}\p{Script=Katakana}]/u], ['Kore', /\p{Script=Hangul}/u], ['Hans', /\p{Script=Han}/u], ['Deva', /\p{Script=Devanagari}/u],
+  ['Arab', /\p{Script=Arabic}/u], ['Cyrl', /\p{Script=Cyrillic}/u], ['Latn', /\p{Script=Latin}/u],
+];
+
+/* The language a text is written in, when its script names one: a script that exactly one language of the registry has.
+   A script that several share (Latin) says nothing. */
+export function languageOfText(text: string): LocaleId | undefined;
+export function languageOfText(text: string, registry: readonly LocaleInfo[]): string | undefined;
+export function languageOfText(text: string, registry: readonly LocaleInfo[] = LOCALES): string | undefined {
+  const script = WRITTEN.find(([, pattern]) => pattern.test(text))?.[0];
+  const same = registry.filter(info => info.script === script);
+  return same.length === 1 ? same[0]!.id : undefined;
+}
+
 /* A text in as many languages as it has been written in; English is always there, and is what a missing one reads as. */
 export type Texts = { en: string } & { [id: string]: string | undefined };
 
 export const say = (texts: Texts, language: string): string => texts[language] ?? texts[SOURCE_LOCALE];
+
+/* Whether a value is a text per language: English and nothing but languages of the registry, each a string. */
+export const isTexts = (value: unknown): value is Texts =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) && typeof (value as Record<string, unknown>)[SOURCE_LOCALE] === 'string'
+  && Object.entries(value).every(([id, text]) => (isLocaleId(id) || isPseudoLocaleId(id)) && typeof text === 'string');
 
 /* The same for a text that may be missing altogether. */
 export const sayIf = (texts: Texts | null | undefined, language: string): string | undefined => (texts ? say(texts, language) : undefined);

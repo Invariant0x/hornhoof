@@ -110,10 +110,34 @@ describe('Accept-Language', () => {
 describe('a text per language', () => {
   const texts = { en: 'Hello', ru: 'Привет' } as const;
 
+  it('tells a text per language from other objects', () => {
+    expect(locales.isTexts({ en: 'Hello' })).toBe(true);
+    expect(locales.isTexts({ en: 'Hello', ru: 'Привет' })).toBe(true);
+    expect(locales.isTexts({ ru: 'Привет' })).toBe(false);
+    expect(locales.isTexts({ en: 'Hello', title: 'x' })).toBe(false);
+    expect(locales.isTexts({ en: 1 })).toBe(false);
+    expect(locales.isTexts(['en'])).toBe(false);
+    expect(locales.isTexts(null)).toBe(false);
+  });
+
   it('reads a language, else English', () => {
     expect(locales.say(texts, 'ru')).toBe('Привет');
     expect(locales.say(texts, 'en')).toBe('Hello');
     expect(locales.say({ en: 'Hello' }, 'ru')).toBe('Hello');
     expect(locales.say(texts, 'zh-Hans')).toBe('Hello');
+  });
+});
+
+describe('the language a text is written in', () => {
+  it('is the language of the script when one language of the registry has it, and none when several share it', () => {
+    expect(locales.languageOfText('Привет, мир')).toBe('ru');
+    expect(locales.languageOfText('Hello world')).toBe('en');
+    expect(locales.languageOfText('')).toBeUndefined();
+    const text = (sample: string) => locales.languageOfText(sample, TWELVE);
+    expect(text('Привет')).toBe('ru');
+    expect(text('你好')).toBe('zh-Hans');
+    expect(text('नमस्ते')).toBe('hi');
+    expect(text('مرحبا')).toBe('ar');
+    expect(text('Bonjour')).toBeUndefined();
   });
 });

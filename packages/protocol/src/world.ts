@@ -925,7 +925,7 @@ export function pickNextWorldEraName(
     const clean = name.trim().toLowerCase();
     if (clean) taken.add(clean);
   }
-  const baseList: readonly string[] = kind === 'orchestrator' ? [say(pack.names.ruler, language)] : (pack.names.employees[language] ?? pack.names.employees[SOURCE_LOCALE]);
+  const baseList: readonly string[] = kind === 'orchestrator' ? [say(pack.names.ruler, language)] : (pack.names.employees[language] ?? pack.names.employees.en);
   const fallback = baseList.length ? baseList : [say(pack.label, language)];
 
   for (const candidate of fallback) {

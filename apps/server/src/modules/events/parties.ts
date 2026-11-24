@@ -49,7 +49,7 @@ async function agentDepartment(ctx: PartyContext, id: string | null): Promise<Me
 export async function personParty(ctx: PartyContext, companyId: string, personId: string): Promise<MessageParty> {
   const [person] = await ctx.db.select().from(people).where(and(eq(people.id, personId), eq(people.companyId, companyId)));
   if (!person) throw new Error('The message person does not exist in this company.');
-  return { kind: 'person', id: person.id, name: person.name, role: person.title ? { en: person.title, ru: person.title } : null, department: null };
+  return { kind: 'person', id: person.id, name: person.name, role: person.title ? { en: person.title } : null, department: null };
 }
 
 const field = (data: unknown, key: string): unknown => data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined;
