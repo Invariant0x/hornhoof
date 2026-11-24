@@ -171,5 +171,6 @@ export async function storeRound(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Pro
   await dropDue(ctx, now);
   await trimTransit(ctx, now);
   await db.execute(sql`DELETE FROM net.file_gives WHERE at < ${new Date(now.getTime() - GIFT_LIFE_MS).toISOString()}::timestamptz`);
+  await db.execute(sql`DELETE FROM net.file_wants WHERE until < ${now.toISOString()}::timestamptz`);
   await checkOwnCopies(ctx);
 }

@@ -34,11 +34,14 @@ export class LeaderFiles {
     return row?.id ?? null;
   }
 
-  /* A file a row names and no record describes, as one a merge brought or keeps refused, from a machine that holds the
-     files or keeps their backup: kept once it opens to its name. */
+  /* A file a row names and no record describes, as one a merge brought or keeps refused, from a machine the leading app
+     asked for it, or one that keeps the store's backup: kept once it opens to its name. */
   private async takeUnrecorded(machine: string, sha256: string, body: Readable): Promise<number> {
     const [named] = rowsOf<{ size: string | null }>(await this.db.execute(namedUnrecorded(sql`n.sha256 = ${sha256}`)));
-    if (!named || named.size === null || !this.key || !((await keepsFiles(this.db, machine)) || (await backsUpStore(this.db, machine, sha256)))) return 403;
+    if (!named || named.size === null || !this.key) return 403;
+    const restores = await backsUpStore(this.db, machine, sha256);
+    const [asked] = rowsOf<{ asked: boolean }>(await this.db.execute(sql`SELECT EXISTS (SELECT 1 FROM net.file_wants WHERE sha256 = ${sha256} AND machine_id = ${machine} AND until > now()) AS asked`));
+    if (!restores && !(asked?.asked && (await keepsFiles(this.db, machine)))) return 403;
     try {
       await this.store.takeOpened(sha256, body, await this.key(), Math.min(UNRECORDED_BYTES, sealedSizeOf(Number(named.size))));
     } catch (err) {
@@ -47,6 +50,7 @@ export class LeaderFiles {
     }
     await recordFile(this.db, { sha256, size: Number(named.size), ...(await this.store.sealedFacts(sha256)) }, await this.ownRow());
     await this.db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id, verified) VALUES (${sha256}, ${machine}, true) ON CONFLICT (sha256, machine_id) DO UPDATE SET verified = true`);
+    await this.db.execute(sql`DELETE FROM net.file_wants WHERE sha256 = ${sha256}`);
     return 201;
   }
 

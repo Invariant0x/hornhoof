@@ -160,6 +160,9 @@ export async function takeReport(db: Tx, machineId: string, report: FileReport):
     const aside = rowsOf<{ aside: boolean }>(await db.execute(sql`SELECT ${SET_ASIDE} AS aside`))[0]?.aside === true;
     unknown = aside ? [] : strangers.filter(sha256 => !named.includes(sha256));
     send = holds ? named : [];
+    if (send.length)
+      await db.execute(sql`INSERT INTO net.file_wants (sha256, machine_id, until) SELECT unnest(${listOf(send)}::text[]), ${machineId}::uuid, ${new Date(Date.now() + WANTED_MS).toISOString()}::timestamptz
+        ON CONFLICT (sha256, machine_id) DO UPDATE SET until = EXCLUDED.until`);
   }
   if (report.dropped.length) {
     await db.execute(sql`DELETE FROM net.file_copies WHERE machine_id = ${machineId} AND sha256 = ANY(${listOf(report.dropped)}::text[])`);

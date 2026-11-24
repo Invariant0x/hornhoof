@@ -83,6 +83,15 @@ CREATE TABLE net.file_gives (
   PRIMARY KEY (sha256, machine_id)
 );
 --> statement-breakpoint
+-- Which machine the leading app asked to send back a file no record describes, and until when: the leading keeper takes
+-- such a file only from a machine asked for it, so a machine cannot fill its disk with files nobody asked for.
+CREATE TABLE net.file_wants (
+  sha256 text NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+  machine_id uuid NOT NULL,
+  until timestamptz NOT NULL,
+  PRIMARY KEY (sha256, machine_id)
+);
+--> statement-breakpoint
 -- The reconciliations of the move out of the database. Once every row whose bytes are on the machine is copied into the
 -- store, checked and named, the rows named since the last one make a new one: its files, contents and bytes, the rows
 -- whose bytes are not on this machine, the size of the database, and the digest of its list. No byte, column or disk file
@@ -136,4 +145,7 @@ CREATE CONSTRAINT TRIGGER net_fence AFTER INSERT OR UPDATE OR DELETE ON net.file
 DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION net.fence_check();
 --> statement-breakpoint
 CREATE CONSTRAINT TRIGGER net_fence AFTER INSERT OR UPDATE OR DELETE ON net.file_gives
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION net.fence_check();
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER net_fence AFTER INSERT OR UPDATE OR DELETE ON net.file_wants
 DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION net.fence_check();

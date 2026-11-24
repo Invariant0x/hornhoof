@@ -400,8 +400,15 @@ describe('where the files of the store are kept', () => {
     const [merge] = rowsOf<{ id: string }>(await s.db.execute(sql`INSERT INTO net.merges (source, label, status) VALUES ('machine:another', 'a copy', 'merged') RETURNING id`));
     await s.db.execute(sql`INSERT INTO net.merge_conflicts (merge, tbl, key, op, kind, topic, here, there, why)
       VALUES (${merge!.id}, 'attachments', '{"id": "00000000-0000-4000-8000-0000000000ab"}', 'insert', 'refused', 'work', NULL, ${JSON.stringify({ sha256: kept.sha256, size: bytes.length })}::jsonb, 'refused')`);
+    /* Sent before it was asked for, it is not taken. */
+    expect(await s.leader.take(two, kept.sha256, holder.store.sealed(kept.sha256)!.stream())).toBe(403);
     const said = (await s.app.inject({ method: 'POST', url: '/api/network/files', payload: { held: [kept.sha256], dropped: [] }, ...from(two) })).json();
     expect(said).toMatchObject({ unknown: [], send: [kept.sha256] });
+    /* Asked of this machine only: another one that has it is not taken either. */
+    const three = await s.worker('three');
+    const other = s.holderOn(three);
+    await other.holder.store.take(kept.sha256, holder.store.sealed(kept.sha256)!.stream(), await holder.store.sealedFacts(kept.sha256));
+    expect(await s.leader.take(three, kept.sha256, other.holder.store.sealed(kept.sha256)!.stream())).toBe(403);
     /* Sent longer than the row says, it is refused before it is opened. */
     await s.db.execute(sql`UPDATE net.merge_conflicts SET there = jsonb_set(there, '{size}', '100') WHERE tbl = 'attachments'`);
     await holder.census();
