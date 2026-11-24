@@ -35,7 +35,7 @@ export const fileAway = () =>
 export async function recordFile(tx: Tx, kept: StoredFile, machineId: string | null): Promise<void> {
   await tx.execute(sql`INSERT INTO net.files (sha256, size, sealed_sha256, sealed_size, salt) VALUES (${kept.sha256}, ${kept.size}, ${kept.sealedSha256}, ${kept.sealedSize}, ${kept.salt})
     ON CONFLICT (sha256) DO UPDATE SET unused_since = NULL, drop_at = NULL, wanted_at = NULL`);
-  if (machineId) await tx.execute(sql`INSERT INTO net.file_copies (sha256, machine_id) VALUES (${kept.sha256}, ${machineId}) ON CONFLICT DO NOTHING`);
+  if (machineId) await tx.execute(sql`INSERT INTO net.file_copies (sha256, machine_id, verified) VALUES (${kept.sha256}, ${machineId}, true) ON CONFLICT (sha256, machine_id) DO UPDATE SET verified = true`);
 }
 
 /* A file this machine sealed, as the record of its content would have it: one the store keeps a record of already, and
@@ -165,7 +165,7 @@ export class Files {
       rowsOf<{ n: number }>(
         await db.execute(sql`SELECT count(*)::int AS n FROM net.file_targets t JOIN machines m ON m.id = t.machine_id WHERE t.sha256 = ${sha256}
           AND (t.machine_id = ${mine} OR m.report_at > ${new Date(Date.now() - FRESH_MS).toISOString()}::timestamptz)
-          AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = t.sha256 AND c.machine_id = t.machine_id)`),
+          AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = t.sha256 AND c.machine_id = t.machine_id AND c.verified)`),
       )[0]?.n ?? 0;
     for (let waited = 0; waited < waitMs; waited += WANT_LOOK_MS) {
       if ((await waiting()) === 0) return true;

@@ -152,6 +152,25 @@ export class FileStore {
     return { length: found.size, stream: () => createReadStream(this.path(sha256)) };
   }
 
+  /* The sealed bytes at a few places of a file, one after another, as a proof that this machine keeps it reads them; a
+     slice past the end gives what the file has there, and a file not here gives none. */
+  async slicesOf(sha256: string, slices: { offset: number; length: number }[]): Promise<Buffer> {
+    checkName(sha256);
+    const file = await open(this.path(sha256), 'r').catch(() => null);
+    if (!file) return Buffer.alloc(0);
+    try {
+      const parts: Buffer[] = [];
+      for (const slice of slices) {
+        const part = Buffer.alloc(slice.length);
+        const { bytesRead } = await file.read(part, 0, slice.length, slice.offset);
+        parts.push(part.subarray(0, bytesRead));
+      }
+      return Buffer.concat(parts);
+    } finally {
+      await file.close();
+    }
+  }
+
   /* A file's plain bytes as they go out, opened with the store key a piece at a time. A copy that does not open under its
      name, as one laid under another name, is refused before a byte goes out; one changed on the disk elsewhere fails the
      stream where it stops opening. */

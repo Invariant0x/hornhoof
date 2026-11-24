@@ -51,12 +51,12 @@ export async function fileStoreState(ctx: Pick<Ctx, 'db' | 'files'>, now = new D
   const ids = `{${counted(all).map(seat => seat.id).join(',')}}`;
   const [row] = rowsOf<{ files: string; used: string; under: string; stuck: string }>(
     await db.execute(sql`WITH g AS ${countedTargets(all)},
-      held AS (SELECT f.sha256, f.sealed_size, (SELECT count(*) FROM g JOIN net.file_copies c ON c.sha256 = g.sha256 AND c.machine_id = g.machine_id WHERE g.sha256 = f.sha256) AS n
+      held AS (SELECT f.sha256, f.sealed_size, (SELECT count(*) FROM g JOIN net.file_copies c ON c.sha256 = g.sha256 AND c.machine_id = g.machine_id AND c.verified WHERE g.sha256 = f.sha256) AS n
         FROM net.files f WHERE f.drop_at IS NULL)
       SELECT (SELECT coalesce(sum(size), 0) FROM net.files WHERE drop_at IS NULL) AS files,
         (SELECT coalesce(sum(f.sealed_size), 0) FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256 WHERE c.machine_id = ANY(${ids}::uuid[])) AS used,
         (SELECT count(*) FROM held WHERE n < ${wanted}) AS under,
-        (SELECT coalesce(sum(h.sealed_size), 0) FROM held h WHERE h.n < ${wanted} AND EXISTS (SELECT 1 FROM net.file_targets t JOIN net.file_copies c ON c.sha256 = t.sha256 AND c.machine_id = t.machine_id
+        (SELECT coalesce(sum(h.sealed_size), 0) FROM held h WHERE h.n < ${wanted} AND EXISTS (SELECT 1 FROM net.file_targets t JOIN net.file_copies c ON c.sha256 = t.sha256 AND c.machine_id = t.machine_id AND c.verified
           WHERE t.sha256 = h.sha256 AND NOT EXISTS (SELECT 1 FROM g WHERE g.sha256 = t.sha256 AND g.machine_id = t.machine_id))) AS stuck`),
   );
   return {

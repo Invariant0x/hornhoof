@@ -412,6 +412,63 @@ describe('where the files of the store are kept', () => {
     expect(rowsOf(await s.db.execute(sql`SELECT 1 FROM net.files WHERE sha256 = ${kept.sha256} AND size = ${bytes.length}`)).length).toBe(1);
   });
 
+  it('counts a copy a machine was given only once it shows it keeps the bytes, and none of one that cannot', async () => {
+    const s = await stand();
+    const two = await s.worker('two', { path: 'relay' });
+    const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(300_000));
+    const verified = async () => rowsOf<{ verified: boolean }>(await s.db.execute(sql`SELECT verified FROM net.file_copies WHERE sha256 = ${kept.sha256} AND machine_id = ${two}`)).map(row => row.verified);
+    const say = (payload: object) => s.app.inject({ method: 'POST', url: '/api/network/files', payload: { held: [], dropped: [], ...payload }, ...from(two) });
+
+    /* Given whole and thrown away, as into /dev/null: its word puts a copy that does not count, and it is asked to show it. */
+    const given = await s.leader.give(two, kept.sha256);
+    if (given.status !== 200) throw new Error(`given ${given.status}`);
+    for await (const _chunk of given.stream()) void _chunk;
+    const [challenge] = (await say({ held: [kept.sha256] })).json().prove as { sha256: string; nonce: string; slices: { offset: number; length: number }[] }[];
+    expect(challenge).toMatchObject({ sha256: kept.sha256 });
+    expect(challenge!.slices.length).toBe(4);
+    expect(await verified()).toEqual([false]);
+    expect(await s.app.ctx.files.copiesStand(s.db, kept.sha256)).toBe(false);
+    /* The view asks it again, so a machine that went away before it showed the slices shows them later. */
+    expect(((await s.app.inject({ url: '/api/network/files', ...from(two) })).json() as { prove: { nonce: string }[] }).prove).toEqual([expect.objectContaining({ nonce: challenge!.nonce })]);
+    /* What it sends without the bytes does not match: the copy is gone and it is to fetch the file again. */
+    const mac = createHash('sha256').update(randomBytes(32)).digest('hex');
+    await say({ proofs: [{ sha256: kept.sha256, nonce: challenge!.nonce, mac }] });
+    expect(await verified()).toEqual([]);
+    expect(rowsOf(await s.db.execute(sql`SELECT 1 FROM net.file_gives WHERE machine_id = ${two}`)).length).toBe(0);
+
+    /* A holder that keeps the bytes shows them in the same look, and its copy counts. */
+    const { holder } = s.holderOn(two);
+    await holder.lookOnce();
+    expect(await verified()).toEqual([true]);
+    expect(await s.app.ctx.files.copiesStand(s.db, kept.sha256)).toBe(true);
+  });
+
+  it('lets no copy go on the word of a machine that has not shown it keeps the file', async () => {
+    const s = await stand();
+    const [two, three] = [await s.worker('two'), await s.worker('three', { path: 'relay' })];
+    await setCopies(s.db, 3, 'person:test');
+    const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(3000));
+    const b = s.holderOn(two);
+    await b.holder.lookOnce();
+    /* The machine off site was given the file, says it keeps it, and never shows it. */
+    const given = await s.leader.give(three, kept.sha256);
+    if (given.status !== 200) throw new Error(`given ${given.status}`);
+    for await (const _chunk of given.stream()) void _chunk;
+    await s.app.inject({ method: 'POST', url: '/api/network/files', payload: { held: [kept.sha256], dropped: [] }, ...from(three) });
+
+    /* Fewer copies asked: the one that goes is the one that does not count, never the machine at home that showed it,
+       though the machine off site was picked first. */
+    await s.db.execute(sql`UPDATE net.file_targets SET at = at - interval '1 hour' WHERE sha256 = ${kept.sha256} AND machine_id = ${three}`);
+    await setCopies(s.db, 2, 'person:test');
+    await s.round();
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id, two].sort());
+    /* Even picked again, the machine off site, while it shows nothing, does not let the one at home go. */
+    await s.db.execute(sql`DELETE FROM net.file_targets WHERE sha256 = ${kept.sha256} AND machine_id = ${two}`);
+    await s.db.execute(sql`INSERT INTO net.file_targets (sha256, machine_id) VALUES (${kept.sha256}, ${three})`);
+    await b.holder.lookOnce();
+    expect(b.holder.store.has(kept.sha256)).toBe(true);
+  });
+
   it('seals a file uploaded again, which the leading machine let go of, under the salt its copies elsewhere have', async () => {
     const s = await stand();
     const two = await s.worker('two');

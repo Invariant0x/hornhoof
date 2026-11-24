@@ -7,6 +7,7 @@ import { ApiError } from '../../errors.js';
 import { keeperAsker } from '../network/via.js';
 import { DEFAULT_AREA_BYTES } from './area.js';
 import { countedNow, FRESH_MS, keptElsewhere } from './place.js';
+import { type Challenge, Proof, sameMac } from './proof.js';
 import { namedUnrecorded, SET_ASIDE } from './sweep.js';
 
 /* How the files of the store go between the company's machines, as the leading app keeps it: what each machine is to
@@ -31,12 +32,12 @@ const SHA = z.string().regex(/^[0-9a-f]{64}$/);
 
 /* What a machine hears: whether it holds the company's files, the files to take with what their sealed bytes hash to,
    those to let go of, and those the leading app asks it to send back. */
-export type FileView = { holds: boolean; hold: { sha256: string; sealedSha256: string; sealedSize: number }[]; drop: string[]; want: string[] };
+export type FileView = { holds: boolean; hold: { sha256: string; sealedSha256: string; sealedSize: number }[]; drop: string[]; want: string[]; prove: Challenge[] };
 /* A census names every file a machine keeps in a span of names, in their order: whatever it was said to keep in that
    span and does not name any more, it lost. The span runs after one name and through another; '' before the first, 'g'
    past the last. */
 const Span = z.strictObject({ after: z.union([z.literal(''), SHA]), through: z.union([z.literal('g'), SHA]) });
-const Report = z.strictObject({ held: z.array(SHA).max(VIEW_FILES * 5), dropped: z.array(SHA).max(VIEW_FILES * 5), span: Span.optional() });
+const Report = z.strictObject({ held: z.array(SHA).max(VIEW_FILES * 5), dropped: z.array(SHA).max(VIEW_FILES * 5), span: Span.optional(), proofs: z.array(Proof).max(VIEW_FILES).optional() });
 export type FileReport = z.infer<typeof Report>;
 
 /* Whether a machine keeps files of the store: it is one of the company's with a keeper and an area more than none. */
@@ -52,6 +53,27 @@ export async function keepsFiles(db: Tx, machineId: string): Promise<boolean> {
 export async function pickedFor(db: Tx, machineId: string, sha256: string): Promise<boolean> {
   const [row] = rowsOf<{ picked: boolean }>(await db.execute(sql`SELECT EXISTS (SELECT 1 FROM net.file_targets WHERE sha256 = ${sha256} AND machine_id = ${machineId}) AS picked`));
   return Boolean(row?.picked) && (await keepsFiles(db, machineId));
+}
+
+/* What a machine is to show it keeps: the copies it said it keeps of files it was given, which count only once it showed
+   the slices the leading keeper asks of each. */
+async function proveOf(db: Tx, machineId: string): Promise<Challenge[]> {
+  return rowsOf<{ sha256: string; nonce: string; slices: Challenge['slices'] }>(
+    await db.execute(sql`SELECT g.sha256, g.nonce, g.slices FROM net.file_gives g JOIN net.file_copies c ON c.sha256 = g.sha256 AND c.machine_id = g.machine_id
+      WHERE g.machine_id = ${machineId} AND NOT c.verified ORDER BY g.at, g.sha256 LIMIT ${VIEW_FILES}`),
+  ).map(row => ({ sha256: row.sha256, nonce: row.nonce, slices: row.slices }));
+}
+
+/* What a machine showed it keeps: a copy whose slices hash to what the leading keeper kept counts from now on; one that
+   does not is no copy, and the machine fetches the file again as one it is picked for. */
+async function takeProofs(db: Tx, machineId: string, proofs: Proof[]): Promise<void> {
+  for (const proof of proofs) {
+    const [kept] = rowsOf<{ mac: string }>(await db.execute(sql`SELECT mac FROM net.file_gives WHERE sha256 = ${proof.sha256} AND machine_id = ${machineId} AND nonce = ${proof.nonce}`));
+    if (!kept) continue;
+    if (sameMac(proof.mac, kept.mac)) await db.execute(sql`UPDATE net.file_copies SET verified = true WHERE sha256 = ${proof.sha256} AND machine_id = ${machineId}`);
+    else await db.execute(sql`DELETE FROM net.file_copies WHERE sha256 = ${proof.sha256} AND machine_id = ${machineId} AND NOT verified`);
+    await db.execute(sql`DELETE FROM net.file_gives WHERE sha256 = ${proof.sha256} AND machine_id = ${machineId}`);
+  }
 }
 
 /* What a machine is to do with the files now: fetch those it is picked for, let go of those whose time came and those
@@ -80,33 +102,35 @@ export async function fileView(db: Tx, machineId: string, now = new Date(), lead
     await db.execute(sql`SELECT c.sha256 FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256 WHERE c.machine_id = ${machineId}
       AND f.drop_at IS NULL AND f.wanted_at > ${new Date(now.getTime() - WANTED_MS).toISOString()}::timestamptz
       AND EXISTS (SELECT 1 FROM machines m WHERE m.id = c.machine_id AND m.report_at > ${fresh})
-      AND (SELECT count(*) FROM net.file_copies o JOIN machines m ON m.id = o.machine_id WHERE o.sha256 = c.sha256 AND o.machine_id < c.machine_id
-        AND o.machine_id IS DISTINCT FROM ${leader} AND m.report_at > ${fresh}) < ${WANT_FROM}
+      AND c.verified AND (SELECT count(*) FROM net.file_copies o JOIN machines m ON m.id = o.machine_id WHERE o.sha256 = c.sha256 AND o.machine_id < c.machine_id
+        AND o.verified AND o.machine_id IS DISTINCT FROM ${leader} AND m.report_at > ${fresh}) < ${WANT_FROM}
       ORDER BY f.wanted_at LIMIT ${VIEW_FILES}`),
   ).map(row => row.sha256);
-  return { holds, hold, drop, want };
+  return { holds, hold, drop, want, prove: await proveOf(db, machineId) };
 }
 
 /* The files a machine says it keeps that count as its copies: those it was given, or any for a machine of the data,
    which keeps the database too. The rest it is to fetch again, so it is given them. */
-async function givenOf(db: Tx, machineId: string, held: string[]): Promise<{ counted: string[]; again: string[] }> {
+async function givenOf(db: Tx, machineId: string, held: string[]): Promise<{ counted: string[]; again: string[]; data: boolean }> {
+  const data = rowsOf<{ data: boolean }>(await db.execute(sql`SELECT EXISTS (SELECT 1 FROM machines m WHERE m.id = ${machineId} AND m.role = 'data' AND m.revoked_at IS NULL) AS data`))[0]?.data === true;
   const rows = rowsOf<{ sha256: string; picked: boolean; given: boolean }>(
     await db.execute(sql`SELECT f.sha256, EXISTS (SELECT 1 FROM net.file_targets t WHERE t.sha256 = f.sha256 AND t.machine_id = ${machineId}) AS picked,
-      (EXISTS (SELECT 1 FROM net.file_gives g WHERE g.sha256 = f.sha256 AND g.machine_id = ${machineId})
-        OR EXISTS (SELECT 1 FROM machines m WHERE m.id = ${machineId} AND m.role = 'data' AND m.revoked_at IS NULL)) AS given
+      (${data} OR EXISTS (SELECT 1 FROM net.file_gives g WHERE g.sha256 = f.sha256 AND g.machine_id = ${machineId})) AS given
       FROM net.files f WHERE f.sha256 = ANY(${listOf(held)}::text[])
       AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256 AND c.machine_id = ${machineId})`),
   );
-  return { counted: rows.filter(row => row.given).map(row => row.sha256), again: rows.filter(row => row.picked && !row.given).map(row => row.sha256) };
+  return { counted: rows.filter(row => row.given).map(row => row.sha256), again: rows.filter(row => row.picked && !row.given).map(row => row.sha256), data };
 }
 
 /* What a machine said it keeps now and what it let go of. A file let go of by every machine that kept it, once it is to
    go, is no file of the store any more. The answer names the files it keeps that no record knows, which it lets go of
-   once they are a day old; those the leading app lacks, to send; and those it is to fetch again before they count. */
-export async function takeReport(db: Tx, machineId: string, report: FileReport): Promise<{ unknown: string[]; send: string[]; again: string[] }> {
+   once they are a day old; those the leading app lacks, to send; those it is to fetch again before they count; and the
+   slices it is to show of the copies it was given, so they count. */
+export async function takeReport(db: Tx, machineId: string, report: FileReport): Promise<{ unknown: string[]; send: string[]; again: string[]; prove: Challenge[] }> {
   let unknown: string[] = [];
   let send: string[] = [];
   let again: string[] = [];
+  if (report.proofs?.length) await takeProofs(db, machineId, report.proofs);
   if (report.span) {
     const { after, through } = report.span;
     await db.execute(sql`DELETE FROM net.file_copies WHERE machine_id = ${machineId} AND sha256 COLLATE "C" > ${after} AND sha256 COLLATE "C" <= ${through}
@@ -117,9 +141,11 @@ export async function takeReport(db: Tx, machineId: string, report: FileReport):
     const known = rowsOf<{ sha256: string }>(await db.execute(sql`SELECT sha256 FROM net.files WHERE sha256 = ANY(${listOf(report.held)}::text[])`)).map(row => row.sha256);
     if (holds && known.length) {
       const given = await givenOf(db, machineId, known);
+      /* A data machine keeps the database and its key, and counts at once; another machine's copy counts once it showed
+         it keeps the bytes, as the answer asks. */
       if (given.counted.length) {
-        await db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id) SELECT unnest(${listOf(given.counted)}::text[]), ${machineId}::uuid ON CONFLICT DO NOTHING`);
-        await db.execute(sql`DELETE FROM net.file_gives WHERE machine_id = ${machineId} AND sha256 = ANY(${listOf(given.counted)}::text[])`);
+        await db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id, verified) SELECT unnest(${listOf(given.counted)}::text[]), ${machineId}::uuid, ${given.data} ON CONFLICT DO NOTHING`);
+        if (given.data) await db.execute(sql`DELETE FROM net.file_gives WHERE machine_id = ${machineId} AND sha256 = ANY(${listOf(given.counted)}::text[])`);
       }
       again = given.again;
     }
@@ -139,10 +165,10 @@ export async function takeReport(db: Tx, machineId: string, report: FileReport):
     await db.execute(sql`DELETE FROM net.file_copies WHERE machine_id = ${machineId} AND sha256 = ANY(${listOf(report.dropped)}::text[])`);
     await db.execute(sql`DELETE FROM net.files f WHERE f.sha256 = ANY(${listOf(report.dropped)}::text[]) AND f.drop_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256)`);
   }
-  return { unknown, send, again };
+  return { unknown, send, again, prove: await proveOf(db, machineId) };
 }
 
-const hasWork = (view: FileView): boolean => view.hold.length > 0 || view.drop.length > 0 || view.want.length > 0;
+const hasWork = (view: FileView): boolean => view.hold.length > 0 || view.drop.length > 0 || view.want.length > 0 || view.prove.length > 0;
 const Ask = z.object({ wait: z.enum(['0', '1']).optional() });
 
 export function fileNetworkRoutes(app: FastifyInstance, ctx: Ctx): void {

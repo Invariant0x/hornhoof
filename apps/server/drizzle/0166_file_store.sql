@@ -38,11 +38,13 @@ CREATE TABLE net.files (
 --> statement-breakpoint
 CREATE INDEX files_made_at ON net.files (made_at, sha256);
 --> statement-breakpoint
--- Which machine said it keeps which file.
+-- Which machine said it keeps which file. A copy counts as one of the copies wanted only once it is verified: at once for
+-- the leading machine and a data machine, and for another machine once it showed it keeps the bytes it was given.
 CREATE TABLE net.file_copies (
   sha256 text NOT NULL REFERENCES net.files (sha256) ON DELETE CASCADE,
   machine_id uuid NOT NULL,
   at timestamptz NOT NULL DEFAULT now(),
+  verified boolean NOT NULL DEFAULT false,
   PRIMARY KEY (sha256, machine_id)
 );
 --> statement-breakpoint
@@ -68,12 +70,16 @@ CREATE TABLE net.file_targets (
 --> statement-breakpoint
 CREATE INDEX file_targets_machine ON net.file_targets (machine_id, at, sha256);
 --> statement-breakpoint
--- Which machine the leading keeper gave which file to: a machine's word that it keeps a file counts only for one it was
--- given, so a machine that only says so takes no copy's place.
+-- Which machine the leading keeper gave which file to, whole: a machine's word that it keeps a file counts only for one it
+-- was given, so a machine that only says so takes no copy's place. With it, what the machine is to show it keeps the
+-- bytes: a nonce, a few slices of the sealed file, and their HMAC under the nonce.
 CREATE TABLE net.file_gives (
   sha256 text NOT NULL REFERENCES net.files (sha256) ON DELETE CASCADE,
   machine_id uuid NOT NULL,
   at timestamptz NOT NULL DEFAULT now(),
+  nonce text NOT NULL CHECK (nonce ~ '^[0-9a-f]{64}$'),
+  slices jsonb NOT NULL,
+  mac text NOT NULL CHECK (mac ~ '^[0-9a-f]{64}$'),
   PRIMARY KEY (sha256, machine_id)
 );
 --> statement-breakpoint

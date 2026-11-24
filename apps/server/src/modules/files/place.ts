@@ -170,7 +170,7 @@ export async function trimTargets(db: Tx, leader: string | null, opts: { now?: D
   const rows = rowsOf<{ sha256: string; machine_id: string; good: boolean; held: boolean }>(
     await db.execute(sql`WITH g AS ${countedTargets(all)},
       t AS (SELECT t.sha256, t.machine_id, t.at, EXISTS (SELECT 1 FROM g WHERE g.sha256 = t.sha256 AND g.machine_id = t.machine_id) AS good,
-        EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = t.sha256 AND c.machine_id = t.machine_id) AS held FROM net.file_targets t),
+        EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = t.sha256 AND c.machine_id = t.machine_id AND c.verified) AS held FROM net.file_targets t),
       over AS (SELECT sha256 FROM t WHERE sha256 COLLATE "C" > ${opts.after ?? ''} GROUP BY sha256 HAVING count(*) > ${wanted} OR bool_or(NOT good)
         ORDER BY sha256 COLLATE "C" LIMIT ${PLACE_BATCH})
       SELECT t.sha256, t.machine_id, t.good, t.held FROM t JOIN over USING (sha256) ORDER BY t.sha256, (t.machine_id = ${leader}) DESC, t.at, t.machine_id`),
@@ -196,9 +196,10 @@ export async function countedNow(db: Tx, leader: string | null, now = new Date()
   return { ids: counted(all).map(seat => seat.id), wanted: copiesWanted(await copiesSet(db), all) };
 }
 
-/* The copies of a file that stand on counted targets other than one machine's, in SQL: what lets that machine's go. */
+/* The verified copies of a file that stand on counted targets other than one machine's, in SQL: what lets that machine's
+   go. */
 export const keptElsewhere = (sha256: SQL, machine: string, ids: string[]): SQL =>
-  sql`(SELECT count(*) FROM net.file_targets t JOIN net.file_copies o ON o.sha256 = t.sha256 AND o.machine_id = t.machine_id
+  sql`(SELECT count(*) FROM net.file_targets t JOIN net.file_copies o ON o.sha256 = t.sha256 AND o.machine_id = t.machine_id AND o.verified
     WHERE t.sha256 = ${sha256} AND t.machine_id <> ${machine} AND t.machine_id = ANY(${listOf(ids)}::uuid[]))`;
 
 /* Whether a file stands on as many machines as the copies asked for, as far as the company has machines that keep files,
@@ -210,7 +211,7 @@ export async function copiesStand(db: Tx, leader: string | null, sha256: string,
   const wanted = Math.min(await copiesSet(db), fit.length);
   if (wanted === 0) return true;
   const [row] = rowsOf<{ n: string | number }>(
-    await db.execute(sql`SELECT count(*) AS n FROM net.file_targets t JOIN net.file_copies c ON c.sha256 = t.sha256 AND c.machine_id = t.machine_id
+    await db.execute(sql`SELECT count(*) AS n FROM net.file_targets t JOIN net.file_copies c ON c.sha256 = t.sha256 AND c.machine_id = t.machine_id AND c.verified
       WHERE t.sha256 = ${sha256} AND t.machine_id = ANY(${listOf(fit.map(seat => seat.id))}::uuid[])`),
   );
   return Number(row?.n ?? 0) >= wanted;

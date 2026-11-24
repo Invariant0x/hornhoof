@@ -4,6 +4,7 @@ import type { Db } from '../../db/client.js';
 import { backsUpStore } from '../files/backup.js';
 import { recordFile } from '../files/files.js';
 import { keepsFiles, pickedFor } from '../files/network.js';
+import { challengeOf, macOf } from '../files/proof.js';
 import { sealedSizeOf } from '../files/seal.js';
 import { namedUnrecorded } from '../files/sweep.js';
 import { FileStore, StoreRefused } from '../files/store.js';
@@ -45,7 +46,7 @@ export class LeaderFiles {
       throw err;
     }
     await recordFile(this.db, { sha256, size: Number(named.size), ...(await this.store.sealedFacts(sha256)) }, await this.ownRow());
-    await this.db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id) VALUES (${sha256}, ${machine}) ON CONFLICT DO NOTHING`);
+    await this.db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id, verified) VALUES (${sha256}, ${machine}, true) ON CONFLICT (sha256, machine_id) DO UPDATE SET verified = true`);
     return 201;
   }
 
@@ -61,20 +62,30 @@ export class LeaderFiles {
       return { status: 404 };
     }
     if (!picked) return { status: 200, length: sealed.length, stream: sealed.stream };
-    const given = () => this.db.execute(sql`INSERT INTO net.file_gives (sha256, machine_id) VALUES (${sha256}, ${machine}) ON CONFLICT (sha256, machine_id) DO UPDATE SET at = now()`);
+    /* With the receipt, what the machine is to show it keeps the bytes: a few slices of this very copy, under a nonce. */
+    const given = async () => {
+      const { nonce, slices } = challengeOf(sealed.length);
+      const mac = macOf(nonce, await this.store.slicesOf(sha256, slices));
+      await this.db.execute(sql`INSERT INTO net.file_gives (sha256, machine_id, nonce, slices, mac) VALUES (${sha256}, ${machine}, ${nonce}, ${JSON.stringify(slices)}::jsonb, ${mac})
+        ON CONFLICT (sha256, machine_id) DO UPDATE SET at = now(), nonce = EXCLUDED.nonce, slices = EXCLUDED.slices, mac = EXCLUDED.mac`);
+    };
     return {
       status: 200,
       length: sealed.length,
       stream: () => {
         /* Counted on the way out, without starting the file's flow before the one it goes to reads it. */
         let sent = 0;
+        /* Recorded before the stream ends, so the machine's word that it keeps the file, which comes after, finds it. */
         const counted = new Transform({
           transform(chunk: Buffer, _encoding, done) {
             sent += chunk.length;
             done(null, chunk);
           },
+          flush(done) {
+            if (sent !== sealed.length) return done();
+            given().then(() => done(), () => done());
+          },
         });
-        counted.once('end', () => void (sent === sealed.length && given().catch(() => undefined)));
         pipeline(sealed.stream(), counted, () => undefined);
         return counted;
       },
@@ -98,7 +109,7 @@ export class LeaderFiles {
     }
     await this.db.execute(restores ? sql`UPDATE net.files SET wanted_at = NULL, unused_since = NULL, drop_at = NULL WHERE sha256 = ${sha256}` : sql`UPDATE net.files SET wanted_at = NULL WHERE sha256 = ${sha256}`);
     const own = await this.ownRow();
-    if (own) await this.db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id) VALUES (${sha256}, ${own}) ON CONFLICT DO NOTHING`);
+    if (own) await this.db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id, verified) VALUES (${sha256}, ${own}, true) ON CONFLICT (sha256, machine_id) DO UPDATE SET verified = true`);
     return 201;
   }
 }

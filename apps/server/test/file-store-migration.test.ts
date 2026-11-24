@@ -181,7 +181,7 @@ const holder = async (db: FilesDb) => {
     await db.execute(sql`INSERT INTO machines (company_id, person_id, machine_key, hostname, role, network_id, report_at)
       VALUES (${COMPANY}, ${person!.id}, 'other-key', 'other', 'worker', 'other-net', now()) RETURNING id`),
   );
-  return { keeps: (sha256: string) => db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id) VALUES (${sha256}, ${machine!.id})`) };
+  return { keeps: (sha256: string) => db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id, verified) VALUES (${sha256}, ${machine!.id}, true)`) };
 };
 
 describe('the mover', () => {

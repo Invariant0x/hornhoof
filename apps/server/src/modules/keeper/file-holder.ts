@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { z } from 'zod';
+import { Challenge, macOf, type Proof } from '../files/proof.js';
 import { FileStore } from '../files/store.js';
 import { Hourly, reasonOf } from './machine-keys.js';
 
@@ -21,9 +22,10 @@ const View = z.object({
   hold: z.array(z.object({ sha256: SHA, sealedSha256: SHA, sealedSize: z.number().int().positive() })),
   drop: z.array(SHA),
   want: z.array(SHA),
+  prove: z.array(Challenge).default([]),
 });
 export type HeldView = z.infer<typeof View>;
-const Answer = z.object({ unknown: z.array(SHA).default([]), send: z.array(SHA).default([]), again: z.array(SHA).default([]) });
+const Answer = z.object({ unknown: z.array(SHA).default([]), send: z.array(SHA).default([]), again: z.array(SHA).default([]), prove: z.array(Challenge).default([]) });
 
 /* The leader as this keeper reaches it: whether one is in reach, a request to its app, and a stream of its own to the
    leading keeper, which carries a file. */
@@ -102,7 +104,8 @@ export class FileHolder {
       dropped.push(sha256);
     }
     for (const sha256 of view.want) await this.send(sha256);
-    if (held.length || dropped.length) await this.report(held, dropped);
+    const proofs = await this.proofsOf(view.prove);
+    if (held.length || dropped.length || proofs.length) await this.report(held, dropped, undefined, proofs);
     /* A file to send back that is not here any more is one this machine lost. */
     const lost = view.want.filter(sha256 => !this.store.has(sha256));
     if (lost.length) await this.report([], lost);
@@ -111,13 +114,26 @@ export class FileHolder {
 
   /* Says what this machine keeps and let go of; the answer names what of it no record knows, and what of it the leader
      lacks and asks for, which goes at once. */
-  private async report(held: string[], dropped: string[], span?: { after: string; through: string }): Promise<string[]> {
-    const answer = await this.opts.link.request('POST', FILES_VIEW_PATH, { held, dropped, ...(span ? { span } : {}) });
+  private async report(held: string[], dropped: string[], span?: { after: string; through: string }, proofs: Proof[] = [], last = false): Promise<string[]> {
+    const answer = await this.opts.link.request('POST', FILES_VIEW_PATH, { held, dropped, ...(span ? { span } : {}), ...(proofs.length ? { proofs } : {}) });
     if (answer.status >= 300) throw new Error(`the company server answered ${answer.status}`);
-    const said = Answer.safeParse(answer.body ?? {}).data ?? { unknown: [], send: [], again: [] };
+    const said = Answer.safeParse(answer.body ?? {}).data ?? { unknown: [], send: [], again: [], prove: [] };
     for (const sha256 of said.send) await this.send(sha256);
     for (const sha256 of said.again) await this.askAgain(sha256);
+    /* The copies it counted are to be shown at once, in one more word, so they count in this same look. */
+    if (!last && said.prove.length) {
+      const more = await this.proofsOf(said.prove);
+      if (more.length) await this.report([], [], undefined, more, true);
+    }
     return said.unknown;
+  }
+
+  /* Shows it keeps the copies asked of: the HMAC, under each nonce, of the slices of its own copy. A copy not here any
+     more shows nothing that matches, and stops counting. */
+  private async proofsOf(challenges: Challenge[]): Promise<Proof[]> {
+    const proofs: Proof[] = [];
+    for (const { sha256, nonce, slices } of challenges) proofs.push({ sha256, nonce, mac: macOf(nonce, await this.store.slicesOf(sha256, slices)) });
+    return proofs;
   }
 
   /* Names every file here, a span of names at a time in their order, so the leading app forgets what this machine lost
