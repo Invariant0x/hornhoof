@@ -139,6 +139,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     moveOldFiles(ctx)
       .then(round => {
         if (round.moved > 0 || round.waiting > 0) ctx.log.info({ moved: round.moved, waiting: round.waiting, finished: round.finished }, 'Files moved from the database into the store.');
+        if (round.stays) ctx.log.warn('Files stay in the database: this server has no FILES_DIR to keep them in.');
       })
       .catch(failed('moving files from the database into the store failed')),
     dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),

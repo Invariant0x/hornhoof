@@ -35,7 +35,8 @@ export async function markUnused(db: Pick<Db, 'execute'>, now: Date): Promise<nu
 
 /* Removes from this machine's store the contents whose time came, each under its record's lock, so an upload of the
    same content, which takes that lock to name it again, either comes first and keeps it, or comes after and finds it
-   gone and writes it again. Then forgets the copies of machines that are gone and the contents no machine keeps. */
+   gone and writes it again. A content a row came to name after its time was given, as a moved file's row does, is kept
+   and in use again. Then forgets the copies of machines that are gone and the contents no machine keeps. */
 export async function dropDue(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Promise<number> {
   const { db, files } = ctx;
   const mine = await files.machineId(db);
@@ -46,10 +47,14 @@ export async function dropDue(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Promis
   let dropped = 0;
   for (const { sha256 } of due) {
     await db.transaction(async tx => {
-      const [still] = rowsOf<{ sha256: string }>(
-        await tx.execute(sql`SELECT sha256 FROM net.files WHERE sha256 = ${sha256} AND drop_at <= ${now.toISOString()}::timestamptz FOR UPDATE`),
+      const [still] = rowsOf<{ sha256: string; named: boolean }>(
+        await tx.execute(sql`SELECT f.sha256, ${NAMED} AS named FROM net.files f WHERE f.sha256 = ${sha256} AND f.drop_at <= ${now.toISOString()}::timestamptz FOR UPDATE OF f`),
       );
       if (!still) return;
+      if (still.named) {
+        await tx.execute(sql`UPDATE net.files SET drop_at = NULL, unused_since = NULL WHERE sha256 = ${sha256}`);
+        return;
+      }
       await store.remove(sha256);
       if (mine) await tx.execute(sql`DELETE FROM net.file_copies WHERE sha256 = ${sha256} AND machine_id = ${mine}`);
       dropped++;

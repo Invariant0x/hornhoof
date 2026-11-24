@@ -23,12 +23,14 @@ export const MOVE_BUDGET_MS = 20_000;
 
 const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 
-export type MoveRound = { moved: number; waiting: number; finished: boolean };
+/* stays says, once for an app, that the files stay in Postgres because the server has no FILES_DIR to keep them in. */
+export type MoveRound = { moved: number; waiting: number; finished: boolean; stays?: 'no_files_dir' };
 type Mover = Pick<Ctx, 'db' | 'config' | 'files'>;
 type Row = { id: string; size: number; held: number | null };
 
-/* Where the mover stands on this app: files stored that wait for a second machine, by row, and the last row it looked at. */
-type Place = { waiting: Map<string, { sha256: string; disk: boolean }>; after: string };
+/* Where the mover stands on this app: files stored that wait for a second machine, by row, the last row it looked at,
+   and whether it said the files stay where they are. */
+type Place = { waiting: Map<string, { sha256: string; disk: boolean }>; after: string; told?: boolean };
 const places = new WeakMap<object, Place>();
 const placeOf = (files: object): Place => {
   let place = places.get(files);
@@ -64,16 +66,21 @@ async function opensTo(ctx: Mover, sha256: string): Promise<boolean> {
   return hash.digest('hex') === sha256;
 }
 
-/* The row names its content in the store and gives up its bytes, if they are still the bytes stored. */
+/* The store still keeps the content and is not letting it go: the store's round takes the record's lock before it removes
+   a content, so the two never cross. */
+const stillKept = (sha256: string) => sql`EXISTS (SELECT 1 FROM net.files f WHERE f.sha256 = ${sha256} AND f.drop_at IS NULL FOR SHARE)`;
+
+/* The row names its content in the store and gives up its bytes, if they are still the bytes stored and the store still
+   keeps them. */
 async function settle(ctx: Mover, id: string, moved: { sha256: string; disk: boolean }, column: boolean): Promise<boolean> {
   if (!moved.disk) {
     const done = await ctx.db.execute(sql`UPDATE attachments SET sha256 = ${moved.sha256}, bytes = NULL
-      WHERE id = ${id} AND bytes IS NOT NULL AND encode(sha256(bytes), 'hex') = ${moved.sha256} RETURNING id`);
+      WHERE id = ${id} AND bytes IS NOT NULL AND encode(sha256(bytes), 'hex') = ${moved.sha256} AND ${stillKept(moved.sha256)} RETURNING id`);
     return rowsOf(done).length === 1;
   }
   const done = column
-    ? await ctx.db.execute(sql`UPDATE attachments SET sha256 = ${moved.sha256}, bytes = NULL WHERE id = ${id} AND sha256 IS NULL AND (bytes IS NULL OR octet_length(bytes) = 0) RETURNING id`)
-    : await ctx.db.execute(sql`UPDATE attachments SET sha256 = ${moved.sha256} WHERE id = ${id} AND sha256 IS NULL RETURNING id`);
+    ? await ctx.db.execute(sql`UPDATE attachments SET sha256 = ${moved.sha256}, bytes = NULL WHERE id = ${id} AND sha256 IS NULL AND (bytes IS NULL OR octet_length(bytes) = 0) AND ${stillKept(moved.sha256)} RETURNING id`)
+    : await ctx.db.execute(sql`UPDATE attachments SET sha256 = ${moved.sha256} WHERE id = ${id} AND sha256 IS NULL AND ${stillKept(moved.sha256)} RETURNING id`);
   if (rowsOf(done).length !== 1) return false;
   await rm(join(ctx.config.filesDir!, id), { force: true });
   return true;
@@ -103,38 +110,76 @@ export async function finishMove(ctx: Pick<Ctx, 'db'>): Promise<boolean> {
   return true;
 }
 
-/* One round of the mover, for at most budgetMs: first the rows whose stored files a second machine keeps now, then more
-   rows, then the finish once none is left. */
-export async function moveOldFiles(ctx: Mover, opts: { budgetMs?: number; now?: () => number } = {}): Promise<MoveRound> {
-  const now = opts.now ?? Date.now;
-  const started = now();
-  const place = placeOf(ctx.files);
-  const column = await hasOldBytes(ctx.db);
-  /* With the column gone, only a big file on this machine's disk is left to move. */
-  if (!column && !ctx.config.filesDir) return { moved: 0, waiting: 0, finished: true };
+/* The contents stored for rows that wait for a second machine are in use, as a row's are, however long that machine is
+   away: no round of the store lets them go. One the store let go meanwhile is stored again later, as its row still holds
+   the bytes. */
+async function keepWaiting(ctx: Mover, place: Place): Promise<void> {
+  const contents = [...new Set([...place.waiting.values()].map(waiting => waiting.sha256))];
+  if (contents.length === 0) return;
+  const list = `{${contents.join(',')}}`;
+  const kept = rowsOf<{ sha256: string }>(await ctx.db.execute(sql`UPDATE net.files SET unused_since = NULL
+    WHERE sha256 = ANY(${list}::text[]) AND drop_at IS NULL RETURNING sha256`));
+  const still = new Set(kept.map(row => row.sha256));
+  for (const [id, waiting] of place.waiting) if (!still.has(waiting.sha256)) place.waiting.delete(id);
+}
+
+/* The answer of a server with no FILES_DIR, whose store is a folder of this run alone: the files stay in Postgres, so a
+   row never gives up its bytes to a store that goes with a restart. It says so once for an app. */
+function staysHere(place: Place, column: boolean): MoveRound {
+  const stays = column && !place.told ? { stays: 'no_files_dir' as const } : {};
+  place.told = place.told || column;
+  return { moved: 0, waiting: 0, finished: !column, ...stays };
+}
+
+/* The rows whose stored files a second machine keeps now give up their bytes. Says how many did. */
+async function settleWaiting(ctx: Mover, place: Place, column: boolean): Promise<number> {
+  await keepWaiting(ctx, place);
   let moved = 0;
   for (const [id, waiting] of place.waiting) {
     if (!(await ctx.files.settled(ctx.db, waiting.sha256, 0))) continue;
     if (await settle(ctx, id, waiting, column)) moved++;
     place.waiting.delete(id);
   }
-  while (now() - started < (opts.budgetMs ?? MOVE_BUDGET_MS) && place.waiting.size < MAX_WAITING) {
+  return moved;
+}
+
+/* Stores one row's file, checked by opening it again, and the row gives up its bytes at once, or waits for a second
+   machine. Says whether it gave them up. */
+async function moveRow(ctx: Mover, place: Place, row: Row, column: boolean): Promise<boolean> {
+  const source = await sourceOf(ctx, row);
+  if (!source) return false;
+  const kept = await ctx.files.put(ctx.db, source.input);
+  if (!(await opensTo(ctx, kept.sha256)) || (source.disk && kept.size !== row.size)) return false;
+  const waiting = { sha256: kept.sha256, disk: source.disk };
+  if (!(await ctx.files.settled(ctx.db, kept.sha256, 0))) {
+    place.waiting.set(row.id, waiting);
+    return false;
+  }
+  return settle(ctx, row.id, waiting, column);
+}
+
+/* More rows, a few at a time, while the round has time and not too many wait. Says how many gave up their bytes. */
+async function moveMore(ctx: Mover, place: Place, column: boolean, inTime: () => boolean): Promise<number> {
+  let moved = 0;
+  while (inTime() && place.waiting.size < MAX_WAITING) {
     const rows = await nextRows(ctx, place.after, [...place.waiting.keys()], column);
     place.after = rows.length < MOVE_BATCH ? '' : rows.at(-1)!.id;
-    for (const row of rows) {
-      const source = await sourceOf(ctx, row);
-      if (!source) continue;
-      const kept = await ctx.files.put(ctx.db, source.input);
-      if (!(await opensTo(ctx, kept.sha256)) || (source.disk && kept.size !== row.size)) continue;
-      const waiting = { sha256: kept.sha256, disk: source.disk };
-      if (!(await ctx.files.settled(ctx.db, kept.sha256, 0))) {
-        place.waiting.set(row.id, waiting);
-        continue;
-      }
-      if (await settle(ctx, row.id, waiting, column)) moved++;
-    }
+    for (const row of rows) if (await moveRow(ctx, place, row, column)) moved++;
     if (place.after === '') break;
   }
+  return moved;
+}
+
+/* One round of the mover, for at most budgetMs: first the rows whose stored files a second machine keeps now, then more
+   rows, then the finish once none is left. A server with no FILES_DIR leaves the files in Postgres. */
+export async function moveOldFiles(ctx: Mover, opts: { budgetMs?: number; now?: () => number } = {}): Promise<MoveRound> {
+  const now = opts.now ?? Date.now;
+  const budget = opts.budgetMs ?? MOVE_BUDGET_MS;
+  const started = now();
+  const place = placeOf(ctx.files);
+  const column = await hasOldBytes(ctx.db);
+  if (!ctx.config.filesDir) return staysHere(place, column);
+  const moved = (await settleWaiting(ctx, place, column)) + (await moveMore(ctx, place, column, () => now() - started < budget));
   const finished = column && place.waiting.size === 0 ? await finishMove(ctx) : !column;
   return { moved, waiting: place.waiting.size, finished };
 }
