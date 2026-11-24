@@ -68,13 +68,14 @@ Roles not listed take the look of their class (head, checker, executor, turnkey,
 
 Cloak colours by subscription provider (the engine tints the cloak layer): Claude `#C96A4B`, Codex `#3FA796`, Antigravity `#4DA167`, Kimi `#4C84D6`, GLM `#766BD6`, API key `#B89B5E`.
 
-### Held sheets
+### Held art
 
-A delivered sheet stays out of the art folder while the art check refuses it, and its look keeps the art it had. The next delivery of the same sheet closes the line.
+A delivered picture stays out of the art folder while the art check refuses it or the art pipeline has withdrawn it, and what it would replace keeps the art it had. The next delivery of the same pictures closes the line.
 
-| Sheet | Delivered | Held because | Closed by |
+| Art | Delivered | Held because | Closed by |
 |---|---|---|---|
 | tier 1 `walk` of `egypt-guard-captain`, `egypt-royal-master`, `egypt-caravan-messenger`, `egypt-canal-builder` and `egypt-firefighter` | 24.11.2026, drawn NE and SE | These looks carry a large item, so their walk draws NE, SE, SW and NW: a mirror would move the item to the other hand (contract section 7). No exception is granted. | The same sheets drawn in NE, SE, SW and NW |
+| house `mudbrick` variants `v09`, `v10` and `v11` | 24.11.2026 | Withdrawn by the art pipeline before intake: at `roof_beams` the doorway shows sand or a grey-blue patch instead of a dark room. Until they come, the engine gives their houses the next delivered variant. | The three variants redrawn |
 
 ## Ground and plants
 
