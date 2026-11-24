@@ -347,7 +347,7 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
   it('walks every construction picture of the step in order over a job, whatever the building own number of stages (#1947 item 7)', () => {
     const pack: WorldPackManifest = {
       ...PACK,
-      art: { ...CATALOG, buildings: { ...CATALOG.buildings, district_hub: [{ id: 'workshop', footprint: '3x3', label: { en: 'Workshop', ru: 'Мастерская' } }] } },
+      art: { ...CATALOG, buildings: { ...CATALOG.buildings, district_hub: [{ id: 'workshop', footprint: '3x3', label: 'Workshop' }] } },
     };
     const at = (name: string) => `buildings/district_hub/workshop/${name}.png`;
     const steps = ['01', '02', '03', '04', '05', '06', '07', '08'].map(n => at(`stage_${n}`));
