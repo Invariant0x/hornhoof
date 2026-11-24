@@ -11,6 +11,7 @@ import { StoreRefused } from './store.js';
    keeps it, in a folder of its own beside its live store, while no other machine keeps files. */
 
 export const KEEP_DAYS = 30;
+export const MAX_KEEP_DAYS = 3650;
 const DAY_MS = 24 * 60 * 60 * 1000;
 /* How many contents one round brings into the backup here, and one look of a machine names, so a store of many files
    comes in over a few. */
@@ -24,6 +25,12 @@ const iso = (at: Date | string | null | undefined): string | null => (at == null
 export async function backupSettings(db: FilesDb): Promise<{ keepDays: number; machineId: string | null }> {
   const [row] = rowsOf<{ keep_days: number; machine_id: string | null }>(await db.execute(sql`SELECT keep_days, machine_id FROM net.file_backup_settings`));
   return { keepDays: row?.keep_days ?? KEEP_DAYS, machineId: row?.machine_id ?? null };
+}
+
+/* Sets the days the backup keeps a content no row names; its next round lets go of what was kept longer. */
+export async function setKeepDays(db: FilesDb, days: number, by: string): Promise<void> {
+  await db.execute(sql`INSERT INTO net.file_backup_settings (keep_days, set_by) VALUES (${days}, ${by})
+    ON CONFLICT (one) DO UPDATE SET keep_days = excluded.keep_days, set_by = excluded.set_by, set_at = now()`);
 }
 
 /* Whether a machine keeps the store's backup, or a content of it (sha256, when one is named): the machine picked for it,

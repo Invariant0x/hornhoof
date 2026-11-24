@@ -36,4 +36,7 @@ SELECT jsonb_build_object(
       FROM query_to_xml('SELECT key_enc FROM net.file_key LIMIT 1', false, true, '') AS x WHERE x::text <> '') END,
   'fileCopies', CASE WHEN to_regclass('net.file_settings') IS NOT NULL THEN (SELECT jsonb_build_object('copies', (xpath('/row/copies/text()', x))[1]::text::int,
       'setBy', (xpath('/row/set_by/text()', x))[1]::text) FROM query_to_xml('SELECT copies, set_by FROM net.file_settings LIMIT 1', false, true, '') AS x
-      WHERE x::text <> '') END);
+      WHERE x::text <> '') END,
+  'fileBackup', CASE WHEN to_regclass('net.file_backup_settings') IS NOT NULL THEN (SELECT jsonb_build_object('keepDays', (xpath('/row/keep_days/text()', x))[1]::text::int,
+      'setBy', (xpath('/row/set_by/text()', x))[1]::text, 'machineId', (xpath('/row/machine_id/text()', x))[1]::text)
+      FROM query_to_xml('SELECT keep_days, set_by, machine_id FROM net.file_backup_settings LIMIT 1', false, true, '') AS x WHERE x::text <> '') END);

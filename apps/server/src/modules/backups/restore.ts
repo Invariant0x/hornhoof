@@ -134,12 +134,18 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
 }
 
 /* The key the company's files are sealed with, as the old database had it: the files the machines keep are sealed with
-   it, whatever the restored database says, so it is the one kept. And how many machines keep each, as the CEO set it. */
+   it, whatever the restored database says, so it is the one kept. And how many machines keep each, as the CEO set it,
+   and the days the store's backup keeps a file and the machine it is on, so what only that machine keeps is not left. */
 async function carryFileStore(db: Db, carry: Carry): Promise<void> {
   if (carry.fileKeyEnc) await db.execute(sql`INSERT INTO net.file_key (key_enc) VALUES (${carry.fileKeyEnc}) ON CONFLICT (one) DO UPDATE SET key_enc = excluded.key_enc`);
   if (carry.fileCopies) {
     await db.execute(sql`INSERT INTO net.file_settings (copies, set_by) VALUES (${carry.fileCopies.copies}, ${carry.fileCopies.setBy})
       ON CONFLICT (one) DO UPDATE SET copies = excluded.copies, set_by = excluded.set_by`);
+  }
+  if (carry.fileBackup) {
+    const { keepDays, setBy, machineId } = carry.fileBackup;
+    await db.execute(sql`INSERT INTO net.file_backup_settings (keep_days, set_by, machine_id) VALUES (${keepDays}, ${setBy}, ${machineId})
+      ON CONFLICT (one) DO UPDATE SET keep_days = excluded.keep_days, set_by = excluded.set_by, machine_id = excluded.machine_id`);
   }
 }
 

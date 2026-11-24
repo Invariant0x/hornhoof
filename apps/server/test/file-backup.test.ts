@@ -153,6 +153,20 @@ describe("the store's own backup", () => {
     expect((await fileStoreState(s.app.ctx)).backup).toMatchObject({ files: 1, keepDays: 7 });
   });
 
+  it('keeps the days the CEO, or the orchestrator for him, sets, and takes them from nobody else', async () => {
+    const s = await stand();
+    const set = (payload: object, who: object = as(s.ceo)) => s.app.inject({ method: 'PATCH', url: '/api/company/file-store', payload, ...who });
+    const zed = await invitePerson(s.app, s.ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
+    expect((await set({ backupKeepDays: 7 }, as(zed))).statusCode).toBe(403);
+    const done = await set({ backupKeepDays: 7 });
+    expect([done.statusCode, (done.json() as { backup: { keepDays: number } }).backup.keepDays]).toEqual([200, 7]);
+    expect((await set({ backupKeepDays: 90, copies: 3 }, { headers: orchestratorHeaders(s.owner.id, s.orchestrator.id) })).json()).toMatchObject({ copies: 3, backup: { keepDays: 90 } });
+    expect(rowsOf<{ set_by: string }>(await s.db.execute(sql`SELECT set_by FROM net.file_backup_settings`))[0]!.set_by).toBe(`orchestrator:${s.orchestrator.id}`);
+    for (const wrong of [{}, { backupKeepDays: 0 }, { backupKeepDays: 3651 }, { backupKeepDays: 2.5 }, { backupKeepDays: '7' }])
+      expect((await set(wrong)).statusCode, JSON.stringify(wrong)).toBe(400);
+    expect((await fileStoreState(s.app.ctx)).backup.keepDays).toBe(90);
+  });
+
   it('keeps what a merge refused still names, and every content while a database set aside may be merged back', async () => {
     const s = await stand();
     const t0 = new Date();

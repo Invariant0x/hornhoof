@@ -76,4 +76,6 @@ export type Carry = {
      set it; none from a database before the store, or before its first file, or before the CEO set it. */
   fileKeyEnc?: string | null;
   fileCopies?: { copies: number; setBy: string } | null;
+  /* The store's backup (#2056): the days it keeps a file no row names, who set them, and the machine it is on. */
+  fileBackup?: { keepDays: number; setBy: string | null; machineId: string | null } | null;
 };

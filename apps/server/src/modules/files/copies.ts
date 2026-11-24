@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
-import { backupState } from './backup.js';
+import { backupState, MAX_KEEP_DAYS, setKeepDays } from './backup.js';
 import { copiesSet, copiesWanted, counted, countedTargets, MAX_COPIES, seats } from './place.js';
 import { plainOf } from './seal.js';
 
@@ -94,7 +94,10 @@ export async function setCopies(db: Tx, copies: number, by: string): Promise<voi
     ON CONFLICT (one) DO UPDATE SET copies = excluded.copies, set_by = excluded.set_by, set_at = now()`);
 }
 
-const Copies = z.strictObject({ copies: z.number().int().min(1).max(MAX_COPIES) });
+/* The copies the CEO asks for, and the days the store's backup keeps a file no row names, either or both. */
+const Settings = z
+  .strictObject({ copies: z.number().int().min(1).max(MAX_COPIES).optional(), backupKeepDays: z.number().int().min(1).max(MAX_KEEP_DAYS).optional() })
+  .refine(set => set.copies !== undefined || set.backupKeepDays !== undefined, 'Name the copies, the days the backup keeps a file, or both.');
 
 export function fileCopiesRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
@@ -110,8 +113,10 @@ export function fileCopiesRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.patch('/api/company/file-store', async req => {
     const me = ceo(await requirePerson(req, db));
-    const { copies } = Copies.parse(req.body);
-    await setCopies(db, copies, me.via ? `orchestrator:${me.via}` : `person:${me.id}`);
+    const { copies, backupKeepDays } = Settings.parse(req.body);
+    const by = me.via ? `orchestrator:${me.via}` : `person:${me.id}`;
+    if (copies !== undefined) await setCopies(db, copies, by);
+    if (backupKeepDays !== undefined) await setKeepDays(db, backupKeepDays, by);
     return fileStoreState(ctx);
   });
 }

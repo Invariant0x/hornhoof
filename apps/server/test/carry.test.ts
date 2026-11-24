@@ -124,20 +124,37 @@ describe('the carry of a restore', () => {
     await setUpCompany(app);
     const read = async () => Object.values(((await db.execute(sql.raw(CARRY))) as unknown as { rows: Record<string, unknown>[] }).rows[0]!)[0] as Carry;
     /* Before the first file: no key, and the copies as the default. */
-    expect(await read()).toMatchObject({ fileKeyEnc: null, fileCopies: null });
+    expect(await read()).toMatchObject({ fileKeyEnc: null, fileCopies: null, fileBackup: null });
 
     const kept = await app.ctx.files.putBytes(db, Buffer.from('a file of the company'));
     await setCopies(db, 3, 'person:ceo');
+    /* The days the backup keeps a file and the machine it is on, so a restore neither resets the days nor leaves what
+       only that machine keeps. */
+    const machine = '00000000-0000-4000-8000-0000000000cc';
+    await db.execute(sql`INSERT INTO net.file_backup_settings (keep_days, set_by, machine_id) VALUES (12, 'person:ceo', ${machine})`);
     const carry = await read();
     const keyEnc = ((await db.execute(sql`SELECT key_enc FROM net.file_key`)) as unknown as { rows: { key_enc: string }[] }).rows[0]!.key_enc;
-    expect(carry).toMatchObject({ fileKeyEnc: keyEnc, fileCopies: { copies: 3, setBy: 'person:ceo' } });
+    expect(carry).toMatchObject({ fileKeyEnc: keyEnc, fileCopies: { copies: 3, setBy: 'person:ceo' }, fileBackup: { keepDays: 12, setBy: 'person:ceo', machineId: machine } });
 
     /* A backup from before the store comes back: the store's key and setting come back with the carry, and the file opens,
        where a key made anew would open none. */
     await db.execute(sql`DELETE FROM net.file_key`);
     await db.execute(sql`DELETE FROM net.file_settings`);
+    await db.execute(sql`DELETE FROM net.file_backup_settings`);
     await applyCarry(app.ctx, carry);
     expect((await read()).fileCopies).toEqual({ copies: 3, setBy: 'person:ceo' });
+    expect((await read()).fileBackup).toEqual({ keepDays: 12, setBy: 'person:ceo', machineId: machine });
+    /* The restored database's own setting gives way to the carried one. */
+    await db.execute(sql`UPDATE net.file_backup_settings SET keep_days = 5, set_by = 'person:other', machine_id = NULL`);
+    await applyCarry(app.ctx, carry);
+    expect((await read()).fileBackup).toEqual({ keepDays: 12, setBy: 'person:ceo', machineId: machine });
+    /* One set by nobody yet, but for the machine, comes back so too. */
+    await db.execute(sql`UPDATE net.file_backup_settings SET set_by = NULL, keep_days = 30`);
+    const unset = await read();
+    expect(unset.fileBackup).toEqual({ keepDays: 30, setBy: null, machineId: machine });
+    await db.execute(sql`DELETE FROM net.file_backup_settings`);
+    await applyCarry(app.ctx, unset);
+    expect((await read()).fileBackup).toEqual({ keepDays: 30, setBy: null, machineId: machine });
     expect(((await db.execute(sql`SELECT key_enc FROM net.file_key`)) as unknown as { rows: { key_enc: string }[] }).rows).toEqual([{ key_enc: keyEnc }]);
     expect((await app.ctx.files.bytes(db, kept.sha256)).toString()).toBe('a file of the company');
   });
