@@ -1036,7 +1036,7 @@ test('saves neutral feedback without pick, delivers words to author, and preserv
       kind: 'person',
       id: srv.ceoId,
       name: 'Ivan',
-      role: { en: 'CEO', ru: 'CEO' },
+      role: { en: 'CEO' },
       department: null,
     });
     expect(freeDeliveries[0]!.data.text).toContain(freeFeedback);
