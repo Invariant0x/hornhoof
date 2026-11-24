@@ -450,8 +450,9 @@ describe('migration 0057', () => {
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
-    expect((await db.execute(sql`select to_jsonb(a) - 'person_id' - 'operator_case_id' as data from attachments a`)).rows).toEqual(before);
-    expect((await db.execute(sql`select person_id, operator_case_id from attachments`)).rows).toEqual([{ person_id: null, operator_case_id: null }]);
+    /* Later migrations add the hash of a file in the store, which a file the database still holds the bytes of has not. */
+    expect((await db.execute(sql`select to_jsonb(a) - 'person_id' - 'operator_case_id' - 'sha256' as data from attachments a`)).rows).toEqual(before);
+    expect((await db.execute(sql`select person_id, operator_case_id, sha256 from attachments`)).rows).toEqual([{ person_id: null, operator_case_id: null, sha256: null }]);
     await db.execute(sql`insert into attachments (company_id, agent_id, person_id, name, media_type, bytes, size) values (${company}, ${agent}, ${person}, 'screen.png', 'image/png', '\\x89504e47', 4)`);
     expect((await db.execute(sql`select name from attachments where job_id is null and person_id = ${person}`)).rows).toEqual([{ name: 'screen.png' }]);
   });
