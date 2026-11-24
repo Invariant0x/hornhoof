@@ -225,8 +225,10 @@ export class CopyMaker {
   }
 
   /* What its app may do: read once the copy holds every table, also while a new copy is made beside it; nothing before
-     that, and nothing while the two databases change places. */
+     that, and nothing while the two databases change places. A copy that is parked takes nothing more, so what it
+     holds only grows older: its app reads nothing until the copy is asked for again. */
   mode(): 'off' | 'read' {
+    if (this.kept.parked) return 'off';
     if (this.kept.swap) return ['off', 'disable', 'rename'].includes(this.kept.swap) ? 'off' : 'read';
     return this.kept.phase === 'ready' || this.kept.old !== null ? 'read' : 'off';
   }
