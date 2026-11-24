@@ -492,6 +492,14 @@ export type WorldEngineParamsSpec = Readonly<{
   orderChaosDefault: number;
 }>;
 
+/* Where the work comes from (#2006): the liquids cargo boats sail, and how many blocks one deck shows. */
+export type HarbourSpec = Readonly<{
+  /* Liquid tile kinds boats sail on. With none, or none of them on the map, the work comes by caravan through a gate. */
+  boatLiquids?: readonly string[];
+  /* The most stone blocks one boat or caravan shows, 1 to 4 (Design: one row, never stacked); 4 when unset. */
+  boatCargoMax?: number;
+}>;
+
 export type WorldPackManifest = Readonly<{
   id: string;
   name: Readonly<{ en: string; ru: string }>;
@@ -515,6 +523,8 @@ export type WorldPackManifest = Readonly<{
   buildingLayout?: BuildingLayoutRules;
   /* Dedicated shrine/altar offset near the ruler residence where agents waiting for a human stand with a scroll. */
   altarAnchor?: AltarAnchorSpec;
+  /* The harbour the tasks arrive at (#2006); a pack without it brings the work by caravan. */
+  harbour?: HarbourSpec;
   /* Pack-owned visual looks keyed by Hornhoof roleKey or generic archetype, plus per-class fallback looks. */
   roleLooks?: Readonly<Record<string, PackRoleLookSpec>>;
   classFallbackLooks?: Readonly<Record<ResidentRoleClass, PackRoleLookSpec>>;
@@ -953,10 +963,24 @@ function validateLotGround(pack: WorldPackManifest, materialIds: ReadonlySet<str
   if (!(spec.regrowthHours > 0)) errors.push('lotGround.regrowthHours must be positive');
 }
 
+/* A harbour names liquids of its own recipe and shows 1 to 4 blocks a deck. */
+function validateHarbour(pack: WorldPackManifest, errors: string[]): void {
+  const h = pack.harbour;
+  if (!h) return;
+  if (h.boatCargoMax !== undefined && !(Number.isInteger(h.boatCargoMax) && h.boatCargoMax >= 1 && h.boatCargoMax <= 4)) {
+    errors.push('harbour.boatCargoMax must be a whole number from 1 to 4');
+  }
+  const kinds = new Map((pack.terrainRecipe?.tileKinds ?? []).map(kind => [kind.id, kind]));
+  for (const id of h.boatLiquids ?? []) {
+    if (!kinds.get(id)?.liquid) errors.push(`harbour.boatLiquids: ${id} is not a liquid of the terrain recipe`);
+  }
+}
+
 export function validateWorldPack(pack: WorldPackManifest): WorldPackValidation {
   const errors: string[] = [];
 
   if (!pack.id.trim()) errors.push('id must be non-empty');
+  validateHarbour(pack, errors);
   if (!Number.isInteger(pack.mapSize) || pack.mapSize < 1) errors.push('mapSize must be a positive integer');
   if (!Number.isInteger(pack.params.chunkSize) || pack.params.chunkSize < 1) {
     errors.push('params.chunkSize must be a positive integer');

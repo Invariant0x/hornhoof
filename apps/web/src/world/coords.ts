@@ -3,6 +3,7 @@
    so camera zoom 0.5 = 50% (60x30 CSS px), 1.0 = 100% (120x60 CSS px), and 2.0 = 200% (240x120 CSS px). */
 
 import type { CameraState, ViewportSize } from './camera';
+import type { Direction8 } from './manifest';
 
 export type Point2D = Readonly<{ x: number; y: number }>;
 export type TileCoord = Readonly<{ col: number; row: number }>;
@@ -223,4 +224,14 @@ export function pickAtScreen(
 ): PickResult | null {
   const w = screenToWorld(sx, sy, camera, viewport);
   return pickAtWorld(w.x, w.y, objects, tileW, tileH, mapSize);
+}
+
+/* Where a step of (dc, dr) tiles points on screen, the way a sheet row is drawn: on the 2:1 diamond a column step runs
+   down right and a row step down left, so a step along a road or a river shows as SE, SW, NE or NW (#1983). */
+export function facingOfStep(dc: number, dr: number): Direction8 {
+  if (Math.abs(dc) < 1e-4 && Math.abs(dr) < 1e-4) return 'S';
+  const angle = Math.atan2((dc + dr) / 2, dc - dr);
+  const oct = Math.round((angle / (Math.PI * 2)) * 8 + 8) % 8;
+  const order: readonly Direction8[] = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
+  return order[oct] ?? 'S';
 }

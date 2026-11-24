@@ -23,8 +23,9 @@ import type { CityBuilding, CityState } from './city-layout';
 import { deliverySpotsForBuilding, type DeliverySpot } from './construction';
 import type { Direction8, PackRoleLookSpec, WorldPackManifest } from './manifest';
 import { resolvePackRoleLook } from './manifest';
-import { tileCenterToWorld, worldToScreen, type TileCoord } from './coords';
+import { facingOfStep, tileCenterToWorld, worldToScreen, type TileCoord } from './coords';
 import type { CameraState, ViewportSize } from './camera';
+import type { HarbourPlan, YardSpot } from './harbour';
 
 export type ResidentPose =
   | 'walking'
@@ -103,7 +104,17 @@ export type ResidentEntity = {
   /* The building the resident works at, and its spot on that building's lot, while it works at one (#2001). */
   workBuildingId: string | null;
   workSpot: ResidentWorkSpot | null;
+  /* Where the resident takes its stone at the harbour yard, or leaves a returned one, and the road beside it, while the
+     harbour is shown (#2006); null brings the stones from home as before. */
+  yardSpot: ResidentWorkSpot | null;
+  yardTile: TileCoord | null;
 };
+
+/* What the city shows beside its buildings when a resident simulation starts. */
+export type ResidentSimulationOptions = Readonly<{
+  /* The harbour the stones come to, when its art is there to draw it (#2006). */
+  harbour?: HarbourPlan | null;
+}>;
 
 export type ResidentSimulation = {
   packId: string;
@@ -131,6 +142,9 @@ export type ResidentSimulation = {
   workSpotsByBuilding: Map<string, readonly DeliverySpot[]>;
   /* How many residents each building has handed a spot, so the next takes the next spot. */
   workSpotTurns: Map<string, number>;
+  /* The harbour yard's spots, and how many residents it has handed one (#2006). */
+  yardSpots: readonly YardSpot[];
+  yardSpotTurns: number;
   supplyTiles: TileCoord[];
   emptySupplyTiles: TileCoord[];
   hubTilesByMachine: Map<string, TileCoord>;
@@ -158,16 +172,6 @@ function hashStr(s: string): number {
     h = Math.imul(h, 16777619);
   }
   return h >>> 0;
-}
-
-/* Where a step of (dc, dr) tiles points on screen, the way a sheet row is drawn: on the 2:1 diamond a column step runs
-   down right and a row step down left, so a step along a road shows as SE, SW, NE or NW (#1983). */
-function facingOfStep(dc: number, dr: number): Direction8 {
-  if (Math.abs(dc) < 1e-4 && Math.abs(dr) < 1e-4) return 'S';
-  const angle = Math.atan2((dc + dr) / 2, dc - dr);
-  const oct = Math.round((angle / (Math.PI * 2)) * 8 + 8) % 8;
-  const order: readonly Direction8[] = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
-  return order[oct] ?? 'S';
 }
 
 /* Tiles per second a resident walks: what its drawn stride asks for, else its own speed. */
@@ -331,6 +335,25 @@ function toWorkSpot(route: TileCoord[], spot: ResidentWorkSpot | null): TileCoor
   return spot ? [...route, { col: spot.col, row: spot.row }] : route;
 }
 
+/* The next spot of the harbour yard, in turn, for a resident who takes its stones there; null with no harbour shown. */
+function takeYardSpot(sim: Pick<ResidentSimulation, 'yardSpots' | 'yardSpotTurns'>): YardSpot | null {
+  if (sim.yardSpots.length === 0) return null;
+  const spot = sim.yardSpots[sim.yardSpotTurns % sim.yardSpots.length]!;
+  sim.yardSpotTurns++;
+  return spot;
+}
+
+/* Who walks between the yard and its building while the harbour is shown: an agent's resident that brings stones, and
+   a checker whose task came back, with the stone it takes back to the yard (#2006). */
+function walksFromYard(roleClass: ResidentRoleClass, archetype: string, hasRecentRework: boolean): boolean {
+  return archetype === 'builder' || roleClass === 'turnkey' || (roleClass === 'checker' && hasRecentRework);
+}
+
+/* The road tile a working resident's walks to work start from and come back to: the yard's, else home. */
+function baseTileOf(r: ResidentEntity): TileCoord {
+  return r.yardTile ?? r.homeTile;
+}
+
 function resolveAltarTile(pack: WorldPackManifest, city: CityState, residence: CityBuilding | undefined): TileCoord {
   const anchor = pack.altarAnchor ?? { offsetCol: 3, offsetRow: -2 };
   const baseCol = residence ? residence.col + Math.floor(residence.spanCol / 2) : city.center.col;
@@ -398,6 +421,7 @@ export function createResidentSimulation(
   pack: WorldPackManifest,
   city: CityState,
   snapshot: WorldLiveSnapshot,
+  options: ResidentSimulationOptions = {},
 ): ResidentSimulation {
   const roadSet = new Set<string>(city.roads.keys());
   const roadTiles: TileCoord[] = [...city.roads.values()].map(r => ({ col: r.col, row: r.row }));
@@ -505,6 +529,8 @@ export function createResidentSimulation(
     deptBuildingIds,
     workSpotsByBuilding,
     workSpotTurns: new Map(),
+    yardSpots: options.harbour?.yard.spots ?? [],
+    yardSpotTurns: 0,
     supplyTiles,
     emptySupplyTiles,
     hubTilesByMachine,
@@ -660,12 +686,17 @@ export function createResidentSimulation(
     const spot = liveState === 'working' ? takeWorkSpot(sim, workBuildingId) : null;
     if (spot) workTile = spot.approach;
     const workSpot: ResidentWorkSpot | null = spot ? { col: spot.col, row: spot.row, facing: spot.facing } : null;
+    /* With the harbour shown, the stone a resident brings comes from the yard, and a returned one goes back there. */
+    const yard =
+      liveState === 'working' && workSpot && walksFromYard(roleClass, archetype, Boolean(agent.hasRecentRework)) ? takeYardSpot(sim) : null;
+    const yardSpot: ResidentWorkSpot | null = yard ? { col: yard.col, row: yard.row, facing: yard.facing } : null;
+    const yardTile: TileCoord | null = yard ? yard.approach : null;
     const originTile =
       liveState === 'waiting_human' || liveState === 'exhausted' || liveState === 'turn_failed'
         ? workTile
         : homeTile;
     const initialPath =
-      liveState === 'working' ? toWorkSpot(findRoadRoute(sim, homeTile, workTile), workSpot) : [originTile];
+      liveState === 'working' ? toWorkSpot(findRoadRoute(sim, yardTile ?? homeTile, workTile), workSpot) : [originTile];
     /* Stagger initial path positions deterministically so streets look bustling from frame 0,
        and spread static-state residents around shared focal spots (altar, empty supply, smoking dept). */
     const startIdx =
@@ -745,6 +776,8 @@ export function createResidentSimulation(
       originTile,
       workBuildingId: liveState === 'working' ? workBuildingId : null,
       workSpot,
+      yardSpot,
+      yardTile,
     };
 
     applyStaticStatePose(entity);
@@ -816,6 +849,8 @@ export function createResidentSimulation(
       originTile: flophouseTile,
       workBuildingId,
       workSpot,
+      yardSpot: null,
+      yardTile: null,
     });
   });
 
@@ -911,10 +946,19 @@ function applyStaticStatePose(r: ResidentEntity): void {
 
 /* A carrier leaves home with a stone, lays it at the site while it pauses there, and walks back empty (#1983). */
 function carrierPose(r: ResidentEntity): void {
+  /* Back at the yard, it dresses the next stone before it carries it off (#2006). */
+  if (r.yardSpot && r.leg === 'outbound' && r.actionTimer > 0) {
+    r.carrying = 'stone';
+    r.pose = 'building';
+    return;
+  }
   const atSite = r.leg === 'inbound';
   r.carrying = atSite ? 'none' : 'stone';
   r.pose = !atSite ? 'carrying_stone' : r.actionTimer > 0 ? 'building' : 'walking';
 }
+
+/* Seconds a resident dresses a stone at the yard before it carries it off (#2006). */
+const YARD_DRESS_SEC = 1.6;
 
 /* Isometric tile distance covered per full walk stride (2*PI radians), preventing foot sliding at any speed. */
 const WALK_STRIDE_TILES = 0.65;
@@ -1002,8 +1046,9 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
     /* Advance along cached road path. */
     const target = r.path[r.pathIndex];
     if (!target) {
-      /* At its spot by the building it works at, a resident turns to the building (#2001). */
+      /* At its spot by the building it works at, a resident turns to the building (#2001); at the yard, to the yard. */
       if (r.leg === 'outbound' && r.workSpot) r.facing = r.workSpot.facing;
+      if (r.leg === 'inbound' && r.yardSpot) r.facing = r.yardSpot.facing;
       r.leg = r.leg === 'outbound' ? 'inbound' : 'outbound';
       /* Turnkey generalists rotate cleanly across all company departments. */
       if (r.roleClass === 'turnkey' && r.leg === 'outbound' && sim.allDepartmentIds.length > 1) {
@@ -1017,12 +1062,12 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
           r.workTile = spot?.approach ?? nextTile;
         }
       }
-      const nextFrom = r.leg === 'outbound' ? r.homeTile : r.workTile;
-      const nextTo = r.leg === 'outbound' ? r.workTile : r.homeTile;
+      const nextFrom = r.leg === 'outbound' ? baseTileOf(r) : r.workTile;
+      const nextTo = r.leg === 'outbound' ? r.workTile : baseTileOf(r);
       const route = findRoadRoute(sim, nextFrom, nextTo);
-      r.path = r.leg === 'outbound' ? toWorkSpot(route, r.workSpot) : route;
+      r.path = toWorkSpot(route, r.leg === 'outbound' ? r.workSpot : r.yardSpot);
       r.pathIndex = 0;
-      r.actionTimer = r.roleClass === 'head' ? 1.4 : r.roleClass === 'checker' ? 1.3 : 0.9;
+      r.actionTimer = r.roleClass === 'head' ? 1.4 : r.roleClass === 'checker' ? 1.3 : r.yardSpot && r.leg === 'outbound' ? YARD_DRESS_SEC : 0.9;
       applyStaticStatePose(r);
       continue;
     }

@@ -332,6 +332,8 @@ export const EGYPT_WORLD_PACK: WorldPackManifest = {
     offsetRow: -2,
     label: { en: "God's Altar", ru: 'Алтарь бога' },
   },
+  /* Ivan 23.11 (#2006): the tasks come down the Nile as limestone blocks on cargo boats, up to 4 in one row a deck. */
+  harbour: { boatLiquids: ['river'], boatCargoMax: 4 },
   roleLooks: EGYPT_ROLE_LOOKS,
   classFallbackLooks: EGYPT_CLASS_FALLBACKS,
   constructionStages: EGYPT_CONSTRUCTION_STAGES,
