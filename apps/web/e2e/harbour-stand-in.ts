@@ -108,7 +108,7 @@ function standInHarbour(): Map<string, { entry: ArtIndexEntry; png: Buffer }> {
       const cx = m.diamondW / 2;
       const cy = h - m.diamondH / 2 - 1;
       const r = new Raster(m.diamondW, h);
-      if (slot.path.includes('/yard/')) {
+      if (slot.path.includes('/stone_yard/')) {
         r.poly(diamond(cx, cy, cx, m.diamondH / 2), 0xc9b48a);
         const stage = Number(/fill_(\d)/.exec(name)![1]);
         for (let i = 0; i < stage * 3; i++) block(r, cx - m.diamondW / 3 + (i % 6) * (m.diamondW / 9), cy - 30 + Math.floor(i / 6) * 40, 26, 34, 0xe8dcc0);
@@ -116,27 +116,38 @@ function standInHarbour(): Map<string, { entry: ArtIndexEntry; png: Buffer }> {
         block(r, cx, cy, cx, 40, 0xa89f91);
       } else {
         r.poly(diamond(cx, cy, cx * 0.8, m.diamondH * 0.4, 10), 0x7a5230);
-        if (name.startsWith('pier_head')) r.poly([[cx - 8, cy - 20], [cx + 8, cy - 20], [cx + 8, cy - 90], [cx - 8, cy - 90]], 0x3b2a1a);
+        if (/^jetty_[uv]_end/.test(name)) r.poly([[cx - 8, cy - 20], [cx + 8, cy - 20], [cx + 8, cy - 90], [cx - 8, cy - 90]], 0x3b2a1a);
       }
       const passport = {
         groundAnchor: { x: cx, y: cy },
         corners: { top: { x: cx, y: cy - m.diamondH / 2 }, right: { x: m.diamondW, y: cy }, bottom: { x: cx, y: cy + m.diamondH / 2 }, left: { x: 0, y: cy } },
-        ...(name.startsWith('pier_head') ? { mooring: { x: 40, y: cy } } : {}),
+        ...(/^jetty_[uv]_end/.test(name) ? { mooring: { x: 40, y: cy } } : {}),
       };
       out.set(slot.path, { entry: { w: r.w, h: r.h, passport } as ArtIndexEntry, png: r.png() });
       continue;
     }
-    const cargo = /boat_cargo_(\d)/.exec(name);
-    const frames = cargo ? 1 : 8;
-    const directions = ['NE', 'SE', 'SW', 'NW'];
-    const r = new Raster(480 * frames, 400 * directions.length);
-    directions.forEach((heading, row) => {
-      if (!cargo) return boatRow(r, row, heading, frames, name === 'boat_sail.png' || name === 'caravan_walk.png');
+    if (slot.passport === 'block') {
+      const r = new Raster(60, 80);
+      block(r, 30, 64, 24, 30, 0xe8dcc0);
+      out.set(slot.path, { entry: { w: r.w, h: r.h, passport: { anchor: { x: 30, y: 70 }, stackTop: { x: 30, y: 38 } } } as ArtIndexEntry, png: r.png() });
+      continue;
+    }
+    if (slot.passport === 'boat') {
+      /* A still boat: sail_<heading> under sail, moored_ and empty_<axis> at the jetty with the sail down. */
+      const sailing = /^sail_(ne|se|sw|nw)/.exec(name);
+      const heading = sailing ? sailing[1]!.toUpperCase() : name.endsWith('_u.png') ? 'SE' : 'SW';
+      const r = new Raster(480, 680);
+      boatRow(r, 0, heading, 1, Boolean(sailing));
       const d = unit(HEADINGS[heading]!);
-      const n = Number(cargo[1]);
-      for (let i = 0; i < n; i++) block(r, 240 + d[0] * (i - (n - 1) / 2) * 56, row * 400 + 284 + d[1] * (i - (n - 1) / 2) * 56, 24, 30, 0xe8dcc0);
-    });
-    const passport = { frameW: 480, frameH: 400, frames, fps: 8, anchor: { x: 240, y: 300 }, directions };
+      const cargoPoints = [-1, 1].map(k => ({ x: Math.round(240 + d[0] * 60 * k), y: Math.round(282 + d[1] * 60 * k) }));
+      const passport = { anchor: { x: 240, y: 300 }, heading, lengthTiles: 2.6, cargoPoints };
+      out.set(slot.path, { entry: { w: r.w, h: r.h, passport } as ArtIndexEntry, png: r.png() });
+      continue;
+    }
+    const directions = ['NE', 'SE', 'SW', 'NW'];
+    const r = new Raster(480 * 8, 400 * directions.length);
+    directions.forEach((heading, row) => boatRow(r, row, heading, 8, true));
+    const passport = { frameW: 480, frameH: 400, frames: 8, fps: 8, anchor: { x: 240, y: 300 }, directions };
     out.set(slot.path, { entry: { w: r.w, h: r.h, passport } as ArtIndexEntry, png: r.png() });
   }
   return out;
@@ -152,9 +163,11 @@ export async function deliverHarbourArt(page: Page, without: readonly string[] =
     const files = { ...base.files, ...Object.fromEntries([...art].map(([path, a]) => [path, a.entry])) };
     await route.fulfill({ json: { contract: ART_CONTRACT_VERSION, pack: pack.id, files } });
   });
-  await page.route('**/world-art/egypt/harbour/**', route => {
-    const path = new URL(route.request().url()).pathname.replace(/^.*\/world-art\/egypt\//, '');
-    const a = art.get(path);
-    return a ? route.fulfill({ body: a.png, contentType: 'image/png' }) : route.fulfill({ status: 404 });
-  });
+  for (const folder of ['harbour', 'boats']) {
+    await page.route(`**/world-art/egypt/${folder}/**`, route => {
+      const path = new URL(route.request().url()).pathname.replace(/^.*\/world-art\/egypt\//, '');
+      const a = art.get(path);
+      return a ? route.fulfill({ body: a.png, contentType: 'image/png' }) : route.fulfill({ status: 404 });
+    });
+  }
 }

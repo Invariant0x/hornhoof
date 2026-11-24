@@ -9,7 +9,7 @@ import type { VariantStep } from './building-variants';
 import type { BuildingKind, CityBuilding } from './city-layout';
 import { resolveStageSpecForBuilding, type BuildingConstructionState } from './construction';
 import { tileTopVertexToWorld, type Point2D } from './coords';
-import { BOAT_CARGO_MAX_DEFAULT, YARD_FILL_STEPS, type HarbourSide } from './harbour';
+import { YARD_FILL_STEPS, type TileAxis } from './harbour';
 import {
   CONSTRUCTION_STAGE_IDS,
   type BuildingLoopKind,
@@ -67,7 +67,7 @@ export type BuildingPicturePassport = Readonly<{
   /* Top centre (apex, spire, chimney) where a capstone or a top loop attaches. */
   topAnchor?: ArtPoint;
   workSlots?: readonly ArtWorkSlotSpec[];
-  /* On a harbour pier head: the water-line point where a boat lies moored at this pier (#2006). */
+  /* On a harbour jetty's end: the water-line point where a boat lies moored at this jetty (#2006). */
   mooring?: ArtPoint;
   /* Pictures on the same canvas drawn over this one, in order (contract section 4, layers). */
   layers?: readonly ArtLayerSpec[];
@@ -116,6 +116,13 @@ export function clothMaskPath(layerPath: string): string {
 
 /* Passport of a small attached picture (flag, capstone): the point that touches its parent. */
 export type AnchorPassport = Readonly<{ anchor: ArtPoint }>;
+
+/* A cargo boat's still picture (#2006, Ivan AI 24.11): anchor is the hull middle at the waterline, heading the screen
+   direction the bow points, and each cargo point the top middle of a stack of blocks on the deck. */
+export type BoatPassport = AnchorPassport &
+  Readonly<{ heading?: Direction8; bow?: ArtPoint; lengthTiles?: number; cargoPoints: readonly ArtPoint[] }>;
+/* A block of a boat's cargo: anchor where it sits, stackTop where the block stacked on it sits. */
+export type BlockPassport = AnchorPassport & Readonly<{ stackTop?: ArtPoint }>;
 
 export type LoopAttachPoint = 'top' | 'awning' | 'door' | 'ground' | 'head';
 
@@ -189,8 +196,9 @@ export type WorldArtCatalog = Readonly<{
   loops?: readonly BuildingLoopKind[];
   /* Kinds whose stage pictures carry their own scaffolds and ramps: no kit module, crane or hoist goes over them. */
   ownConstruction?: readonly BuildingKind[];
-  /* The harbour the tasks arrive at (#2006): its yard sizes, and whether the land gate and caravan have slots too. */
-  harbour?: Readonly<{ yards: readonly FootprintKey[]; gate?: boolean }>;
+  /* The harbour the tasks arrive at (#2006): the footprint its yard is drawn for, and whether the land gate and caravan
+     have slots too. */
+  harbour?: Readonly<{ yard: FootprintKey; gate?: boolean }>;
   /* The bridge over the map's water (bridge-site.ts): its pieces in both directions. Until all of them are in the
      folder, no street crosses water. */
   bridge?: boolean;
@@ -323,7 +331,7 @@ export function bridgePicturePath(axis: 'u' | 'v', piece: BridgePiece): string {
 export type DeclaredArtFile = Readonly<{
   path: string;
   role: DeclaredArtRole;
-  passport: 'picture' | 'anchor' | 'sheet' | 'none';
+  passport: 'picture' | 'anchor' | 'boat' | 'block' | 'sheet' | 'none';
   required: boolean;
   /* Files that stand in for a required picture: with any of them in the folder this one is not needed. */
   alternatives?: readonly string[];
@@ -363,46 +371,44 @@ export function modulePath(footprint: FootprintKey, module: (typeof CONSTRUCTION
   return `modules/${footprint}/${module}.png`;
 }
 
-/* Harbour pieces of one tile each, laid along the bank in the bank's orientation (#2006, ARTIST_CONTRACT.md). */
-export const HARBOUR_PIECES = ['quay', 'pier_root', 'pier', 'pier_head'] as const;
+/* Harbour pieces of one tile each (#2006, Ivan AI's layout of 24.11): the quay along the bank and jetties out into the
+   water, each drawn along one tile axis as its first tile, any number of spans, and its last (ARTIST_CONTRACT.md). */
+export const HARBOUR_PIECE_KINDS = ['quay', 'jetty'] as const;
+export type HarbourPieceKind = (typeof HARBOUR_PIECE_KINDS)[number];
+export const HARBOUR_PIECES = ['start', 'span', 'end'] as const;
 export type HarbourPiece = (typeof HARBOUR_PIECES)[number];
-export const HARBOUR_SIDES: readonly HarbourSide[] = ['a', 'b'];
-export const BOAT_STATES = ['sail', 'moored', 'unload'] as const;
-export type BoatSheetState = (typeof BOAT_STATES)[number];
-/* The pictures of the yard's fill, fill_0 (empty) to one per step of YARD_FILL_STEPS. */
+export const TILE_AXES: readonly TileAxis[] = ['u', 'v'];
+/* The ways a boat sails on screen, and the pictures of the yard's fill, fill_0 (empty) to one per YARD_FILL_STEPS. */
+export const BOAT_HEADINGS: readonly Direction8[] = ['NE', 'SE', 'SW', 'NW'];
 export const YARD_FILL_PICTURES = YARD_FILL_STEPS.length + 1;
+export const BOAT_BLOCK = 'boats/cargo/block.png';
 export const CARAVAN_SHEET = 'harbour/caravan_walk.png';
-/* The ways a boat or a caravan heads on screen as it moves along the grid. */
+/* The ways a caravan heads on screen as it moves along the grid. */
 export const CARRIER_DIRECTIONS: readonly Direction8[] = ['NE', 'SE', 'SW', 'NW'];
 
-export const harbourPiecePath = (piece: HarbourPiece, side: HarbourSide): string => `harbour/${piece}_${side}.png`;
-/* A quay's end: 1 is the end higher on screen, 2 the other. */
-export const quayEndPath = (side: HarbourSide, end: 1 | 2): string => `harbour/quay_end_${side}${end}.png`;
-export const boatSheetPath = (state: BoatSheetState): string => `harbour/boat_${state}.png`;
-export const boatCargoPath = (blocks: number): string => `harbour/boat_cargo_${blocks}.png`;
-export const yardFillPath = (footprint: FootprintKey, stage: number): string => `harbour/yard/${footprint}/fill_${stage}.png`;
-export const harbourGatePath = (side: HarbourSide): string => `harbour/gate_${side}.png`;
+export const harbourPiecePath = (kind: HarbourPieceKind, axis: TileAxis, piece: HarbourPiece): string => `harbour/${kind}_${axis}_${piece}.png`;
+export const boatSailPath = (heading: Direction8): string => `boats/cargo/sail_${heading.toLowerCase()}.png`;
+/* A boat at its jetty, hull along the jetty's axis: with blocks still aboard, and empty once the last is off. */
+export const boatMooredPath = (axis: TileAxis, loaded: boolean): string => `boats/cargo/${loaded ? 'moored' : 'empty'}_${axis}.png`;
+export const yardFillPath = (stage: number): string => `harbour/stone_yard/fill_${stage}.png`;
+export const harbourGatePath = (side: 'a' | 'b'): string => `harbour/gate_${side}.png`;
 
 /* Every harbour slot of a catalog. None is required: until the set a harbour needs is there, no harbour is shown. */
 function harbourFiles(harbour: NonNullable<WorldArtCatalog['harbour']>): DeclaredArtFile[] {
   const out: DeclaredArtFile[] = [];
-  const carrier = (what: string): HeldItemRule => ({ what, need: CARRIER_DIRECTIONS });
-  for (const side of HARBOUR_SIDES) {
-    for (const piece of HARBOUR_PIECES) out.push({ path: harbourPiecePath(piece, side), role: 'harbour', passport: 'picture', required: false, footprint: '1x1' });
-    for (const end of [1, 2] as const) out.push({ path: quayEndPath(side, end), role: 'harbour', passport: 'picture', required: false, footprint: '1x1' });
-  }
-  for (const state of BOAT_STATES) out.push({ path: boatSheetPath(state), role: 'harbour', passport: 'sheet', required: false, held: carrier('a boat') });
-  for (let n = 1; n <= BOAT_CARGO_MAX_DEFAULT; n++) {
-    out.push({ path: boatCargoPath(n), role: 'harbour', passport: 'sheet', required: false, held: carrier('a boat’s cargo') });
-  }
-  for (const fp of harbour.yards) {
-    for (let stage = 0; stage < YARD_FILL_PICTURES; stage++) {
-      out.push({ path: yardFillPath(fp, stage), role: 'harbour', passport: 'picture', required: false, footprint: fp });
+  const optional = { role: 'harbour', required: false } as const;
+  for (const kind of HARBOUR_PIECE_KINDS) {
+    for (const axis of TILE_AXES) {
+      for (const piece of HARBOUR_PIECES) out.push({ path: harbourPiecePath(kind, axis, piece), ...optional, passport: 'picture', footprint: '1x1' });
     }
   }
+  for (const heading of BOAT_HEADINGS) out.push({ path: boatSailPath(heading), ...optional, passport: 'boat' });
+  for (const axis of TILE_AXES) for (const loaded of [true, false]) out.push({ path: boatMooredPath(axis, loaded), ...optional, passport: 'boat' });
+  out.push({ path: BOAT_BLOCK, ...optional, passport: 'block' });
+  for (let stage = 0; stage < YARD_FILL_PICTURES; stage++) out.push({ path: yardFillPath(stage), ...optional, passport: 'picture', footprint: harbour.yard });
   if (harbour.gate) {
-    for (const side of HARBOUR_SIDES) out.push({ path: harbourGatePath(side), role: 'harbour', passport: 'picture', required: false, footprint: '2x2' });
-    out.push({ path: CARAVAN_SHEET, role: 'harbour', passport: 'sheet', required: false, held: carrier('a caravan') });
+    for (const side of ['a', 'b'] as const) out.push({ path: harbourGatePath(side), ...optional, passport: 'picture', footprint: '2x2' });
+    out.push({ path: CARAVAN_SHEET, ...optional, passport: 'sheet', held: { what: 'a caravan', need: CARRIER_DIRECTIONS } });
   }
   return out;
 }
@@ -760,6 +766,23 @@ export function drawnArtPaths(pack: WorldPackManifest, index: ArtIndex): Readonl
   return out;
 }
 
+/* A picture placed by one anchor point; a boat's also names the cargo points its blocks stack on, a block where the
+   next block on it sits. */
+function checkAnchored(path: string, entry: ArtIndexEntry, kind: 'anchor' | 'boat' | 'block', errors: string[]): void {
+  const inside = (v: unknown) => isPoint(v) && pointInside(v, entry.w, entry.h);
+  const p = entry.passport as Partial<BoatPassport & BlockPassport> | undefined;
+  if (!p || !inside(p.anchor)) {
+    errors.push(`${path}: needs a passport with an anchor inside the picture`);
+    return;
+  }
+  if (kind === 'boat') {
+    const points = Array.isArray(p.cargoPoints) ? p.cargoPoints : [];
+    if (points.length === 0 || !points.every(inside)) errors.push(`${path}: needs at least one cargo point, each inside the picture`);
+    if (p.heading !== undefined && !DRAWABLE_DIRECTIONS.includes(p.heading)) errors.push(`${path}: heading must be one of ${DRAWABLE_DIRECTIONS.join(', ')}`);
+  }
+  if (kind === 'block' && p.stackTop !== undefined && !inside(p.stackTop)) errors.push(`${path}: stackTop must be inside the picture`);
+}
+
 export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtIndexReport {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -798,11 +821,8 @@ export function validateArtIndex(pack: WorldPackManifest, index: ArtIndex): ArtI
     }
     if (slot.passport === 'picture') {
       checkPicture(pack, path, entry, pictureFootprint(slot, path, footprintOf), errors);
-    } else if (slot.passport === 'anchor') {
-      const a = entry.passport as AnchorPassport | undefined;
-      if (!a || !isPoint(a.anchor) || !pointInside(a.anchor, entry.w, entry.h)) {
-        errors.push(`${path}: needs a passport with an anchor inside the picture`);
-      }
+    } else if (slot.passport === 'anchor' || slot.passport === 'boat' || slot.passport === 'block') {
+      checkAnchored(path, entry, slot.passport, errors);
     } else if (slot.passport === 'sheet') {
       checkSheet(path, entry, slot.role === 'person' || slot.role === 'harbour' ? personRows(path, entry, errors) : null, errors);
       if (slot.held) checkHeldItem(path, entry, slot.held, errors, warnings);
@@ -879,8 +899,8 @@ export function validateArtCatalog(art: WorldArtCatalog): string[] {
       }
     }
   }
-  for (const fp of art.harbour?.yards ?? []) {
-    if (!ART_FOOTPRINT_KEYS.includes(fp)) errors.push(`art.harbour.yards: unknown footprint "${String(fp)}"`);
+  if (art.harbour && !ART_FOOTPRINT_KEYS.includes(art.harbour.yard)) {
+    errors.push(`art.harbour.yard: unknown footprint "${String(art.harbour.yard)}"`);
   }
   if (art.people) {
     const t = art.people.tiers;

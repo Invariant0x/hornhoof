@@ -74,7 +74,7 @@ import {
   type ResidentSimulation,
 } from './residents';
 import { renderResidentsFallback2D, renderResidentsToPixi, type ResidentArtContext } from './residents-renderer';
-import { boatCargoMaxOf, harbourGround, type HarbourPlan } from './harbour';
+import { harbourGround, type HarbourPlan } from './harbour';
 import { harbourArtReady } from './harbour-renderer';
 import { PlantRenderer, type PlantStats } from './plant-renderer';
 import { bakeSmoothChunkCanvas, buildLiquidSurfaceCanvas, smoothPixelsToCanvas, startSmoothChunkBake, type SmoothChunkBake } from './smooth-terrain-baker';
@@ -606,7 +606,7 @@ export class IsometricWorldEngine {
     const index = this.artLibrary.index;
     const known = this.harbourArtCheck;
     if (known && known.index === index && known.plan === plan) return known.ready;
-    const ready = harbourArtReady(this.pack, index, plan, boatCargoMaxOf(this.pack));
+    const ready = harbourArtReady(this.pack, index, plan);
     this.harbourArtCheck = { index, plan, ready };
     return ready;
   }

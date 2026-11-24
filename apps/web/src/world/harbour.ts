@@ -10,10 +10,12 @@ import { facingOfStep, type TileCoord } from './coords';
 import type { Direction8, WorldPackManifest } from './manifest';
 import type { GeneratedWorldMap } from './terrain-engine';
 
-/* The most blocks a deck shows when the pack does not say (Design: up to 4 in one row, never stacked). */
+/* The most blocks a deck carries when the pack does not say: stacked on the boat picture's cargo points (head, 24.11). */
 export const BOAT_CARGO_MAX_DEFAULT = 4;
-/* Stones in the yard at which its fill picture steps up from fill_0 (empty) to fill_5 (full). */
-export const YARD_FILL_STEPS: readonly number[] = [1, 3, 6, 10, 15];
+/* Stones in the yard at which its fill picture steps up from fill_0 (empty) to fill_4 (full at 15, head 24.11). */
+export const YARD_FILL_STEPS: readonly number[] = [1, 4, 8, 15];
+/* The yard's side in tiles when the pack's art does not name the footprint its pictures are drawn for. */
+const YARD_SPAN_DEFAULT = 2;
 
 /* Tasks created this close after the first of a batch come in the same boat, as many as a deck shows. */
 const BATCH_MS = 20_000;
@@ -24,7 +26,9 @@ const BOAT_RUN_TILES = 36;
 /* At the pier: a moment to moor, then one block off the deck at a time. */
 const MOOR_MS = 1_500;
 const UNLOAD_MS_PER_STONE = 2_500;
-/* After the last block is off, how long the berth stays taken while the boat casts off. */
+/* After the last block is off, the boat lies empty at the pier a moment before it casts off ... */
+const CAST_OFF_MS = 1_500;
+/* ... and the berth stays taken a little longer, while it pulls away. */
 const BERTH_CLEAR_MS = 2_000;
 /* How far from the city centre the harbour may stand, in tiles. */
 const SEARCH_RADIUS = 40;
@@ -36,6 +40,22 @@ const YARD_GAP = 2;
 const YARD_ROAD_REACH = 2;
 
 export type HarbourSide = 'a' | 'b';
+/* The tile axes a one-tile piece is drawn along: 'u' runs down right on screen (columns), 'v' down left (rows). */
+export type TileAxis = 'u' | 'v';
+
+/* The axis a quay runs along on its side of the water, and the one its jetties run out along, at a right angle. */
+export function quayAxis(side: HarbourSide): TileAxis {
+  return side === 'a' ? 'u' : 'v';
+}
+export function jettyAxis(side: HarbourSide): TileAxis {
+  return side === 'a' ? 'v' : 'u';
+}
+
+/* The yard's side in tiles: the footprint the pack's yard pictures are drawn for (one size, Ivan AI 24.11). */
+export function yardSpanOf(pack: WorldPackManifest): number {
+  const n = Number.parseInt(pack.art?.harbour?.yard ?? '', 10);
+  return Number.isFinite(n) && n > 0 ? n : YARD_SPAN_DEFAULT;
+}
 type Step = Readonly<{ dc: number; dr: number }>;
 
 /* Where a resident stands on the yard to take a stone or put one back, reached from the road at approach. */
@@ -111,11 +131,11 @@ export function yardFillStage(stones: number): number {
   return YARD_FILL_STEPS.filter(step => stones >= step).length;
 }
 
-type HarbourSize = Readonly<{ quay: number; piers: number; yard: number }>;
+type HarbourSize = Readonly<{ quay: number; piers: number }>;
 const HARBOUR_SIZES: readonly HarbourSize[] = [
-  { quay: 2, piers: 1, yard: 3 },
-  { quay: 4, piers: 2, yard: 3 },
-  { quay: 6, piers: 3, yard: 4 },
+  { quay: 2, piers: 1 },
+  { quay: 4, piers: 2 },
+  { quay: 6, piers: 3 },
 ];
 
 /* The harbour grows with the city, a longer quay and more piers for more buildings; where the bank has no room for that
@@ -136,6 +156,7 @@ type Ground = Readonly<{
   free: (col: number, row: number) => boolean;
   /* Ground a caravan walks, as a road does: walkable, or rock it carves; never water, a building or a wall. */
   walk: (col: number, row: number) => boolean;
+  yardSpan: number;
 }>;
 
 function groundOf(pack: WorldPackManifest, map: GeneratedWorldMap, city: CityState): Ground {
@@ -160,6 +181,7 @@ function groundOf(pack: WorldPackManifest, map: GeneratedWorldMap, city: CitySta
         !city.footprintOccupant.has(k) && !city.wallTiles.has(k)
       );
     },
+    yardSpan: yardSpanOf(pack),
   };
 }
 
@@ -239,7 +261,7 @@ function riverAt(
       piers.push(pier);
     }
     if (piers.length < size.piers) continue;
-    const yard = yardBehind(g, quay, water, along, size.yard);
+    const yard = yardBehind(g, quay, water, along, g.yardSpan);
     if (yard) return { kind: 'river', side: s.side, water, quay, piers, yard };
   }
   return null;
@@ -359,7 +381,6 @@ function planGate(g: Ground): GateHarbourPlan | null {
     .map(r => ({ col: r.col, row: r.row, d: Math.hypot(r.col - c0.col, r.row - c0.row) }))
     .sort((a, b) => b.d - a.d || a.row - b.row || a.col - b.col)
     .slice(0, 24);
-  const size = harbourSizes(g.city)[0]!;
   for (const road of roads) {
     const options: { gate: TileCoord; d: number }[] = [];
     for (let dr = -2; dr <= 1; dr++) {
@@ -375,7 +396,7 @@ function planGate(g: Ground): GateHarbourPlan | null {
     for (const { gate } of options) {
       const caravanRoute = routeInFromEdge(g, gate);
       if (!caravanRoute) continue;
-      const yard = yardBeside(g, gate, size.yard);
+      const yard = yardBeside(g, gate, g.yardSpan);
       if (!yard) continue;
       const side: HarbourSide = Math.abs(road.col - (gate.col + 0.5)) > Math.abs(road.row - (gate.row + 0.5)) ? 'b' : 'a';
       return { kind: 'gate', gate, side, caravanRoute, yard };
@@ -468,8 +489,8 @@ export function scheduleBoats(plan: HarbourPlan, flow: WorldLiveTaskFlow, cargoM
     });
     const sail = travelMs(plan, routes[pier]!);
     const unloaded = moored + MOOR_MS + stones * UNLOAD_MS_PER_STONE;
-    free[pier] = unloaded + BERTH_CLEAR_MS;
-    trips.push({ id: `trip-${first}-${trips.length}`, pier, stones, leaveMs: moored - sail, mooredMs: moored, unloadedMs: unloaded, goneMs: unloaded + sail });
+    free[pier] = unloaded + CAST_OFF_MS + BERTH_CLEAR_MS;
+    trips.push({ id: `trip-${first}-${trips.length}`, pier, stones, leaveMs: moored - sail, mooredMs: moored, unloadedMs: unloaded, goneMs: unloaded + CAST_OFF_MS + sail });
   }
   return trips;
 }
@@ -556,11 +577,11 @@ export function harbourAt(plan: HarbourPlan, trips: readonly CarrierTrip[], flow
     if (nowMs < trip.mooredMs) {
       at = alongRoute(route, (nowMs - trip.leaveMs) / sail);
       state = 'sail';
-    } else if (nowMs < trip.unloadedMs) {
+    } else if (nowMs < trip.unloadedMs + CAST_OFF_MS) {
       at = atBerth;
-      state = nowMs < unloadFrom ? 'moored' : 'unload';
+      state = nowMs < unloadFrom || nowMs >= trip.unloadedMs ? 'moored' : 'unload';
     } else {
-      const back = alongRoute(route, (nowMs - trip.unloadedMs) / sail, true);
+      const back = alongRoute(route, (nowMs - trip.unloadedMs - CAST_OFF_MS) / sail, true);
       at = back;
       state = 'sail';
     }

@@ -26,7 +26,7 @@ async function openLivePage(page: Page): Promise<void> {
 }
 
 test('with a file of its art missing the live page shows no harbour, and the stones come from home', async ({ page }) => {
-  await deliverHarbourArt(page, ['harbour/boat_moored.png']);
+  await deliverHarbourArt(page, ['boats/cargo/block.png']);
   await openLivePage(page);
   const h = await handle(page);
   expect(h, 'the city plans its harbour by the river').not.toBeNull();

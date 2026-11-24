@@ -124,6 +124,10 @@ describe('The harbour where the work comes from (#2006)', () => {
     const unloaded = harbourAt(plan, trips, flow, trip.unloadedMs + 1);
     expect(unloaded.yardStones).toBe(1);
     expect(unloaded.carriers[0]!.cargo).toBe(0);
+    /* Empty, it lies at the pier a moment before it casts off and sails back. */
+    expect(unloaded.carriers[0]!.state).toBe('moored');
+    expect(unloaded.carriers[0]!.col).toBeCloseTo(pier.berth.col, 6);
+    expect(harbourAt(plan, trips, flow, trip.goneMs - 1).carriers[0]!.state).toBe('sail');
     expect(harbourAt(plan, trips, flow, trip.goneMs + 1).carriers).toEqual([]);
   });
 
@@ -173,8 +177,8 @@ describe('The harbour where the work comes from (#2006)', () => {
       expect(state.yardStones).toBe(open);
       expect(state.yardStage).toBe(yardFillStage(open));
     }
-    expect(YARD_FILL_STEPS).toEqual([1, 3, 6, 10, 15]);
-    expect([0, 1, 2, 3, 5, 6, 9, 10, 14, 15, 40].map(yardFillStage)).toEqual([0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
+    expect(YARD_FILL_STEPS).toEqual([1, 4, 8, 15]);
+    expect([0, 1, 2, 3, 4, 7, 8, 14, 15, 40].map(yardFillStage)).toEqual([0, 1, 1, 1, 2, 2, 3, 3, 4, 4]);
     /* Stones still on a boat are not in the yard yet. */
     const flow = { open: 5, arrivals: [new Date(T0).toISOString(), new Date(T0 + 1000).toISOString()] };
     const trips = scheduleBoats(plan, flow, 4);
