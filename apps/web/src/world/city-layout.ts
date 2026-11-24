@@ -850,6 +850,44 @@ function waterOpen(city: CityState, allowBridge: boolean, col: number, row: numb
   return allowBridge && onBridge(city.bridge ?? null, col, row);
 }
 
+/* The land a street can reach from the city's centre, by terrain alone: over ground a road may be laid on, and over
+   water only on the city's bridge. With no bridge a building on the far bank could never be joined to the streets, so
+   the lot search keeps to this land. Kept per map and bridge, as neither changes. */
+const landReachKept = new WeakMap<GeneratedWorldMap, Map<string, ReadonlySet<string>>>();
+
+/* Whether a street could cross a tile by terrain alone: ground a road may be laid on, or water on the bridge. */
+function landOpen(map: GeneratedWorldMap, site: BridgeSite | null, col: number, row: number): boolean {
+  const spec = map.kindSpecAt(col, row);
+  if (!spec) return false;
+  return spec.liquid ? onBridge(site, col, row) : spec.walkable || spec.excavatable;
+}
+
+function landReach(city: CityState, map: GeneratedWorldMap): ReadonlySet<string> {
+  const site = city.bridge ?? null;
+  const which = `${city.center.col},${city.center.row}|${site ? `${site.axis},${site.col},${site.row},${site.length}` : 'none'}`;
+  const kept = landReachKept.get(map) ?? new Map<string, ReadonlySet<string>>();
+  landReachKept.set(map, kept);
+  const known = kept.get(which);
+  if (known) return known;
+  const reach = new Set<string>([tileKey(city.center.col, city.center.row)]);
+  const queue: TileCoord[] = [city.center];
+  for (let i = 0; i < queue.length; i++) {
+    for (const [dc, dr] of CARDINAL_DIRS) {
+      const next = { col: queue[i]!.col + dc, row: queue[i]!.row + dr };
+      const k = tileKey(next.col, next.row);
+      if (reach.has(k) || !landOpen(map, site, next.col, next.row)) continue;
+      reach.add(k);
+      queue.push(next);
+    }
+  }
+  kept.set(which, reach);
+  return reach;
+}
+
+/* A building's door, kept only where the streets can reach it. */
+const reachableDoor = (reach: ReadonlySet<string>, door: TileCoord | null): TileCoord | null =>
+  door && reach.has(tileKey(door.col, door.row)) ? door : null;
+
 /* A road search may step from one tile to the next: onto or off the bridge only at its ends, and onto a tile that is
    a road already or one a road may be laid on. */
 function canStepTo(city: CityState, map: GeneratedWorldMap, from: TileCoord, to: TileCoord, isExistingRoad: boolean, allowBridge: boolean): boolean {
@@ -1277,6 +1315,7 @@ export function placeBuilding(
 
   /* Progressive search rings around the role anchor so nothing ever jumps to the far edge of the map. */
   const rings = req.kind === 'supply' ? [18, 36, 58] : [12, 24, 40, 58, 76];
+  const reach = landReach(city, map);
   const dept = req.departmentId
     ? city.buildings.find(b => b.kind === 'department' && b.departmentId === req.departmentId)
     : undefined;
@@ -1333,7 +1372,7 @@ export function placeBuilding(
           const lot = lotBehind(col, row, spanCol, spanRow, lotC, lotR);
 
           const nearestRoad = findNearestRoadTile(city, { col, row });
-          const door = pickDoorForFootprint(city, map, col, row, spanCol, spanRow, nearestRoad, rule);
+          const door = reachableDoor(reach, pickDoorForFootprint(city, map, col, row, spanCol, spanRow, nearestRoad, rule));
           if (!door) continue;
 
           const distAnchor = Math.hypot(col - anchor.col, row - anchor.row);
