@@ -48,8 +48,17 @@ export type Seat = {
   backup: boolean;
 };
 
-/* The machines that could keep files: every one with a keeper, of the data or a worker, whose owner is active. */
+/* The machines that could keep files: every one with a keeper, of the data or a worker, whose owner is active; the one
+   that keeps the store's backup apart from the live copies where there are machines enough. */
 export async function seats(db: Tx, leader: string | null, now = new Date()): Promise<Seat[]> {
+  const all = await machineSeats(db, leader, now);
+  const backups = await storeBackupMachines(db);
+  return backups.length ? apartFromBackup(all, backups, await copiesSet(db)) : all;
+}
+
+/* Those machines as they are, the one that keeps the store's backup among them like any other. What its files take
+   counts the backup's too, and what it is still to take the backup's it is to fetch. */
+export async function machineSeats(db: Tx, leader: string | null, now = new Date()): Promise<Seat[]> {
   type Row = { id: string; report_at: Date | string | null; addresses: string[] | string; path: string | null; free: string | number | null; total: string | number | null; area: string | number;
     assigned: string | number; used: string | number; pending: string | number };
   /* What a machine's files take there: what its keeper said, and no less than the copies on record of it, which counts
@@ -59,13 +68,16 @@ export async function seats(db: Tx, leader: string | null, now = new Date()): Pr
     await db.execute(sql`SELECT m.id, m.report_at, m.addresses, m.path, coalesce(m.files_disk_free, m.disk_free) AS free, m.files_disk_total AS total,
       coalesce(m.file_store_limit_bytes, ${DEFAULT_AREA_BYTES}) AS area,
       coalesce((SELECT sum(f.sealed_size) FROM net.file_targets t JOIN net.files f ON f.sha256 = t.sha256 WHERE t.machine_id = m.id), 0) AS assigned,
-      greatest(m.file_store_used_bytes, coalesce((SELECT sum(f.sealed_size) FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256 WHERE c.machine_id = m.id), 0)) AS used,
+      greatest(m.file_store_used_bytes, coalesce((SELECT sum(f.sealed_size) FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256 WHERE c.machine_id = m.id), 0)
+        + coalesce((SELECT sum(b.sealed_size) FROM net.file_backups b WHERE b.machine_id = m.id AND b.kept_at IS NOT NULL), 0)) AS used,
       coalesce((SELECT sum(f.sealed_size) FROM net.file_targets t JOIN net.files f ON f.sha256 = t.sha256 WHERE t.machine_id = m.id
-        AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = t.sha256 AND c.machine_id = m.id)), 0) AS pending
+        AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = t.sha256 AND c.machine_id = m.id)), 0)
+        + coalesce((SELECT sum(b.sealed_size) FROM net.file_backups b WHERE m.id = (SELECT s.machine_id FROM net.file_backup_settings s) AND b.drop_at IS NULL
+          AND (b.kept_at IS NULL OR b.machine_id IS DISTINCT FROM m.id)), 0) AS pending
       FROM machines m JOIN people p ON p.id = m.person_id
       WHERE m.revoked_at IS NULL AND m.network_id IS NOT NULL AND m.role IN ('data', 'worker') AND p.status = 'active' ORDER BY m.id`),
   );
-  const all = rows.map(row => {
+  return rows.map(row => {
     const isLeader = row.id === leader;
     const silent = row.report_at ? now.getTime() - new Date(row.report_at).getTime() : Infinity;
     const area = Number(row.area);
@@ -89,8 +101,6 @@ export async function seats(db: Tx, leader: string | null, now = new Date()): Pr
       backup: false,
     };
   });
-  const backups = await storeBackupMachines(db);
-  return backups.length ? apartFromBackup(all, backups, await copiesSet(db)) : all;
 }
 
 /* A machine that keeps the store's backup keeps no live copy while the other machines that keep files are as many as the
@@ -127,7 +137,7 @@ export function countedTargets(all: Seat[]): SQL {
 
 /* The order machines are picked for a file in: any but one that keeps the store's backup; the leading one, then one away
    from where its copies are, then the one with the most of its area free. */
-function better(here: string[]): (a: Seat, b: Seat) => number {
+export function better(here: string[]): (a: Seat, b: Seat) => number {
   const away = (seat: Seat) => seat.relayed || (here.length > 0 && seat.addresses.length > 0 && !sameHome(here, seat.addresses));
   return (a, b) =>
     Number(a.backup) - Number(b.backup) || Number(b.leader) - Number(a.leader) || Number(away(b)) - Number(away(a)) || b.room / b.area - a.room / a.area || a.id.localeCompare(b.id);

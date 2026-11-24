@@ -341,6 +341,10 @@ describe('routeOf', () => {
 
   it.each([
     ['hello on the peer door', asked('GET', '/peer/hello'), 'peer', 'worker', db, { to: 'hello' }],
+    ['a file of the store', asked('GET', `/peer/files/${'a'.repeat(64)}`), 'peer', 'worker', db, { to: 'file', sha256: 'a'.repeat(64), put: false }],
+    ["a file of the store's backup, fetched", asked('GET', `/peer/store-backup/${'b'.repeat(64)}`), 'peer', 'worker', db, { to: 'file', sha256: 'b'.repeat(64), put: false, backup: true }],
+    ["a file of the store's backup, given back", asked('PUT', `/peer/store-backup/${'c'.repeat(64)}`), 'peer', 'worker', db, { to: 'file', sha256: 'c'.repeat(64), put: true, backup: true }],
+    ["a backup name that is no hash", asked('GET', '/peer/store-backup/../files'), 'peer', 'worker', db, refused(404)],
     ['hello on the app door', asked('GET', '/peer/hello'), 'app', 'worker', null, { to: 'hello' }],
     ['the app on the peer door', connect(APP_AUTHORITY), 'peer', 'worker', db, { to: 'app' }],
     ['the app on the app door', connect(APP_AUTHORITY), 'app', 'data', db, { to: 'app' }],

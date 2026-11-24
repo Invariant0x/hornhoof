@@ -1,7 +1,7 @@
 import { sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
-import { backupRound } from './backup.js';
+import { backupRound, pickBackupMachine } from './backup.js';
 import { recordFile } from './files.js';
 import { NAMED, SET_ASIDE } from './named.js';
 import { countedNow, keptElsewhere, placeFiles, trimTargets } from './place.js';
@@ -149,6 +149,8 @@ export async function storeRound(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Pro
   const { db, files } = ctx;
   await adoptNamed(ctx);
   const mine = await files.machineId(db);
+  /* The machine the backup is on, before files are placed, so no live copy is placed on it to go again. */
+  await pickBackupMachine(db, mine, now);
   files.placedThrough = (await placeFiles(db, mine, { now, after: files.placedThrough })).through;
   files.trimmedThrough = (await trimTargets(db, mine, { now, after: files.trimmedThrough })).through;
   /* The backup takes in what rows name before the live store lets go of what none names. */
@@ -162,6 +164,6 @@ export async function storeRound(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Pro
   /* What the files take on the leading machine, which has no keeper of them to say so, for the CEO's cards. */
   if (mine) {
     await db.execute(sql`UPDATE machines SET file_store_used_bytes = (SELECT coalesce(sum(f.sealed_size), 0) FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256
-      WHERE c.machine_id = ${mine}) WHERE id = ${mine}`);
+      WHERE c.machine_id = ${mine}) + (SELECT coalesce(sum(b.sealed_size), 0) FROM net.file_backups b WHERE b.machine_id = ${mine} AND b.kept_at IS NOT NULL) WHERE id = ${mine}`);
   }
 }

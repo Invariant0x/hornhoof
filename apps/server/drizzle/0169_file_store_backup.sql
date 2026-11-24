@@ -1,6 +1,6 @@
 -- The store's own backup (#2056): each content a row names, kept apart from the live copies on the machine picked for
 -- it, until 30 days, or the days the CEO set, after no row names it. Its copies are never live copies: none of them is in
--- net.file_copies. One row of settings: the days, and the machine the backup is on now (none: the leading one).
+-- net.file_copies. One row of settings: the days, and the machine other than the leading one the backup is on now.
 CREATE TABLE net.file_backup_settings (
   one boolean PRIMARY KEY DEFAULT true CHECK (one),
   keep_days integer NOT NULL DEFAULT 30 CHECK (keep_days BETWEEN 1 AND 3650),
@@ -10,7 +10,8 @@ CREATE TABLE net.file_backup_settings (
 );
 --> statement-breakpoint
 -- Each content of the backup once, with the sealed facts of its record when it came: machine_id is the machine that
--- keeps it, and kept_at when it was last found kept there; none yet while it is on its way.
+-- keeps it, and kept_at when it was found kept there; none yet while it is on its way. drop_at: from when the machine
+-- that keeps it is to let it go, as no row named it for the days kept; the row goes once it did.
 CREATE TABLE net.file_backups (
   sha256 text PRIMARY KEY CHECK (sha256 ~ '^[0-9a-f]{64}$'),
   size bigint NOT NULL CHECK (size >= 0),
@@ -19,7 +20,8 @@ CREATE TABLE net.file_backups (
   salt text NOT NULL CHECK (salt ~ '^[0-9a-f]{32}$'),
   at timestamptz NOT NULL DEFAULT now(),
   machine_id uuid,
-  kept_at timestamptz
+  kept_at timestamptz,
+  drop_at timestamptz
 );
 --> statement-breakpoint
 -- Which row of attachments named which content, from when until when: a row deleted or given other bytes closes its

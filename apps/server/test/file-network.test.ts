@@ -102,6 +102,8 @@ describe('the files of the store between machines', () => {
 
   it('loses no file with any one machine: the leader gets back what it lost, and a holder that lost its copy is filled again', async () => {
     const s = await stand();
+    /* A machine with little room keeps the store's backup, the last one live copies would go to: the others keep them as before. */
+    await s.worker('backup', { diskFree: 3 * 1024 ** 3 });
     const [two, three] = [await s.worker('two'), await s.worker('three')];
     const bytes = [randomBytes(70_000), randomBytes(130_000)];
     const kept = [await s.app.ctx.files.putBytes(s.db, bytes[0]!), await s.app.ctx.files.putBytes(s.db, bytes[1]!)];
@@ -293,6 +295,8 @@ describe('where the files of the store are kept', () => {
 
   it('places the files of a machine away for over a day on another, and that machine lets them go once it is back', async () => {
     const s = await stand();
+    /* A machine with little room keeps the store's backup, the last one live copies would go to: the others keep them as before. */
+    await s.worker('backup', { diskFree: 3 * 1024 ** 3 });
     const ids = [await s.worker('two'), await s.worker('three')];
     const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(6000));
     const picked = (await s.targetsOf(kept.sha256)).find(id => id !== s.server.id)!;
@@ -490,6 +494,8 @@ describe('where the files of the store are kept', () => {
 
   it('lets no copy go on the word of a machine that has not shown it keeps the file', async () => {
     const s = await stand();
+    /* A machine with little room keeps the store's backup, the last one live copies would go to: the others keep them as before. */
+    await s.worker('backup', { diskFree: 3 * 1024 ** 3 });
     const [two, three] = [await s.worker('two'), await s.worker('three', { path: 'relay' })];
     await setCopies(s.db, 3, 'person:test');
     const kept = await s.app.ctx.files.putBytes(s.db, randomBytes(3000));

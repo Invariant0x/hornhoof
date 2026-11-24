@@ -9,6 +9,7 @@ import { DEFAULT_AREA_BYTES } from './area.js';
 import { countedNow, FRESH_MS, keptElsewhere } from './place.js';
 import { type Challenge, Proof, sameMac } from './proof.js';
 import { namedUnrecorded, SET_ASIDE } from './sweep.js';
+import { backupView, takeBackupReport, type BackupView } from './backup.js';
 
 /* How the files of the store go between the company's machines, as the leading app keeps it: what each machine is to
    take, give back or let go of, and what each said it keeps. Which machines keep which file is placed in ./place. Only
@@ -32,12 +33,20 @@ const SHA = z.string().regex(/^[0-9a-f]{64}$/);
 
 /* What a machine hears: whether it holds the company's files, the files to take with what their sealed bytes hash to,
    those to let go of, and those the leading app asks it to send back. */
-export type FileView = { holds: boolean; hold: { sha256: string; sealedSha256: string; sealedSize: number }[]; drop: string[]; want: string[]; prove: Challenge[]; area: number };
+export type FileView = { holds: boolean; hold: { sha256: string; sealedSha256: string; sealedSize: number }[]; drop: string[]; want: string[]; prove: Challenge[]; area: number; backup: BackupView };
 /* A census names every file a machine keeps in a span of names, in their order: whatever it was said to keep in that
    span and does not name any more, it lost. The span runs after one name and through another; '' before the first, 'g'
    past the last. */
 const Span = z.strictObject({ after: z.union([z.literal(''), SHA]), through: z.union([z.literal('g'), SHA]) });
-const Report = z.strictObject({ held: z.array(SHA).max(VIEW_FILES * 5), dropped: z.array(SHA).max(VIEW_FILES * 5), span: Span.optional(), proofs: z.array(Proof).max(VIEW_FILES).optional() });
+/* What a machine says of its backup folder, as its view had a part of the backup: a keeper from before says none. */
+const BackupReport = z.strictObject({ held: z.array(SHA).max(VIEW_FILES * 5), dropped: z.array(SHA).max(VIEW_FILES * 5), span: Span.optional() });
+const Report = z.strictObject({
+  held: z.array(SHA).max(VIEW_FILES * 5),
+  dropped: z.array(SHA).max(VIEW_FILES * 5),
+  span: Span.optional(),
+  proofs: z.array(Proof).max(VIEW_FILES).optional(),
+  backup: BackupReport.optional(),
+});
 export type FileReport = z.infer<typeof Report>;
 
 /* Whether a machine keeps files of the store: it is one of the company's with a keeper and an area more than none. */
@@ -108,7 +117,7 @@ export async function fileView(db: Tx, machineId: string, now = new Date(), lead
   ).map(row => row.sha256);
   /* The area its owner gives the files, so it takes none past it whatever it is picked for. */
   const [limit] = rowsOf<{ area: string | number }>(await db.execute(sql`SELECT coalesce(file_store_limit_bytes, ${DEFAULT_AREA_BYTES}) AS area FROM machines WHERE id = ${machineId}`));
-  return { holds, hold, drop, want, prove: await proveOf(db, machineId), area: limit ? Number(limit.area) : 0 };
+  return { holds, hold, drop, want, prove: await proveOf(db, machineId), area: limit ? Number(limit.area) : 0, backup: await backupView(db, machineId, leader) };
 }
 
 /* The files a machine says it keeps that count as its copies: those it was given, or any for a machine of the data,
@@ -128,7 +137,7 @@ async function givenOf(db: Tx, machineId: string, held: string[]): Promise<{ cou
    go, is no file of the store any more. The answer names the files it keeps that no record knows, which it lets go of
    once they are a day old; those the leading app lacks, to send; those it is to fetch again before they count; and the
    slices it is to show of the copies it was given, so they count. */
-export async function takeReport(db: Tx, machineId: string, report: FileReport): Promise<{ unknown: string[]; send: string[]; again: string[]; prove: Challenge[] }> {
+export async function takeReport(db: Tx, machineId: string, report: FileReport): Promise<{ unknown: string[]; send: string[]; again: string[]; prove: Challenge[]; backupUnknown?: string[] }> {
   let unknown: string[] = [];
   let send: string[] = [];
   let again: string[] = [];
@@ -170,10 +179,12 @@ export async function takeReport(db: Tx, machineId: string, report: FileReport):
     await db.execute(sql`DELETE FROM net.file_copies WHERE machine_id = ${machineId} AND sha256 = ANY(${listOf(report.dropped)}::text[])`);
     await db.execute(sql`DELETE FROM net.files f WHERE f.sha256 = ANY(${listOf(report.dropped)}::text[]) AND f.drop_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256)`);
   }
-  return { unknown, send, again, prove: await proveOf(db, machineId) };
+  const backupUnknown = report.backup ? await takeBackupReport(db, machineId, report.backup) : undefined;
+  return { unknown, send, again, prove: await proveOf(db, machineId), ...(backupUnknown ? { backupUnknown } : {}) };
 }
 
-const hasWork = (view: FileView): boolean => view.hold.length > 0 || view.drop.length > 0 || view.want.length > 0 || view.prove.length > 0;
+const hasWork = (view: FileView): boolean =>
+  view.hold.length > 0 || view.drop.length > 0 || view.want.length > 0 || view.prove.length > 0 || view.backup.hold.length > 0 || view.backup.drop.length > 0 || view.backup.give.length > 0;
 const Ask = z.object({ wait: z.enum(['0', '1']).optional() });
 
 export function fileNetworkRoutes(app: FastifyInstance, ctx: Ctx): void {

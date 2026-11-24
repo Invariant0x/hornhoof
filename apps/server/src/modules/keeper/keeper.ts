@@ -900,8 +900,8 @@ export class Keeper {
     if (!db || !dir) return undefined;
     const files = new LeaderFiles(db, join(dir, 'store'), this.opts.config.machineId ?? null, () => filesFor(this.opts.config).key(db));
     return {
-      get: async (peer, sha256) => (this.mode() === 'lead' ? files.give(peer.machine, sha256) : { status: 403 }),
-      put: async (peer, sha256, body) => (this.mode() === 'lead' ? files.take(peer.machine, sha256, body) : 403),
+      get: async (peer, sha256, backup) => (this.mode() === 'lead' ? files.give(peer.machine, sha256, backup) : { status: 403 }),
+      put: async (peer, sha256, body, backup) => (this.mode() === 'lead' ? files.take(peer.machine, sha256, body, backup) : 403),
     };
   }
 

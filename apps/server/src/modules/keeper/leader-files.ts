@@ -1,3 +1,4 @@
+import { dirname, join } from 'node:path';
 import { pipeline, Transform, type Readable } from 'node:stream';
 import { sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
@@ -21,11 +22,14 @@ const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (a
    with the sealed hash the record says. */
 export class LeaderFiles {
   readonly store: FileStore;
+  /* The store's backup on this machine, beside its store, as the leading app keeps it while no other machine does. */
+  readonly backup: FileStore;
 
   /* own: the network id of this machine, whose row the copy taken back is recorded under. key: the store key, which opens
      a file a merge brought a row of and no record describes. */
   constructor(private readonly db: Db, dir: string, private readonly own: string | null, private readonly key?: () => Promise<Buffer>) {
     this.store = new FileStore(dir);
+    this.backup = new FileStore(join(dirname(dir), 'store-backup'));
   }
 
   private async ownRow(): Promise<string | null> {
@@ -57,7 +61,8 @@ export class LeaderFiles {
   /* A file for a machine picked to keep it, recorded as given once its whole stream went out, so its word that it keeps
      it counts: a stream cut short, or one the machine let go of unread, records nothing. Or for the machine that keeps the
      store's backup, which takes no copy's place. */
-  async give(machine: string, sha256: string): Promise<{ status: 200; length: number; stream(): Readable } | { status: 403 | 404 }> {
+  async give(machine: string, sha256: string, backup = false): Promise<{ status: 200; length: number; stream(): Readable } | { status: 403 | 404 }> {
+    if (backup) return this.giveBackup(machine, sha256);
     const picked = await pickedFor(this.db, machine, sha256);
     if (!picked && !(await backsUpStore(this.db, machine, sha256))) return { status: 403 };
     const sealed = this.store.sealed(sha256);
@@ -98,7 +103,37 @@ export class LeaderFiles {
 
   /* A file sent back: one the leading app asked for, from a machine that keeps it, or one the store's backup restores,
      which is in use again as it comes back. Either is kept only as long and with the sealed hash the record says. */
-  async take(machine: string, sha256: string, body: Readable): Promise<number> {
+  /* A content of the backup for the machine picked to keep it, from the live store here or, where it went from there, the
+     backup folder here: no receipt, as a backup copy is no live copy. */
+  private async giveBackup(machine: string, sha256: string): Promise<{ status: 200; length: number; stream(): Readable } | { status: 403 | 404 }> {
+    if (!(await backsUpStore(this.db, machine, sha256))) return { status: 403 };
+    const sealed = this.store.sealed(sha256) ?? this.backup.sealed(sha256);
+    return sealed ? { status: 200, length: sealed.length, stream: sealed.stream } : { status: 404 };
+  }
+
+  /* A content of the backup a machine gives back as the backup moves off it: only one the record says it keeps, only as
+   long and with the sealed hash the record says, sealed again where it was sealed before. The backup folder here keeps
+   it, until the machine picked fetches it. */
+  private async takeBackup(machine: string, sha256: string, body: Readable): Promise<number> {
+    const [row] = rowsOf<{ sealed_sha256: string; sealed_size: string; salt: string }>(
+      await this.db.execute(sql`SELECT sealed_sha256, sealed_size, salt FROM net.file_backups WHERE sha256 = ${sha256} AND machine_id = ${machine} AND kept_at IS NOT NULL AND drop_at IS NULL`),
+    );
+    if (!row) {
+      body.destroy();
+      return 403;
+    }
+    try {
+      await this.backup.take(sha256, body, { sealedSha256: row.sealed_sha256, sealedSize: Number(row.sealed_size) }, this.key ? { key: await this.key(), salt: row.salt } : undefined);
+    } catch (err) {
+      if (err instanceof StoreRefused) return 400;
+      throw err;
+    }
+    await this.db.execute(sql`UPDATE net.file_backups SET machine_id = ${await this.ownRow()}, kept_at = now() WHERE sha256 = ${sha256} AND machine_id = ${machine}`);
+    return 201;
+  }
+
+  async take(machine: string, sha256: string, body: Readable, backup = false): Promise<number> {
+    if (backup) return this.takeBackup(machine, sha256, body);
     const restores = await backsUpStore(this.db, machine, sha256);
     const [asked] = rowsOf<{ sealed_sha256: string; sealed_size: string; salt: string }>(
       await this.db.execute(sql`SELECT f.sealed_sha256, f.sealed_size, f.salt FROM net.files f WHERE f.sha256 = ${sha256} AND (${restores} OR (f.wanted_at IS NOT NULL

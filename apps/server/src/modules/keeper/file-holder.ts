@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { statfsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { z } from 'zod';
 import { floorOf } from '../files/area.js';
@@ -12,6 +12,8 @@ import { Hourly, reasonOf } from './machine-keys.js';
    files themselves from the leading keeper. */
 export const FILES_VIEW_PATH = '/api/network/files';
 export const FILE_PATH = '/peer/files/';
+/* The sealed files of the store's backup, which the machine picked for it fetches, and one it keeps gives back. */
+export const BACKUP_FILE_PATH = '/peer/store-backup/';
 /* A file that no record names is left this long before it goes: an upload may still be between the store and its row. */
 export const UNNAMED_MS = 86_400_000;
 const LOOK_EVERY_MS = 5_000;
@@ -28,9 +30,19 @@ const View = z.object({
   prove: z.array(Challenge).default([]),
   /* The area its owner gives the files; a leader from before it says none. */
   area: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+  backup: z
+    .object({
+      keep: z.boolean(),
+      hold: z.array(z.object({ sha256: SHA, sealedSha256: SHA, sealedSize: z.number().int().positive() })),
+      drop: z.array(SHA),
+      give: z.array(SHA),
+      clear: z.boolean(),
+      keepDays: z.number().int().positive(),
+    })
+    .optional(),
 });
 export type HeldView = z.infer<typeof View>;
-const Answer = z.object({ unknown: z.array(SHA).default([]), send: z.array(SHA).default([]), again: z.array(SHA).default([]), prove: z.array(Challenge).default([]) });
+const Answer = z.object({ unknown: z.array(SHA).default([]), send: z.array(SHA).default([]), again: z.array(SHA).default([]), prove: z.array(Challenge).default([]), backupUnknown: z.array(SHA).default([]) });
 
 /* The leader as this keeper reaches it: whether one is in reach, a request to its app, and a stream of its own to the
    leading keeper, which carries a file. */
@@ -78,8 +90,13 @@ export class FileHolder {
   /* The sealed bytes the store keeps: counted whole once and at each census, and kept up with each file in or out. */
   private used: number | null = null;
 
+  /* The store's backup, when this machine is picked for it: a folder of its own beside the store, never a live copy. */
+  readonly backup: FileStore;
+  private backupCensusAt = 0;
+
   constructor(private readonly opts: FileHolderOptions) {
     this.store = new FileStore(opts.dir);
+    this.backup = new FileStore(join(dirname(opts.dir), 'store-backup'));
   }
 
   start(): void {
@@ -108,15 +125,15 @@ export class FileHolder {
 
   private async countUsed(): Promise<void> {
     let used = 0;
-    for (const file of await this.store.list()) used += this.store.sealed(file.sha256)?.length ?? 0;
+    for (const store of [this.store, this.backup]) for (const file of await store.list()) used += store.sealed(file.sha256)?.length ?? 0;
     this.used = used;
   }
 
   /* Lets a file go, and counts it no more. */
-  async drop(sha256: string): Promise<void> {
-    const size = this.store.sealed(sha256)?.length ?? 0;
-    await this.store.remove(sha256);
-    if (this.used !== null && size > 0 && !this.store.has(sha256)) this.used = Math.max(0, this.used - size);
+  async drop(sha256: string, store = this.store): Promise<void> {
+    const size = store.sealed(sha256)?.length ?? 0;
+    await store.remove(sha256);
+    if (this.used !== null && size > 0 && !store.has(sha256)) this.used = Math.max(0, this.used - size);
   }
 
   /* Whether a file of that size fits: in the area its owner gives the files, past what they take, and on a disk that
@@ -160,6 +177,50 @@ export class FileHolder {
     const lost = view.want.filter(sha256 => !this.store.has(sha256));
     if (lost.length) await this.report([], lost);
     if (this.now() - this.censusAt >= CENSUS_MS) await this.census();
+    if (view.backup) await this.lookBackup(view.backup, view.area);
+  }
+
+  /* The backup's part of a look: its folder empties once it keeps nothing of the backup; what it lets go of goes first,
+     what it is to keep it fetches, what only it keeps as the backup moves off it it gives back, and it says so. The
+     machine picked for it names its folder each hour, and lets go of what the backup does not know once older than the
+     days it keeps. */
+  private async lookBackup(view: NonNullable<HeldView['backup']>, area: number | undefined): Promise<void> {
+    await this.backup.tidy(new Date(this.now()));
+    if (view.clear) for (const file of await this.backup.list()) await this.drop(file.sha256, this.backup);
+    const held: string[] = [];
+    const dropped: string[] = [];
+    for (const sha256 of view.drop) {
+      await this.drop(sha256, this.backup);
+      dropped.push(sha256);
+    }
+    for (const file of view.hold) {
+      if (this.stopped) break;
+      if (this.backup.has(file.sha256) || (await this.fetch(file, area, this.backup))) held.push(file.sha256);
+    }
+    for (const sha256 of view.give) await this.send(sha256, this.backup);
+    if (held.length || dropped.length) await this.reportBackup({ held, dropped });
+    if (view.keep && this.now() - this.backupCensusAt >= CENSUS_MS) await this.censusBackup(view.keepDays);
+  }
+
+  private async reportBackup(backup: { held: string[]; dropped: string[]; span?: { after: string; through: string } }): Promise<string[]> {
+    const answer = await this.opts.link.request('POST', FILES_VIEW_PATH, { held: [], dropped: [], backup });
+    if (answer.status >= 300) throw new Error(`the company server answered ${answer.status}`);
+    return Answer.safeParse(answer.body ?? {}).data?.backupUnknown ?? [];
+  }
+
+  /* Names every file of its backup folder, a span at a time, so the leading app fetches again what it lost there. */
+  async censusBackup(keepDays: number): Promise<void> {
+    const here = (await this.backup.list()).sort((x, y) => (x.sha256 < y.sha256 ? -1 : 1));
+    const cutoff = this.now() - keepDays * UNNAMED_MS;
+    let after = '';
+    for (let at = 0; at === 0 || at < here.length; at += CENSUS_BATCH) {
+      const batch = here.slice(at, at + CENSUS_BATCH);
+      const through = at + CENSUS_BATCH >= here.length ? 'g' : batch.at(-1)!.sha256;
+      const unknown = new Set(await this.reportBackup({ held: batch.map(file => file.sha256), dropped: [], span: { after, through } }));
+      for (const file of batch) if (unknown.has(file.sha256) && file.at.getTime() < cutoff) await this.drop(file.sha256, this.backup);
+      after = through;
+    }
+    this.backupCensusAt = this.now();
   }
 
   /* Says what this machine keeps and let go of; the answer names what of it no record knows, and what of it the leader
@@ -203,19 +264,19 @@ export class FileHolder {
     this.censusAt = this.now();
   }
 
-  private async fetch(file: HeldView['hold'][number], area: number | undefined): Promise<boolean> {
+  private async fetch(file: HeldView['hold'][number], area: number | undefined, store = this.store): Promise<boolean> {
     if (!this.roomFor(file.sealedSize, area)) {
       this.say('room', "Has no room for a file of the company it is picked to keep: its area or its disk is full.");
       return false;
     }
     let body: Readable | null = null;
     try {
-      const answer = await this.opts.link.stream('GET', `${FILE_PATH}${file.sha256}`);
+      const answer = await this.opts.link.stream('GET', `${store === this.backup ? BACKUP_FILE_PATH : FILE_PATH}${file.sha256}`);
       body = answer.body;
       if (answer.status !== 200) return false;
-      const fresh = !this.store.has(file.sha256);
-      await this.store.take(file.sha256, body, { sealedSha256: file.sealedSha256, sealedSize: file.sealedSize });
-      const has = this.store.has(file.sha256);
+      const fresh = !store.has(file.sha256);
+      await store.take(file.sha256, body, { sealedSha256: file.sealedSha256, sealedSize: file.sealedSize });
+      const has = store.has(file.sha256);
       if (has && fresh && this.used !== null) this.used += file.sealedSize;
       return has;
     } catch (err) {
@@ -246,13 +307,14 @@ export class FileHolder {
     }
   }
 
-  /* The leader lacks a file this machine holds, and asks for it. */
-  private async send(sha256: string): Promise<void> {
-    const sealed = this.store.sealed(sha256);
+  /* The leader lacks a file this machine holds, and asks for it; or one only the backup folder here keeps, as the backup
+     moves off this machine. */
+  private async send(sha256: string, store = this.store): Promise<void> {
+    const sealed = store.sealed(sha256);
     if (!sealed) return;
     const body = sealed.stream();
     try {
-      const answer = await this.opts.link.stream('PUT', `${FILE_PATH}${sha256}`, body, sealed.length);
+      const answer = await this.opts.link.stream('PUT', `${store === this.backup ? BACKUP_FILE_PATH : FILE_PATH}${sha256}`, body, sealed.length);
       answer.body.destroy();
     } catch (err) {
       this.say('send', `Could not send a file to the company's server: ${reasonOf(err)}`);
