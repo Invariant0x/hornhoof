@@ -682,8 +682,12 @@ function buildingExtrudedHeight(b: CityBuilding): number {
 
 function isOccludedByFrontBuilding(r: ResidentEntity, posX: number, posY: number): boolean {
   const sampleY = posY - 18;
+  const col = Math.round(r.col);
+  const row = Math.round(r.row);
   for (let i = 0; i < visibleBuildingBoxes.length; i++) {
     const b = visibleBuildingBoxes[i]!;
+    /* A resident on a building's own lot stands at its front edge, at work there (#2001): in front of it, not behind. */
+    if (col >= b.minCol && col < b.maxCol && row >= b.minRow && row < b.maxRow) continue;
     /* In 2:1 isometric painter's order, building b sits in front of (r.col, r.row) iff
        r.col < b.maxCol and r.row < b.maxRow (not strictly South or East of the footprint). */
     if (r.col < b.maxCol - 0.15 && r.row < b.maxRow - 0.15) {

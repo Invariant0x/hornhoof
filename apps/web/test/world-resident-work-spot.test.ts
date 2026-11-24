@@ -1,9 +1,11 @@
+import { Graphics } from 'pixi.js';
 import { describe, expect, it } from 'vitest';
 import type { CityBuilding, CityState } from '../src/world/city-layout';
 import { deliverySpotsForBuilding, workSlotsForBuilding } from '../src/world/construction';
 import { createHornhoofLiveFixture, syncLiveSnapshotToCity } from '../src/world/live-sync';
 import type { Direction8, WorldPackManifest } from '../src/world/manifest';
 import { createResidentSimulation, stepResidentSimulation, type ResidentEntity } from '../src/world/residents';
+import { renderResidentsToPixi } from '../src/world/residents-renderer';
 import { generateWorldTerrain } from '../src/world/terrain-engine';
 import { DUNGEON_WORLD_PACK } from '../src/world-packs/dungeon/pack';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
@@ -106,6 +108,34 @@ describe('A delivery ends at the building it is for (#2001)', () => {
       if (want > 1) spread++;
     }
     expect(spread, 'the fixture has buildings where several residents work side by side').toBeGreaterThan(0);
+  });
+
+  /* The map hides a passer-by behind a building in front of it; a resident on the building's own front edge stands in
+     front of it and is drawn. */
+  it('is drawn at its spot, not hidden behind the building it works at', () => {
+    const live = createHornhoofLiveFixture();
+    const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: live.company.seed, mapSize: 150 });
+    const { city } = syncLiveSnapshotToCity(EGYPT_WORLD_PACK, map, live);
+    const sim = createResidentSimulation(EGYPT_WORLD_PACK, city, live);
+    const everywhere = { minX: -1e7, maxX: 1e7, minY: -1e7, maxY: 1e7 };
+    const drawn = new Set<string>();
+    const leg = new Map(sim.residents.map(r => [r.id, r.leg]));
+    let checked = 0;
+    for (let tick = 0; tick < 1600 && checked < 12; tick++) {
+      stepResidentSimulation(sim, 0.1);
+      const atSpot = sim.residents.filter(r => {
+        const arrived = leg.get(r.id) === 'outbound' && r.leg === 'inbound';
+        leg.set(r.id, r.leg);
+        return arrived && r.workSpot !== null && r.pose === 'building';
+      });
+      if (atSpot.length === 0) continue;
+      renderResidentsToPixi(new Graphics(), sim, city, EGYPT_WORLD_PACK, everywhere, 64, 32, 'full', null, drawn);
+      for (const r of atSpot) {
+        expect(drawn.has(r.id), `${r.name} at its spot on ${r.workBuildingId}`).toBe(true);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(12);
   });
 
   it('leaves the buildings as the accepted results drew them: a delivery grows nothing by itself', () => {
