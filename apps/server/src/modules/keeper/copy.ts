@@ -79,8 +79,9 @@ export const PASSFILE_THERE = 'SELECT (pg_stat_file($1, true)).size IS NOT NULL 
 export type CopyReport = {
   schema?: SchemaAttempt; state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number; led?: number } | null; left?: string[];
   saving?: { waiting: SavingWait; since: string };
-  /* A copy that was given up for good: since when, and after how many attempts in a row. */
-  gaveUp?: { since: string; attempts: number };
+  /* A copy that was given up for good: since when, after how many attempts in a row, and why: it failed again and again,
+     or the path from the leader to this machine is too slow or too late for it. */
+  gaveUp?: { since: string; attempts: number; why: ParkedWhy };
 };
 /* What the leader says of the copy in its view. slot: its slot there. leaderSize: the size of the leader's database.
    migrations: how many the leader's schema has. old: how far the leader is with reading the copy's old database.
@@ -95,11 +96,18 @@ export type CopyOrder = {
   leader?: string;
   join?: string | null;
   applied?: AppliedLed | null;
+  /* The CEO asked for the copy again by hand: a keeper that gave it up makes a new one. */
+  retry?: true;
+  /* The path from the leader to this machine is measured too weak for a copy that is not whole: slow or late. */
+  weak?: 'slow' | 'late';
 };
 
 type Closable = Sql & { close(): Promise<void> };
 const SchemaAttempt = z.object({ attempt: z.number().int().min(1), since: z.iso.datetime() });
 type SchemaAttempt = z.infer<typeof SchemaAttempt>;
+
+const ParkedWhy = z.enum(['failed', 'slow', 'late']);
+type ParkedWhy = z.infer<typeof ParkedWhy>;
 
 const Kept = z.object({
   attempt: z.number().int().min(1),
@@ -138,7 +146,7 @@ const Kept = z.object({
   /* When the copy last held every table, which starts the hour that clears the attempts given up before. */
   readyAt: z.string().nullable().default(null),
   /* The copy was given up for good: since when, and after how many attempts. Nothing more is made until it is asked for. */
-  parked: z.object({ since: z.string(), attempts: z.number().int().min(1) }).nullable().default(null),
+  parked: z.object({ since: z.string(), attempts: z.number().int().min(0), why: ParkedWhy.default('failed') }).nullable().default(null),
 });
 type Kept = z.infer<typeof Kept>;
 type Subscription = { name: string; oid: number; enabled: boolean; slot: string | null };
@@ -392,12 +400,10 @@ export class CopyMaker {
     }
     if (this.kept.phase === 'detach') return this.detach();
     if (this.kept.phase === 'drop') return this.drop();
-    if (this.kept.phase === 'parked') {
-      this.said = this.parkedReport();
-      return;
-    }
+    if (this.kept.phase === 'parked') return this.parked(order);
     const sql = this.on(this.kept.database);
     if (await this.led(sql)) return this.saveLed(order);
+    if (order?.weak && ['schema', 'grant', 'subscribe', 'sync'].includes(this.kept.phase)) return this.parkWeak(order.weak);
     if (this.kept.phase === 'join') return this.join(sql, order);
     if (this.kept.phase === 'schema') return this.schema(sql);
     if (this.kept.phase === 'grant') return this.grant();
@@ -760,8 +766,8 @@ export class CopyMaker {
   }
 
   /* The attempt that was just given up was the last the copy gets: the count of them in a row, when it is at the limit. */
-  private parking(): { since: string; attempts: number } | null {
-    return this.kept.given + 1 >= MAX_GIVEN ? { since: new Date(this.now()).toISOString(), attempts: this.kept.given + 1 } : null;
+  private parking(): { since: string; attempts: number; why: 'failed' } | null {
+    return this.kept.given + 1 >= MAX_GIVEN ? { since: new Date(this.now()).toISOString(), attempts: this.kept.given + 1, why: 'failed' } : null;
   }
 
   /* A copy that broke is made again beside the old one: the next attempt, in a database of its own. Written down
@@ -792,10 +798,38 @@ export class CopyMaker {
     this.said = parked ? this.parkedReport() : this.making(0);
   }
 
+  /* The leader measured the path to this machine as too weak for a copy that is not whole: what it made is dropped with its
+     slots as an attempt given up, and nothing is made while the path stays so. It counts for no attempt given up. */
+  private parkWeak(why: 'slow' | 'late'): void {
+    this.opts.log(
+      why === 'slow'
+        ? "The path from the company server to this machine is measured too slow for a copy of the company's database, so none is made over it. What was made is dropped, with its slots on the company server."
+        : "The path from the company server to this machine answers too late for a copy of the company's database, so none is made over it. What was made is dropped, with its slots on the company server.",
+    );
+    this.keep({ attempt: this.kept.attempt + 1, phase: 'drop', notBefore: null, seen: false, missing: 0, cuts: 0, best: null, parked: { since: new Date(this.now()).toISOString(), attempts: this.kept.given, why } });
+    this.disabledSince = null;
+    this.said = this.parkedReport();
+  }
+
   private parkLine(attempts: number): void {
     this.opts.log(
       `This machine's copy of the company's database could not be made in ${attempts} attempts in a row, so this machine gives up this copy. Nothing more is made until it is asked for, and what it held on the company server is dropped.`,
     );
+  }
+
+  /* A copy that was given up makes nothing, until the CEO asks for it again by hand: then the attempt begins in the empty
+     database that was made for it, with the count of attempts given up in a row starting over. */
+  private parked(order: CopyOrder | null): void {
+    /* One parked for its path goes on by itself once the leader no longer says the path is too weak. */
+    const pathMended = this.kept.parked?.why !== 'failed' && order !== null && order.weak === undefined;
+    if (!order?.retry && !pathMended) {
+      this.said = this.parkedReport();
+      return;
+    }
+    this.opts.log(order?.retry ? "The CEO asked for this machine's copy of the company's database again: it is made anew." : "The path from the company server to this machine carries a copy now: it is made.");
+    this.keep({ phase: 'schema', parked: null, given: order?.retry ? 0 : this.kept.given, cuts: 0, best: null, readyAt: null, notBefore: null, schema: null, seen: false, missing: 0 });
+    this.disabledSince = null;
+    this.said = this.making(0);
   }
 
   /* What a parked copy says: stopped, for good, and the old database that still waits to be merged. */

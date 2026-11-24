@@ -1196,6 +1196,9 @@ export const en = {
       stopped: 'Copy: stopped',
       stoppedDiskFull: 'Copy: stopped: disk full',
       stoppedSetup: "Copy: stopped: the company's settings cannot be written here",
+      stoppedPathSlow: 'Copy: not made: the connection between this machine and the company server is too slow for it',
+      stoppedPathLate: 'Copy: not made: the connection between this machine and the company server answers too late for it',
+      retryCopy: 'Try again',
       stoppedGaveUp: (attempts: number, since: string | null) =>
         `Copy: given up after ${attempts} failed attempts in a row${since ? ` (${since})` : ''}. Nothing more is copied to this machine until it is asked for.`,
       left: (date: string) => `Stopped holding the company's data on ${date}. If it may be in other hands, change the company secret and the API keys.`,
