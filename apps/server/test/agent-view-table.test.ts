@@ -138,6 +138,8 @@ const LISTS: Listed[] = [
   { route: 'GET /api/org', url: () => '/api/org', statuses: ALL_OK, company: true },
   { route: 'GET /api/world/state', url: () => '/api/world/state', statuses: ALL_OK, company: true },
   { route: 'GET /api/world/theme', url: () => '/api/world/theme', statuses: ALL_OK, company: true },
+  { route: 'GET /api/world/rewards', url: () => '/api/world/rewards', statuses: ALL_OK, company: true },
+  { route: 'GET /api/world/rewards/showcase', url: () => '/api/world/rewards/showcase', statuses: ALL_OK, company: true },
   { route: 'GET /api/tasks', url: c => `/api/tasks?status=all&department=${c.dev.id}`, statuses: ALL_OK, company: true },
   { route: 'GET /api/requests', url: () => '/api/requests', statuses: ALL_OK },
   { route: 'GET /api/wait-cards', url: () => '/api/wait-cards', statuses: ALL_OK },

@@ -20,6 +20,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Added
 
+- Company achievements are now computed read-only on the server from verified records alone (accepted tasks with evidence, released turns, passed commit checks and reached goals, taking an achievement back when its record is undone) and served to human company members at `/api/world/rewards` and `/api/world/rewards/showcase` without private data in showcase cards and with no currency counter.
 - The task watchdog can now see whether a task's commit is in main or a release and close, in any department, the tasks the server proves done, with its reason in the task log and a notice to the head of that department; its role template carries the rules for code, documents and reports, and groups, and never touches paused work.
 
 ### Changed
