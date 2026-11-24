@@ -168,7 +168,10 @@ export function residentDepthY(site: BridgeSite | null, col: number, row: number
 
 /* Two sites are the same bridge. */
 export function sameBridge(a: BridgeSite | null | undefined, b: BridgeSite | null | undefined): boolean {
-  if (!a || !b) return !a && !b;
-  const banks = (s: BridgeSite) => `${Boolean(s.overBank?.[0])}|${Boolean(s.overBank?.[1])}`;
-  return a.axis === b.axis && a.col === b.col && a.row === b.row && a.length === b.length && banks(a) === banks(b);
+  return bridgeKey(a) === bridgeKey(b);
+}
+
+/* A site's axis, place, length and bank ends in one word: empty for no bridge, so two sites compare by their keys. */
+function bridgeKey(s: BridgeSite | null | undefined): string {
+  return s ? `${s.axis}|${s.col}|${s.row}|${s.length}|${Boolean(s.overBank?.[0])}|${Boolean(s.overBank?.[1])}` : '';
 }

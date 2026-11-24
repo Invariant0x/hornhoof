@@ -745,6 +745,11 @@ function drawAltarArtPixi(ctx: ResidentArtContext, index: ArtIndex, sim: Residen
   return true;
 }
 
+/* The depth a resident's feet stand at: over the deck it walks on where it is on the city's bridge, else its tile's centre. */
+function feetDepth(city: CityState | null, r: Readonly<{ col: number; row: number }>, tileH: number): number {
+  return residentDepthY(city?.bridge ?? null, r.col, r.row, tileH);
+}
+
 export function renderResidentsToPixi(
   g: Graphics,
   sim: ResidentSimulation,
@@ -817,7 +822,7 @@ export function renderResidentsToPixi(
     const selected = r.id === selectedResidentId;
     if (art) {
       /* Through the pool, art or placeholder, at the depth of the feet among buildings and plants. */
-      art.pool.depth = residentDepthY(city?.bridge ?? null, r.col, r.row, tileH);
+      art.pool.depth = feetDepth(city, r, tileH);
       const resolved = artIndex ? resolveResidentArt(pack, artIndex, r, sim.timeSec) : null;
       if (!resolved || !drawResidentArtPixi(art, resolved, r, pack, tileW, tileH, selected)) {
         drawResidentPixi(art.pool.graphics(), r, sim.timeSec, tileW, tileH, detail, selected);
