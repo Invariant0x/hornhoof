@@ -5,7 +5,7 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
-## [Unreleased]
+## [0.44.0] - 2026-11-24
 
 ### Fixed
 
@@ -13,11 +13,21 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A task reaches Failures only for a cause that needs a person: a command Hornhoof refuses before it starts ends as refused, with the refusal told to its agent at once as a hint, and neither it, a stopped run, a turn that retries by itself after an overloaded provider or a usage limit, nor a turn replaced because its task moved on marks a task, the agent card or the map as failed; a stuck agent asking for help and a turn that failed with nothing to take it on now do, each until it is answered or a turn goes well, and the failure card says what to do. Refusals kept as failed runs become refused when the update runs.
 - A machine's copy of the company's data no longer tries again without end over a link that keeps cutting it: a subscription stopped by an error and enabled again 30 times in one attempt ends that attempt even when some tables got through, one that takes no table through and grows by less than 8 MiB in two hours ends too, the attempts given up in a row count until the copy has been whole for an hour, a whole copy that breaks soon after is counted too, each wait is twice as long as the one before, and after the fourth attempt given up in a row the keeper parks the copy: its slots on the company server are dropped so the log they held is released, nothing more is made until it is asked for, and the machine's card says it was given up, since when and after how many attempts.
 - A former server machine whose database is being saved before its copy is remade no longer gets stuck in "Saving" when a backup-holder sweep runs during sealing: the keeper keeps one shared record of temporary bundle files in flight, puts the sealed archive in place before its header and clears any leftover header without an archive, skips the save when the current server's copy has already applied the former server's last write, and shows on the machine card what the save is waiting on and since when.
+- Residents on the city map turn to face the way they walk along diagonal streets.
+- Two residents no longer stand on one work spot while another spot of their building is free, and a resident stepping onto a building's lot stays drawn on the way.
+- A building under construction shows the nearest drawn picture for a stage that has no art yet, and a world pack without art shows one flat placeholder instead of nothing.
+- The world map with a dark theme no longer shows a black rectangle under the plates over it, also in a browser that draws WebGL in software.
+- A finished Antigravity turn always closes on the server, and a turn whose end was lost closes by itself.
+- A computer that runs both the server and a node shows in Machines as one row instead of two.
 
 ### Added
 
 - Every text people see now comes from a file per language, loaded only for the language that is on: the screens, the words of the world packs, what the server says in its own words, and the names and descriptions of templates. A language is one line in a registry and one file per kind of text, with no code that names a language. Plurals, dates and numbers follow the language through the browser's own rules, a language that reads right to left mirrors the page, and the letters of a script that the product's fonts do not hold load only when a language in that script is on.
 - Two languages made for tests, a text 40% longer than English and the same text mirrored, are checked on the main screens at phone and desktop widths for cut text and sideways scroll. They never reach a person.
+- A development department runs its turn in slots: a task that finds every slot busy waits in a queue that the next turn takes in, shown on the task card and the turns screen. A cancelled task leaves the queue, one made urgent goes past it to its holder at once, and one its head gives to an owner leaves it. Existing development departments keep giving their work out at once after the update; only new ones start with slots.
+- Tasks keep who asked for them apart from who decides, and the task card and the Mine list show both.
+- Operations gets a list of agents suspected to hang, with the tool suspected_hangs, to look at and act on.
+- A release can be recorded on the green CI of the repository's release workflow, which a person names: only a full run of that workflow counts, and a skipped test counts as red.
 
 ### Changed
 
@@ -25,6 +35,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A machine whose copy of the company's data its keeper gave up reads nothing from that copy: the old copy no longer changes, so it is not served as if it were current.
 - A skin file of your own may name the skin in any language of the registry, with the English name required and the others optional, and the names of a world's employees can be taken in any language of the registry.
 - Follower machines that hold company data no longer prune their local backup bundles during worker backup-holder sweeps, keeping their own backups and saved former-leader bundles on disk while still sending any bundle the server asks for.
+- The server no longer closes quiet turns by itself: a turn that looks stuck goes on the suspected-hang list for Operations instead.
+- A subscription's limit cell shows one line and one bar for the provider's main model group; the plan card still shows a bar for every group.
+- A theme without a world loads no world map code, and the server computes no city for it.
 
 ## [0.43.0] - 2026-11-23
 
