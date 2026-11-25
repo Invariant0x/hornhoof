@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:f
 import { availableParallelism, tmpdir, totalmem, uptime } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { COMMIT_PROBE, KEEP_SAMPLES, Measures, SAMPLE_MS, commitProbe, fsyncP99, keepLatest } from '../src/modules/keeper/measures.js';
+import { COMMIT_PROBE, HOUR_SAMPLES, KEEP_SAMPLES, Measures, SAMPLE_MS, commitProbe, fsyncP99, keepLatest } from '../src/modules/keeper/measures.js';
 import { createTestSql } from './helpers.js';
 
 const PROBE_FILE = 'fsync-probe';
@@ -122,6 +122,43 @@ describe('Measures', () => {
     for (let taken = 0; taken < 10; taken++) await measures.sample();
     expect(measures.snapshot().fsyncP99Ms).toBe(3);
     expect(measures.leaseFsyncP99()).toBe(500);
+  });
+
+  it('reports the median of its hourly p99s, so a quarter of an hour of slow writes is not what it says of its disk for a day', async () => {
+    const queue: number[] = [];
+    const measures = new Measures({ dir: tempFolder(), probe: { time: async () => queue.shift()! } });
+    running.push(measures);
+    const take = async (count: number, ms: number) => {
+      for (let n = 0; n < count; n++) {
+        queue.push(ms);
+        await measures.sample();
+      }
+    };
+    expect(HOUR_SAMPLES * 24).toBe(KEEP_SAMPLES);
+    /* A day of quick writes, but for a quarter of an hour of slow ones. */
+    await take(10 * HOUR_SAMPLES, 3);
+    await take(45, 500);
+    await take(14 * HOUR_SAMPLES - 45, 3);
+    expect(measures.snapshot().fsyncP99Ms).toBe(3);
+    /* What the lease's statements may take still counts that quarter of an hour. */
+    expect(measures.leaseFsyncP99()).toBe(500);
+  });
+
+  it('reports a disk that was slow for most of its hours as slow, and as quick again once most of them are quick', async () => {
+    const queue: number[] = [];
+    const measures = new Measures({ dir: tempFolder(), probe: { time: async () => queue.shift()! } });
+    running.push(measures);
+    const take = async (count: number, ms: number) => {
+      for (let n = 0; n < count; n++) {
+        queue.push(ms);
+        await measures.sample();
+      }
+    };
+    await take(11 * HOUR_SAMPLES, 3);
+    await take(13 * HOUR_SAMPLES, 500);
+    expect(measures.snapshot().fsyncP99Ms).toBe(500);
+    await take(2 * HOUR_SAMPLES, 3);
+    expect(measures.snapshot().fsyncP99Ms).toBe(3);
   });
 
   it('reports no sample during which the machine became busy', async () => {

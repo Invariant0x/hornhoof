@@ -344,6 +344,23 @@ describe('the ranking on the server', () => {
     expect(await rank(c.ctx)).toEqual({ changed: 0, scored: false });
   });
 
+  it('scores the order again at once when the disk that held a machine low is not slow any more', async () => {
+    const c = await company();
+    const measured = { linkRttMs: 20, linkMbps: 100, internetRttMs: 20, internetMbps: 100, cores: 8 };
+    const slow = await c.joined(c.ownerId, 3, { ...measured, fsyncP99Ms: 800 });
+    await c.joined(c.mariaId, 1, measured);
+    expect(await rank(c.ctx)).toMatchObject({ scored: true });
+    expect((await c.places())[slow.hostname!]![1]).toMatch(/\.slow_disk$/);
+    /* The same day with nothing new: the order stays as it is. */
+    expect(await rank(c.ctx)).toEqual({ changed: 0, scored: false });
+    /* Its disk is quick again, as after a burst of slow writes: the order is scored now, not the next day. */
+    await c.db.update(machines).set({ fsyncP99Ms: 3 }).where(eq(machines.id, slow.id));
+    expect(await rank(c.ctx)).toMatchObject({ scored: true });
+    expect((await c.places())[slow.hostname!]![1]).not.toMatch(/slow_disk/);
+    /* Scored once for it, and not again. */
+    expect(await rank(c.ctx)).toEqual({ changed: 0, scored: false });
+  });
+
   it('swaps two numbers without a clash', async () => {
     const c = await company();
     const a = await c.joined(c.ownerId, 3);
