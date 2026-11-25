@@ -1179,6 +1179,16 @@ export const en = {
       making: (percent: number) => `Copy: being made, ${percent}%`,
       remaking: (percent: number) => `Copy: being made again, ${percent}%`,
       saving: 'Copy: saving what it did while it led',
+      savingDump: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (reading the database, since ${since})` : 'Copy: saving what it did while it led (reading the database)',
+      savingSeal: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (encrypting the backup, since ${since})` : 'Copy: saving what it did while it led (encrypting the backup)',
+      savingServer: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (waiting for the company server, since ${since})` : 'Copy: saving what it did while it led (waiting for the company server)',
+      savingSend: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (sending the backup to the company server, since ${since})` : 'Copy: saving what it did while it led (sending the backup to the company server)',
+      savingRetry: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (retrying after an error, since ${since})` : 'Copy: saving what it did while it led (retrying after an error)',
       ready: 'Copy: up to date',
       behind: (minutes: number) => `Copy: ${minutes} min behind`,
       catchingUp: 'Copy: catching up',
@@ -1186,6 +1196,8 @@ export const en = {
       stopped: 'Copy: stopped',
       stoppedDiskFull: 'Copy: stopped: disk full',
       stoppedSetup: "Copy: stopped: the company's settings cannot be written here",
+      stoppedGaveUp: (attempts: number, since: string | null) =>
+        `Copy: given up after ${attempts} failed attempts in a row${since ? ` (${since})` : ''}. Nothing more is copied to this machine until it is asked for.`,
       left: (date: string) => `Stopped holding the company's data on ${date}. If it may be in other hands, change the company secret and the API keys.`,
       one: (leader: string, copy: string) => `${leader} leads. ${copy} keeps a copy and takes over if ${leader} stops.`,
       many: (leader: string, copies: string, next: string) => `${leader} leads. ${copies} keep copies; ${next} takes over if ${leader} stops.`,
@@ -2182,7 +2194,6 @@ export const en = {
     fileMb: (n: number | string) => `${n} MB`,
     textTooLarge: 'This text is too large to send in one request. Attach it as a file on the task and send its link. Your text is still here.',
     fileMissing: 'This file is not available.',
-    bigFile: 'big file: lives 30 days on one machine and is lost if that machine goes',
     questions: 'Questions',
     log: 'Log',
     skippedRun: (by: string, run: string) => `Run skipped: task is already closed. ${by}: ${run}.`,

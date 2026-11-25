@@ -7,6 +7,8 @@ import { appendEvent } from '../src/modules/events/store.js';
 import { keepMail } from '../src/modules/conversation/inbox.js';
 import { insertTurn } from '../src/modules/conversation/queue.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { sha256Of, stored } from './files-fixture.js';
+import { dropDue } from '../src/modules/files/sweep.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -54,7 +56,7 @@ describe('secrets in stored prose', () => {
     const { task } = await createTask(app.ctx, { agentId: agent.id }, { title: 'Old text', brief: '', body: marker, departmentId: null, assigneeAgentId: agent.id });
     await comment(app.ctx, { agentId: agent.id }, task.id, `copy ${marker}`);
     await appendEvent(app.ctx, { companyId, agentId: agent.id, kind: 'text', data: { text: marker, nested: [{ [marker]: marker }] } });
-    await db.insert(attachments).values({ companyId, taskId: task.id, agentId: agent.id, name: 'old-comment.txt', mediaType: 'text/plain', bytes: Buffer.from(marker), size: Buffer.byteLength(marker) });
+    await db.insert(attachments).values({ companyId, taskId: task.id, agentId: agent.id, name: 'old-comment.txt', mediaType: 'text/plain', sha256: await stored(db, marker, app.ctx.config), size: Buffer.byteLength(marker) });
     const response = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(ceo), payload: { value: marker } });
     expect(response.statusCode, response.body).toBe(200);
     expect(response.body).not.toContain(marker);
@@ -65,7 +67,11 @@ describe('secrets in stored prose', () => {
     }
     expect((await db.select().from(tasks))[0]!.body).toBe('[hidden]');
     expect((await app.inject({ url: `/api/tasks/${task.id}`, ...as(ceo) })).body).not.toContain(marker);
-    expect(Buffer.from((await db.select().from(attachments))[0]!.bytes).toString()).toBe('[hidden]');
+    /* The file is kept again as it reads now, and the store lets the one it was go at its next round. */
+    const [file] = await db.select().from(attachments);
+    expect([file!.sha256, file!.size, (await app.ctx.files.bytes(db, file!.sha256!)).toString()]).toEqual([sha256Of('[hidden]'), 8, '[hidden]']);
+    await dropDue(app.ctx, new Date());
+    expect(app.ctx.files.store().has(sha256Of(marker))).toBe(false);
     /* An old copy brings the value back only through a merge, which checks its rows against the fingerprint. */
     expect(await db.select().from(secretRedactions)).toEqual([expect.objectContaining({ characters: marker.length, fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) })]);
   });
@@ -198,9 +204,10 @@ describe('secrets in stored prose', () => {
     await comment(app.ctx, { agentId: agent.id }, task.id, `${'ordinary prose '.repeat(400)}password=archiveValue1077!`);
     const before = await db.select().from(attachments);
     expect(before).toHaveLength(2);
-    expect(before.map(file => Buffer.from(file.bytes).toString()).join('')).not.toContain('archiveValue1077!');
+    const said = async (rows: { sha256: string | null }[]) => (await Promise.all(rows.map(file => app.ctx.files.bytes(db, file.sha256!)))).map(String).join('');
+    expect(await said(before)).not.toContain('archiveValue1077!');
     const response = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(ceo), payload: { value: marker } });
     expect(response.statusCode, response.body).toBe(200);
-    for (const file of await db.select().from(attachments)) expect(Buffer.from(file.bytes).toString()).not.toContain(marker);
+    expect(await said(await db.select().from(attachments))).not.toContain(marker);
   });
 });

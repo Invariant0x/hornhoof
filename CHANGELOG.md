@@ -7,8 +7,14 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Fixed
+
+- A machine's copy of the company's data no longer tries again without end over a link that keeps cutting it: a subscription stopped by an error and enabled again 30 times in one attempt ends that attempt even when some tables got through, one that takes no table through and grows by less than 8 MiB in two hours ends too, the attempts given up in a row count until the copy has been whole for an hour, a whole copy that breaks soon after is counted too, each wait is twice as long as the one before, and after the fourth attempt given up in a row the keeper parks the copy: its slots on the company server are dropped so the log they held is released, nothing more is made until it is asked for, and the machine's card says it was given up, since when and after how many attempts.
+- A former server machine whose database is being saved before its copy is remade no longer gets stuck in "Saving" when a backup-holder sweep runs during sealing: the keeper keeps one shared record of temporary bundle files in flight, puts the sealed archive in place before its header and clears any leftover header without an archive, skips the save when the current server's copy has already applied the former server's last write, and shows on the machine card what the save is waiting on and since when.
+
 ### Added
 
+- Company achievements are computed on the server from verified records only and taken back when their record is undone; human members read them at `/api/world/rewards`, and `/api/world/rewards/showcase` carries no private data.
 - Every text people see now comes from a file per language, loaded only for the language that is on: the screens, the words of the world packs, what the server says in its own words, the page shown while the server is away, and the names and descriptions of templates. A language is one line in a registry and one file per kind of text, with no code that names a language. Plurals, dates and numbers follow the language through the browser's own rules, a language that reads right to left mirrors the page, and the letters of a script that the product's fonts do not hold load only when a language in that script is on.
 - Two languages made for tests, a text 40% longer than English and the same text mirrored, are checked on the main screens at phone and desktop widths for cut text and sideways scroll. They never reach a person.
 - A development department runs its turn in slots, one task for each of up to five developers: a task that finds them all busy waits in a queue that the task card and the Turns and releases screen show, the next turn takes the queue in, and urgent work goes past it.
@@ -16,7 +22,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Changed
 
+- Files leave the database: every file of a task, a message, a run or a person's picture goes into the company's file store on the server's disk (`FILES_DIR`, the `files` volume), sealed and named by its sha256, and the database keeps only what describes it, so copies of the database and backups no longer grow with files. After the update the server copies the files of 0.43 into the store while it serves, checks each one by its hash, and clears their bytes from the database only after the CEO, or the orchestrator for him, says yes to the reconciliation it writes (`GET /api/files/move`, `POST /api/files/move/approve` with its digest); then it drops the old column and runs `VACUUM FULL`. A server in production does not start without `FILES_DIR`. `hh-fetch` downloads a file it has already only when Hornhoof has other bytes.
 - A skin file of your own may name the skin in any language of the registry, with the English name required and the others optional, and the names of a world's employees can be taken in any language of the registry.
+- Follower machines that hold company data no longer prune their local backup bundles during worker backup-holder sweeps, keeping their own backups and saved former-leader bundles on disk while still sending any bundle the server asks for.
 - The Development template gives a new company the code pipeline as a tree (Development first, then Review, Security, Tests and the release, Architecture on request beside it), one Hotfix unit for urgent work in place of the turnkey team, and one Security read of the whole turn branch instead of one for each task; a function moves existing departments to it for the update, keeping what was changed by hand.
 
 ## [0.43.0] - 2026-11-23

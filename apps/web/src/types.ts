@@ -551,8 +551,7 @@ export type TaskLine = {
 /* by.for: the person the orchestrator acted for. */
 export type TaskLogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string }; byOrchestrator?: true } | null; at: string };
 export type TaskRequest = { id: string; kind: 'question' | 'choice' | 'approval' | 'stuck'; text: string; commit: string | null; status: string; answer: string | null; byOrchestrator?: boolean; agent: AgentRef | null; at: string };
-/* big: over 50 MB, it lives 30 days on one machine and is lost if that machine goes. */
-export type TaskFile = { id: string; name: string; size: number; by: { id: string; name: string } | null; at: string; big?: true };
+export type TaskFile = { id: string; name: string; size: number; by: { id: string; name: string } | null; at: string };
 
 export type TaskDetail = TaskLine & {
   echelonFindings: EchelonFindingsView;
@@ -973,13 +972,16 @@ export type Unfit =
   | { why: 'phone' | 'no_core' | 'no_link' }
   | { why: 'scope'; person: string; departments?: number };
 
+export type SavingWait = 'dump' | 'seal' | 'server' | 'send' | 'retry';
+
 /* How a machine's copy of the company's data does. */
 export type CopyLine =
   | { line: 'making' | 'remaking'; progress: number }
-  | { line: 'ready' | 'catching_up' | 'saving' }
+  | { line: 'saving'; waiting?: SavingWait; since?: string | null }
+  | { line: 'ready' | 'catching_up' }
   | { line: 'behind'; minutes: number }
   | { line: 'asleep'; since: string | null }
-  | { line: 'stopped'; why: 'disk_full' | 'setup' | null };
+  | { line: 'stopped'; why: 'disk_full' | 'setup' | 'gave_up' | null; since?: string; attempts?: number };
 
 /* A machine's place in the order of who holds the company's data, why it holds no copy, how its copy does, when it
    stopped holding the data, and, for the machine the server last moved from, until when it ran the server, once its

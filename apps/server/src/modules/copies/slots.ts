@@ -59,8 +59,24 @@ export async function copyOrder(ctx: Ctx, row: { id: string; networkId: string |
   const leader = ctx.config.machineId ?? undefined;
   return {
     slot, leaderSize: sized ? Number(sized.size) : null, migrations: counted?.n ?? null, old, upload, lastAttempt: attempt ? Number(attempt) : null,
+    applied: await appliedOf(ctx, row.id),
     ...(leader === undefined ? {} : { leader, join: await slotToJoin(ctx, row.networkId ?? null, attempt ? Number(attempt) : 0) }),
   };
+}
+
+/* How far a handover from that machine to this server applied its log, while no restore replaced it. */
+async function appliedOf(ctx: Ctx, machineId: string): Promise<{ term: number; lsn: string } | null> {
+  const mine = (await findThisMachine(ctx.db, ctx.config))?.id;
+  if (!mine) return null;
+  const [row] = await queryOf(ctx.db)<{ term: number; lsn: string }>(
+    `SELECT h.term_number::int AS term, h.applied AS lsn FROM net.handovers h
+      WHERE h.from_machine_id = $1::uuid AND h.to_machine_id = $2::uuid
+        AND h.applied ~ '^[0-9A-Fa-f]{1,8}/[0-9A-Fa-f]{1,8}$'
+        AND NOT EXISTS (SELECT 1 FROM net.restores r WHERE r.dumped_at < h.at OR r.at >= h.at)
+      ORDER BY h.term_number DESC, h.at DESC, h.id DESC LIMIT 1`,
+    [machineId, mine],
+  );
+  return row ? { term: Number(row.term), lsn: row.lsn } : null;
 }
 
 /* The slot the newest planned switch made for that machine, when this machine took the server in it and the slot's
