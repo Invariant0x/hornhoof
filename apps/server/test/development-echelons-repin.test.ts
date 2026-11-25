@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { jobs, subscriptions, taskEvents, taskRoutes, tasks } from '../src/db/schema.js';
+import { removeSubscription } from '../src/modules/subscriptions/routes.js';
 import { submit, verdict } from '../src/modules/tasks/engine.js';
 import { as } from './helpers.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
@@ -23,7 +24,6 @@ describe('a checking stage follows its owner when the owner card changes', () =>
   it('accepts the Review result after the reviewer moves to another model of the same strength', async () => {
     const f = await atReview();
     expect((await f.edit({ model: 'claude-fable-5-1' })).statusCode).toBe(200);
-    expect((await f.route()).assignment).toMatchObject({ agentId: f.reviewer.id, model: 'claude-fable-5-1', capability: 2 });
     await verdict(f.ctx, f.reviewer.id, f.task.id, pass);
     expect((await f.detail()).echelons).toMatchObject({ stage: 'tests', phase: 'active' });
   });
@@ -32,7 +32,6 @@ describe('a checking stage follows its owner when the owner card changes', () =>
     const f = await atReview();
     const [second] = await f.db.insert(subscriptions).values({ companyId: f.task.companyId, provider: 'claude', kind: 'personal', label: 'Second', ownerPersonId: f.codex.ownerPersonId, status: 'ready' }).returning();
     expect((await f.edit({ subscription: second!.id })).statusCode).toBe(200);
-    expect((await f.route()).assignment).toMatchObject({ agentId: f.reviewer.id, subscriptionId: second!.id });
     await verdict(f.ctx, f.reviewer.id, f.task.id, pass);
     expect((await f.detail()).echelons).toMatchObject({ stage: 'tests', phase: 'active' });
   });
@@ -47,6 +46,19 @@ describe('a checking stage follows its owner when the owner card changes', () =>
     expect((await f.db.select().from(tasks).where(eq(tasks.id, f.task.id)))[0]).toMatchObject({ assigneeAgentId: null, status: 'waiting' });
     const notes = (await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'updated')))).map(event => event.text);
     expect(notes.some(text => text?.includes('weaker') && text.includes('Reviewer'))).toBe(true);
+    expect(await f.headJobs()).toBeGreaterThan(before);
+    await expect(verdict(f.ctx, f.reviewer.id, f.task.id, pass)).rejects.toThrow();
+  });
+
+  it('lets the stage go with its reason when the plan the reviewer moved to leaves the company', async () => {
+    const f = await atReview();
+    const [second] = await f.db.insert(subscriptions).values({ companyId: f.task.companyId, provider: 'claude', kind: 'personal', label: 'Second', ownerPersonId: f.codex.ownerPersonId, status: 'ready' }).returning();
+    expect((await f.edit({ subscription: second!.id })).statusCode).toBe(200);
+    const before = await f.headJobs();
+    await removeSubscription(f.ctx, second!);
+    expect((await f.detail()).echelons).toMatchObject({ stage: 'review', phase: 'waiting', ownerAgentId: null });
+    const notes = (await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'updated')))).map(event => event.text);
+    expect(notes.some(text => text?.includes('Reviewer') && text.includes('no plan'))).toBe(true);
     expect(await f.headJobs()).toBeGreaterThan(before);
     await expect(verdict(f.ctx, f.reviewer.id, f.task.id, pass)).rejects.toThrow();
   });

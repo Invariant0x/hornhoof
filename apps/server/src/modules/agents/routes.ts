@@ -26,7 +26,7 @@ import { leaveWork } from '../tasks/engine.js';
 import { agentProgramState } from '../tasks/program-state.js';
 import { type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
 import { backOn, leaveForTeam, leaveIfOff, resumeAgent, wakeAll } from '../tasks/wake.js';
-import { repinAssignments } from '../tasks/echelons-repin.js';
+import { repinMoved } from '../tasks/echelons-repin.js';
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import { modelOnPlan, tierIn } from './role-model.js';
 import type { Lang, Role, RoleSkill, Skill } from '../templates/load.js';
@@ -341,7 +341,7 @@ export async function afterPlanMove(ctx: Ctx, agent: AgentRow, next: AgentRow): 
    one of them the pin follows the owner, or the stage is let go with its reason and the head told (echelons-repin). */
 async function afterIdentityMove(ctx: Ctx, me: Person, agent: AgentRow, next: AgentRow): Promise<void> {
   if (agent.subscriptionId === next.subscriptionId && agent.model === next.model) return;
-  await wakeAll(ctx, (await repinAssignments(ctx, actorOf(me), next)).wakes);
+  await repinMoved(ctx, [next.id], actorOf(me));
 }
 
 /* Back on: a checker that can take the waiting stage of a route takes it again and the task turns it missed go out. Off: its work goes back

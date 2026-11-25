@@ -1,13 +1,14 @@
 import { and, asc, eq, inArray, notInArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { jobs, tasks } from '../../db/schema.js';
-import { ApiError } from '../../errors.js';
+import { agents, jobs, tasks } from '../../db/schema.js';
+import { ApiError, loggable } from '../../errors.js';
 import { agentIdentity, checkerFor, departmentHead, keptFromReview, PRODUCER_REVIEW } from './echelons-assign.js';
 import { checkedProducer, currentHanded } from './echelons-candidates.js';
 import { reviewEligibility, sameChecker, type CheckerIdentity } from './echelons-policy.js';
 import { changeRoute, routeOf, type Route } from './route-records.js';
 import { CLOSED, giver, loadTask, type Actor, type Task, type Wake } from './state.js';
 import { move } from './transitions.js';
+import { wakeAll } from './wake.js';
 
 type Holder = { id: string; name: string; companyId: string };
 
@@ -71,4 +72,20 @@ async function repinOne(ctx: Ctx, actor: Actor, holder: Holder, task: Task): Pro
   const wakes: Wake[] = head ? [{ agentId: head, taskId: task.id, why: 'switched', text }] : giver(task, 'switched', undefined, text);
   await move(ctx, task, { assigneeAgentId: null, status: 'waiting' }, { kind: 'updated', actor, text, data: { fields: ['owner'] } }, tx => changeRoute(tx, route, state), wakes);
   return { released: true, wakes };
+}
+
+/* Every move of an employee's plan or model calls this once it is kept: a person's change of the card, and Hornhoof's own
+   moves (a fallback plan and the way home, a plan that left the company, a plan that came to one waiting, a person whose
+   plans stop serving). With no person behind the move the employee moved stands as who moved it, as a switch-off without
+   a person does. The plan has moved already, so a failure here is logged and fails nothing. */
+export async function repinMoved(ctx: Ctx, agentIds: readonly string[], by?: Actor): Promise<void> {
+  if (!agentIds.length) return;
+  const moved = await ctx.db.select({ id: agents.id, name: agents.name, companyId: agents.companyId }).from(agents).where(inArray(agents.id, [...new Set(agentIds)]));
+  for (const holder of moved) {
+    try {
+      await wakeAll(ctx, (await repinAssignments(ctx, by ?? { agentId: holder.id }, holder)).wakes);
+    } catch (error) {
+      ctx.log.error({ error: loggable(error), agentId: holder.id }, 'Re-pinning the checking stages of a moved employee failed.');
+    }
+  }
 }
