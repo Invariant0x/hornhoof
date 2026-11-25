@@ -11,28 +11,23 @@ import { agySteps, LineTail } from '../src/terminal/transcripts.js';
 import { Tmux } from '../src/terminal/tmux.js';
 
 const realSetTimeout = setTimeout;
-const realClearTimeout = clearTimeout;
 const realMoment = () => new Promise<void>(resolve => { realSetTimeout(resolve, 1); });
-/* Moves the fake clock until the work ends. The code under test also waits on real file reads, which land in real time and
-   later on a loaded machine, so every tick leaves a real moment for them: a clock that stops after a number of ticks leaves the
-   work waiting for a timer that no one moves any more. An Antigravity turn has no deadline of its own, and these tests have no
-   time limit, so a limit in real time ends the wait for work that never settles: the test then fails by name instead of
-   holding the run for ever. */
-async function untilSettled<T>(work: Promise<T>, limitMs = 30_000): Promise<T> {
+/* Moves the fake clock until the work ends, at most limitTicks ticks of 50 ms. The code under test also waits on real file
+   reads, which land in real time and later on a loaded machine, so every tick leaves a real moment for them: before
+   bec48c75c the helpers moved the clock 60 to 200 ticks with no real moment, and on a loaded runner the reads landed after
+   the last tick, leaving the work waiting for a timer that no one moved any more. An Antigravity turn has no deadline of its
+   own and these tests have no time limit, so the tick bound ends the wait for work that never settles: the test then fails
+   by name instead of holding the run for ever. The bound counts ticks, not real time, so a slow machine makes the loop
+   take longer but never fails it. */
+async function untilSettled<T>(work: Promise<T>, limitTicks = 1200): Promise<T> {
   let settled = false;
-  let late = false;
   const mark = () => { settled = true; };
   work.then(mark, mark);
-  const limit = realSetTimeout(() => { late = true; }, limitMs);
-  try {
-    while (!settled && !late) {
-      await vi.advanceTimersByTimeAsync(50);
-      await realMoment();
-    }
-  } finally {
-    realClearTimeout(limit);
+  for (let tick = 0; tick < limitTicks && !settled; tick++) {
+    await vi.advanceTimersByTimeAsync(50);
+    await realMoment();
   }
-  expect(settled, `the work did not settle within ${limitMs / 1000} s of real time`).toBe(true);
+  expect(settled, `the work did not settle within ${limitTicks} ticks of the fake clock`).toBe(true);
   return work;
 }
 
@@ -73,14 +68,15 @@ describe('the fake clock of these tests', () => {
       await new Promise<void>(resolve => { setTimeout(resolve, 1000); });
       return 'done';
     })();
-    expect(await Promise.race([untilSettled(work), new Promise(resolve => { realSetTimeout(() => resolve('stuck'), 5000); })])).toBe('done');
+    expect(await untilSettled(work)).toBe('done');
   });
 
   it('fails by name when the work never settles, as a turn whose end never comes, instead of waiting for ever', async () => {
     vi.useFakeTimers();
     const never = new Promise<never>(() => {});
-    const outcome = untilSettled(never, 300).then(() => 'settled', (error: Error) => error.message);
-    expect(await Promise.race([outcome, new Promise(resolve => { realSetTimeout(() => resolve('stuck'), 5000); })])).toMatch(/did not settle/);
+    const start = Date.now();
+    await expect(untilSettled(never, 5)).rejects.toThrow('the work did not settle within 5 ticks of the fake clock');
+    expect(Date.now() - start).toBe(250);
   });
 });
 
