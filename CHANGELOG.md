@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [0.44.2] - 2026-11-25
+
+### Fixed
+
+- A machine that led the company before and follows another now asks its updater again for the dump of what it did while it led, ten minutes after a request that left no dump and no line, or after a dump the updater cleared before it was sealed, so its copy no longer stays in "Saving" for ever after such a request was lost.
+
 ## [0.44.1] - 2026-11-25
 
 ### Fixed
