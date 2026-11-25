@@ -7,13 +7,15 @@ import { agents, attachments, people, tasks } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { checkRoom, FILE_BYTES } from './file-policy.js';
+import { filesFor } from '../files/files.js';
 import type { Actor, Tx } from './state.js';
 
 /* Prose is preserved in full; transport and attachment budgets bound its storage. */
 export const Text = z.string();
 const INLINE = 4000;
 const PREVIEW = 3000;
-type Budget = Pick<Ctx['config'], 'taskFilesBytes'>;
+/* The app's settings, which say how much room files have and where the store is. */
+type Budget = Ctx['config'];
 type Scope = { id: string; companyId: string };
 type Owner = { agentId: string; personId: string | null };
 type Note = { kind: string; actor: Actor; text?: string; data?: Record<string, unknown>; inlineText?: true };
@@ -44,17 +46,20 @@ async function owner(db: Db | Tx, task: Scope, actor: Actor): Promise<Owner> {
   return { agentId: await recipient(db, task), personId: person.id };
 }
 
-/* Names carry the complete content hash; existing bytes are checked before a retry reuses one. */
+/* Names carry the complete content hash, and a row of that name is reused only when the store keeps those very bytes
+   for it. The bytes go to the store first: a transaction that does not commit leaves a file no row names, which the
+   sweep takes away. */
 async function archive(db: Db | Tx, task: Scope, author: Owner, kind: string, field: FullText['field'], text: string, config: Budget): Promise<FullText> {
   const bytes = Buffer.from(text, 'utf8');
   if (bytes.length > FILE_BYTES) throw new ApiError(413, 'validation', 'Keep the full text in a smaller task file and send its file name with hh-attach.', 'attachment_invalid');
   const sha256 = digest(bytes);
   const name = `${kind}-${field}-${sha256}.txt`;
-  const [existing] = await db.select().from(attachments).where(and(eq(attachments.companyId, task.companyId), eq(attachments.taskId, task.id), eq(attachments.agentId, author.agentId), author.personId ? eq(attachments.personId, author.personId) : isNull(attachments.personId), eq(attachments.name, name), eq(attachments.mediaType, 'text/plain'), isNull(attachments.operatorCaseId))).limit(1);
-  if (existing && digest(existing.bytes) === sha256) return { field, id: existing.id, name, size: bytes.length, sha256 };
+  const [existing] = await db.select({ id: attachments.id, sha256: attachments.sha256 }).from(attachments).where(and(eq(attachments.companyId, task.companyId), eq(attachments.taskId, task.id), eq(attachments.agentId, author.agentId), author.personId ? eq(attachments.personId, author.personId) : isNull(attachments.personId), eq(attachments.name, name), eq(attachments.mediaType, 'text/plain'), isNull(attachments.operatorCaseId))).limit(1);
+  if (existing && existing.sha256 === sha256) return { field, id: existing.id, name, size: bytes.length, sha256 };
   const [row] = await db.select(only(tasks, 'number')).from(tasks).where(eq(tasks.id, task.id));
   await checkRoom({ db, config }, task.companyId, { id: task.id, number: row!.number }, bytes.length);
-  const [file] = await db.insert(attachments).values({ companyId: task.companyId, taskId: task.id, ...author, name, mediaType: 'text/plain', bytes, size: bytes.length }).returning({ id: attachments.id });
+  const kept = await filesFor(config).putBytes(db, bytes);
+  const [file] = await db.insert(attachments).values({ companyId: task.companyId, taskId: task.id, ...author, name, mediaType: 'text/plain', sha256: kept.sha256, size: bytes.length }).returning({ id: attachments.id });
   return { field, id: file!.id, name, size: bytes.length, sha256 };
 }
 

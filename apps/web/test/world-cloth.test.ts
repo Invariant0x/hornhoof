@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CLOTH_COLS, CLOTH_ROWS, clothIndices, clothUvs, clothVertexWeights, clothWind, greyOf, swayClothVertices } from '../src/world/cloth';
 
-/* #1983, Ivan: wooden posts and frames never move; only cloth sways, a little. A layer sways by its grey mask alone
+/* #1983: wooden posts and frames never move; only cloth sways, a little. A layer sways by its grey mask alone
    (0 still, 255 the free edge), and a mesh cell that holds one still pixel keeps all its corners where they are. */
 const W = 120;
 const H = 80;

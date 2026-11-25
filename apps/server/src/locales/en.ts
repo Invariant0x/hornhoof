@@ -21,9 +21,17 @@ export const en = {
     attachment_unknown: 'there is no such file in Hornhoof, it was deleted after its 30 days, or you cannot open it there.',
     file_empty: 'the file is empty.',
     file_too_big: (megabytes: number) => `the file is bigger than ${megabytes} MB.`,
-    file_lost: 'a big file lives only on the machine that took it, and Hornhoof cannot reach it there now.',
+    file_lost: "this file is not in the company's file store any more, and no copy of it is left.",
+    file_away: 'this file is kept on a machine of the company that is away now. Try again once it is back.',
+    file_store_full: "the company's machines have no room left for it, until files go or a machine gives the files more room.",
+    file_store_busy: "the company's server holds as many files for its other machines as it has room for, until they take them. Try again in a little while.",
     file_link_expired: (days: number) => `the link to the file worked for ${days} days, and they are over.`,
     attachment_invalid: "Hornhoof has no room left for the company's files.",
+  },
+
+  /* Why the server does not start, said before it opens the database. */
+  boot: {
+    filesDirMissing: 'FILES_DIR is not set: a server in production keeps its files there, and without it they would be lost at the next restart. Set FILES_DIR to a folder that stays, as compose.yaml does with /files, and start again.',
   },
 
   /* What a bot can say on its own. */
@@ -36,7 +44,7 @@ export const en = {
     unreadable: 'I cannot read this kind of message. Send words, a file, a photo, a video or a voice message.',
     fileLost: (name: string) => `${name} did not come through. Send it again in a little while.`,
     fileTooBig: (name: string, limit: number) => `${name} is too big: a bot gets files of up to ${limit} MB from Telegram. Send it as a link, or in parts.`,
-    bigFile: (name: string, url: string, days: number) => `${name} is a big file: it lives 30 days on one machine and is lost if that machine goes. Its link downloads it for ${days} days: ${url}`,
+    bigFile: (name: string, url: string, days: number) => `${name} is over 50 MB, more than Telegram passes on. Its link downloads it for ${days} days: ${url}`,
     noRoom: (name: string) => `${name} did not come through: Hornhoof has no room left for the company's files. Ask the company's owner about it.`,
     notReady: (agent: string) => `${agent} cannot answer right now. Open Hornhoof to see why, or write again later.`,
     failed: 'Your message did not go through. Please write it again in a little while.',

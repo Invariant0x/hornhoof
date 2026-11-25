@@ -60,12 +60,24 @@ it.each(['wait_id', 'generation', 'level', 'purpose', 'route_revision'])('keeps 
 
 it.each([
   { table: 'program_operator_cases', secret: 'capability', metadata: 'id, status, reason' },
-  { table: 'attachments', secret: 'bytes', metadata: 'id, media_type, size, operator_case_id' },
 ])('hides the $secret column of $table from Operations, shows it to the orchestrator, and both read metadata', async ({ table, secret, metadata }) => {
   const run = await roles();
   await expect(run('read', `SELECT ${secret} FROM ${table}`)).rejects.toThrow(/permission denied|read-only/);
   expect((await run('write', `SELECT ${secret} FROM ${table}`))[0]!.rows).toEqual([]);
   for (const mode of ['write', 'read'] as const) expect((await run(mode, `SELECT ${metadata} FROM ${table}`))[0]!.rows).toEqual([]);
+});
+
+/* An installation whose files have not moved into the store yet keeps their bytes in a column the read role is not
+   given; once they moved, the column is gone, as on a fresh install. */
+it('keeps no bytes of a file in attachments, and its hash from Operations, and both roles read its metadata', async () => {
+  const run = await roles();
+  for (const mode of ['write', 'read'] as const) {
+    await expect(run(mode, 'SELECT bytes FROM attachments')).rejects.toThrow(/column "bytes" does not exist/);
+    expect((await run(mode, 'SELECT id, media_type, size, operator_case_id FROM attachments'))[0]!.rows).toEqual([]);
+  }
+  /* A file's hash names its content: with it Operations, which reads every row, could confirm a guess at a person's file. */
+  await expect(run('read', 'SELECT sha256 FROM attachments')).rejects.toThrow(/permission denied|read-only/);
+  expect((await run('write', 'SELECT sha256 FROM attachments'))[0]!.rows).toEqual([]);
 });
 
 it('keeps request material history from Operations, and lets the orchestrator read and change it', async () => {

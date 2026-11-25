@@ -17,9 +17,16 @@ export const ru: ServerWords = {
     attachment_unknown: 'такого файла в Hornhoof нет, его удалили через 30 дней, или вам его там не открыть.',
     file_empty: 'файл пустой.',
     file_too_big: megabytes => `файл больше ${megabytes} МБ.`,
-    file_lost: 'большой файл хранится только на машине, которая его приняла, и сейчас Hornhoof не может его оттуда взять.',
+    file_lost: 'этого файла больше нет в хранилище файлов компании, и его копии не осталось.',
+    file_away: 'этот файл хранится на машине компании, которой сейчас нет в сети. Попробуйте еще раз, когда она вернется.',
+    file_store_full: 'на машинах компании не осталось для него места, пока не уйдут файлы или какая-то машина не даст файлам больше места.',
+    file_store_busy: 'сервер компании держит столько файлов для других ее машин, сколько у него есть места, пока они их не заберут. Попробуйте еще раз чуть позже.',
     file_link_expired: days => `ссылка на файл работала ${days} дней, и они прошли.`,
     attachment_invalid: 'в Hornhoof закончилось место для файлов компании.',
+  },
+
+  boot: {
+    filesDirMissing: 'FILES_DIR не задан: сервер в работе хранит в нем файлы, а без него они пропали бы при следующем перезапуске. Укажите в FILES_DIR постоянную папку, как compose.yaml указывает /files, и запустите снова.',
   },
 
   bot: {
@@ -31,7 +38,7 @@ export const ru: ServerWords = {
     unreadable: 'Такое сообщение я прочитать не могу. Пришлите текст, файл, фото, видео или голосовое.',
     fileLost: name => `Файл ${name} не дошел. Пришлите его, пожалуйста, еще раз чуть позже.`,
     fileTooBig: (name, limit) => `Файл ${name} слишком большой: бот получает из Telegram файлы до ${limit} МБ. Пришлите ссылку или разбейте на части.`,
-    bigFile: (name, url, days) => `Файл ${name} большой: он хранится 30 дней на одной машине и пропадет, если этой машины не станет. По ссылке его можно скачать ${days} дней: ${url}`,
+    bigFile: (name, url, days) => `Файл ${name} больше 50 МБ, столько Telegram не передает. По ссылке его можно скачать ${days} дней: ${url}`,
     noRoom: name => `Файл ${name} не дошел: в Hornhoof закончилось место для файлов компании. Спросите об этом владельца компании.`,
     notReady: agent => `${agent} сейчас не может ответить. Откройте Hornhoof, чтобы узнать почему, или напишите позже.`,
     failed: 'Ваше сообщение не дошло. Напишите его, пожалуйста, еще раз чуть позже.',
@@ -77,5 +84,9 @@ export const ru: ServerWords = {
     notStarted: name => `${name}: ход закончился до запуска программы`,
   },
 };
+
+/* What a node from before refusals had a word of their own wrote as the first line of a refused part's log. The server reads
+   old logs for it, so it is kept as the node wrote it, here with the Russian words and not in code. */
+export const OLD_NODE_REFUSAL_MARK = 'запусти через run_tests';
 
 export default ru;

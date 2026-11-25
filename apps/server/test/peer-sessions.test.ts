@@ -234,6 +234,32 @@ describe("a worker's sessions to the company's data machines", () => {
     expect(sessions.state()).toEqual({ path: 'direct', directFails: false, refused: false });
   });
 
+  it('redials a relay whose visitor hung up on each connection until the far proxy exists, with no restart', async () => {
+    const stand = await standUp();
+    /* The visitor frpc's local port: the relay refuses what it asks for before the data machine registered its service,
+       and the visitor closes the connection; once the service is there, the port carries it to the machine. */
+    const visit = { open: false, accepted: 0 };
+    const server = net.createServer(socket => {
+      visit.accepted += 1;
+      socket.on('error', () => undefined);
+      if (!visit.open) return void socket.destroy();
+      const far = net.connect(stand.peerPort, '127.0.0.1');
+      far.on('error', () => socket.destroy());
+      socket.on('error', () => far.destroy());
+      socket.pipe(far).pipe(socket);
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    onTestFinished(() => void server.close());
+    const relayPort = (server.address() as AddressInfo).port;
+    const sessions = stand.sessionsWith({ connectMs: 500 });
+    sessions.use([stand.target({ addresses: [], peerPort: null, relayPort })]);
+    await until(() => visit.accepted >= 3);
+    expect(sessions.leader()).toBeNull();
+    visit.open = true;
+    await until(() => sessions.leader() !== null);
+    expect(sessions.leader()!.path).toBe('relay');
+  });
+
   it('trusts only the data machine it dialed', async () => {
     /* The certificate is the authority's, but of another machine than the one the view named. */
     const stand = await standUp();

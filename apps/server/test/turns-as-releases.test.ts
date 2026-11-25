@@ -90,7 +90,9 @@ describe('a result joins the open turn of its department as its head accepts it'
     const f = await readyInTurn();
     await f.db.execute(sql`update turns set start_commit = ${START} where id = ${f.turn.id}`);
     await expect(f.accept()).rejects.toMatchObject({ status: 409, message: expect.stringContaining(START) as unknown });
-    f.repo.holds[f.finalCommit]!.push(START);
+    /* A refusal of a pair of commits stays proved, so the turn branch goes on to a new head that holds the start commit. */
+    f.repo.heads[f.branch] = PAST;
+    f.repo.holds[PAST] = [f.finalCommit, START, ...f.repo.holds[f.finalCommit]!];
     expect((await f.accept()).task).toMatchObject({ status: 'done', turnId: f.turn.id });
   });
 

@@ -15,7 +15,7 @@ import {
   testParts,
 } from '../../db/schema.js';
 import { SERVER_KEY, isServerInstall } from '../nodes/nodes.js';
-import { hostIdOf } from './join.js';
+import { hostIdOf } from './join-proof.js';
 
 type HostConfig = Pick<Config, 'hostId' | 'machineId'>;
 type MachineRow = typeof machines.$inferSelect;

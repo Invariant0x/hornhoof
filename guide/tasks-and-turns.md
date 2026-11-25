@@ -13,12 +13,16 @@ The word has two meanings in Hornhoof.
 
 ## Where do tasks come from?
 
-People write to the orchestrator or to a department's head, and they lay the work out as tasks. Anyone whose access lists a department can also give it a task in the tracker. Work flows: a new task goes to its department's head at once, and nothing waits for a turn.
+People write to the orchestrator or to a department's head, and they lay the work out as tasks. Anyone whose access lists a department can also give it a task in the tracker. Work flows: a new task goes to its department's head at once, and nothing waits for a turn, unless every slot of a Development department is busy (see "What are slots?" below).
 
 A task runs in one of two ways:
 
 - In stages. Code work goes through the checks below: Architecture, Development, Review, Security and Tests.
 - Turnkey. A task given to a member of a sub-unit marked "Works turnkey" goes through no stages: that member does it alone from start to finish.
+
+## What are slots?
+
+A Development department runs its turn in slots: one for each developer, five at most, and each slot holds one task. A small addition to the same product joins a slot that is running instead of taking another. A new task that finds every slot busy waits in the department's queue for the next turn: nobody is woken for it, its card says "Waits for the next turn" (or the one after it, in batches of the slots), and the Turns and releases screen lists the queue by the turn each task waits for. When a release ends the turn, the turn that opens takes the queue in, in order, each task to the developer it was given to or to the head. A queued task you cancel leaves the queue; one made urgent goes past it at once. Urgent work takes no slot and waits for nothing. Work given to a named developer waits for that developer and never goes to another when they are busy. A department with no slot cap hands every task out at once, as before.
 
 ## What does the Tasks tab show?
 
@@ -183,12 +187,34 @@ The task's view lists its files.
 
 ## How much room do task files have?
 
-The files live in the database, so every copy of the database carries them.
+The files live in the company's file store, not in the database. Each file is kept sealed on as many of the company's machines as the CEO sets in Company settings, two by default, one copy to a machine, so losing one machine loses no file. The database and its backups keep only each file's name, size and hash.
 
-- One file can be up to 50 MB.
 - One task holds up to 500 MB of files.
-- The whole company holds up to 2 GB, or as many megabytes as `TASK_FILES_MB` in `.env` says.
+- The whole company holds up to 2 GB, or as many megabytes as `TASK_FILES_MB` in `.env` says. The same content counts once, however many tasks carry it.
 - The files of a turn go 30 days after it closes.
+- The files of a task outside any turn go 30 days after the task closes.
+- The logs and files of a test or work run go 30 days after the run ends.
+- A file that no task, message or run names any more leaves the machines a day later.
+
+## Which machines keep the files?
+
+Every machine of the company with a keeper gives the files an area of its disk, 10 GB unless its owner sets another in the machine's settings, or none. For each file the leading machine picks as many machines as the CEO asked for, or as many as keep files when there are fewer:
+
+- the leading machine first, when its area has room, as it reads the file at once;
+- then one off site, so a house lost to fire, theft or flood takes no file with it;
+- then the one with the most of its area free.
+
+A machine away for up to a day, as a laptop asleep, keeps its files and takes the new ones once it is back. A machine away for longer has its files copied to another one, and lets them go when it comes back. A machine whose area is lowered or set to none, or a lower number of copies, lets a file go only after the other machines keep it as many times as asked. With no room elsewhere the file stays where it is, and Company settings shows what waits.
+
+## How do files leave the database after an update from 0.43?
+
+After the update the server copies each file of the database into the store while it serves, checks each one there by its hash, and reads it from the store from then on. It deletes nothing by itself: the bytes stay in the database until the CEO says yes.
+
+- A file counts as copied once the machines picked for it keep it, as many as the CEO asked for, whether or not they are online at that minute.
+- Once every file on the server is copied, the server writes a reconciliation in its log: how many files, distinct contents and bytes, how many files are not on this server (a big file kept on another machine's disk, or one lost before), the size of the database, and a digest of the list of every file's id, sha256 and size.
+- The CEO, or the orchestrator for him, reads it with `GET /api/files/move` and says yes with `POST /api/files/move/approve` and that digest. Nobody else can.
+- Only then does the server clear the bytes of exactly the files on that list, each only while the database still finds them the bytes the store keeps. It then drops the old column, gives the database's room back with `VACUUM FULL`, and writes its size before and after.
+- Until then the two rules that came with the store wait too: the files of tasks outside any turn and of old runs stay. The files of turns closed 30 days ago go as before.
 
 A comment, message, report or reason that carries a file pasted as a long run of base64 or hex is refused. The refusal says how to put the file on the task instead.
 

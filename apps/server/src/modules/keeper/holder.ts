@@ -55,6 +55,7 @@ type Sent = { target: string; nonce: string; at: number; ids: Set<string> };
 type HolderKeeperOptions = {
   /* The keeper's own folder; the bundles lie in a folder of it. */
   dir: string;
+  bundles?: BundleStore;
   link: HolderLink;
   held: () => HeldCertificate | null;
   log: (line: string) => void;
@@ -87,7 +88,7 @@ export class HolderKeeper {
   private readonly sentTo = new Map<string, Sent>();
 
   constructor(private readonly opts: HolderKeeperOptions) {
-    this.bundles = new BundleStore(join(opts.dir, BUNDLES_DIR));
+    this.bundles = opts.bundles ?? new BundleStore(join(opts.dir, BUNDLES_DIR));
     this.leaderlessSince = this.clock();
   }
 
@@ -273,12 +274,18 @@ export class HolderKeeper {
     if (!held || !this.opts.link.leader()) return;
     const view = await this.view();
     if (!view) return;
+    /* A data machine keeps its own backups and fork bundles, never worker holder slots: it only sends what a restore wants. */
+    if (held.role === 'data') return this.sendWanted(view.want);
     if (!view.keeps) return this.bundles.keepOnly([]);
     for (const entry of view.hold) {
       if (!this.bundles.has(entry.id)) await this.fetch(entry, held);
     }
     this.letGo(view);
-    for (const id of view.want) await this.send(id);
+    await this.sendWanted(view.want);
+  }
+
+  private async sendWanted(want: string[]): Promise<void> {
+    for (const id of want) await this.send(id);
   }
 
   /* A bundle is taken only when it holds against the company's authority, and kept only when it is the very one the

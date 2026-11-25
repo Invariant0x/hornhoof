@@ -123,6 +123,7 @@ A language is a line in one registry and a file per text domain named by its id.
 2. Add the file of the language to each domain. Each has every text of the English one and the same shape, and a test fails for a text that is missing, extra or of another kind:
    - the screens: `apps/web/src/i18n/<id>.ts` (the source is `en.ts`; a phrase with a count uses `plural()` with the forms the language has, which `Intl.PluralRules` names: `zero`, `one`, `two`, `few`, `many`, `other`);
    - the words of the world engine and each pack on the web: `apps/web/src/world/pack-locales/<id>.ts` and `apps/web/src/world-packs/<pack>/locales/<id>.ts`, each English text a pack gives through `text()` being the key;
+   - the words of the static map viewer: `apps/web/src/world-packs/viewer-locales/<id>.ts`, with every key of `en.ts`;
    - what the server says in its own words: `apps/server/src/locales/<id>.ts`, and each world pack's name, skills and crew: `apps/server/src/modules/world/packs/locales/<pack>/<id>.ts`;
    - the names and descriptions of templates: `templates/locales/<id>.yaml`.
 3. A script that is not Latin or Cyrillic needs `apps/web/src/fonts/scripts/<Script>.css` (the ones for Han, Japanese, Korean, Devanagari and Arabic exist; put the font file in its rules when a release ships one). It loads only when a language written in that script is on.
