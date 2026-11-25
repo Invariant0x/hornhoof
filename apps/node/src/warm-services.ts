@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chownSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chownSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, matchesGlob, relative, resolve, sep } from 'node:path';
 import type { Command } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
@@ -59,19 +59,22 @@ function claim(path: string): boolean {
   return false;
 }
 
-/* The files of the build's inputs, by their path in the repository: a glob is read only below the folders before it. */
+/* The files of the build's inputs, by their path in the repository: a glob is read only below the folders before it, and
+   one that names a file with no pattern is that file. */
 function inputFiles(repository: string, globs: readonly string[]): string[] {
   const found = new Set<string>();
+  const take = (path: string) => {
+    const rel = relative(repository, path).split(sep).join('/');
+    if (globs.some(glob => matchesGlob(rel, glob))) found.add(rel);
+  };
   const walk = (dir: string) => {
     if (!existsSync(dir)) return;
+    if (!statSync(dir).isDirectory()) { take(dir); return; }
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.name === '.git' || entry.name === 'node_modules') continue;
       const path = join(dir, entry.name);
       if (entry.isDirectory()) walk(path);
-      else if (entry.isFile()) {
-        const rel = relative(repository, path).split(sep).join('/');
-        if (globs.some(glob => matchesGlob(rel, glob))) found.add(rel);
-      }
+      else if (entry.isFile()) take(path);
     }
   };
   for (const base of new Set(globs.map(glob => glob.split('/').filter((_p, i, all) => !all.slice(0, i + 1).some(part => /[*?[{]/.test(part))).join('/')))) walk(join(repository, base));

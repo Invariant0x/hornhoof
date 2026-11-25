@@ -132,6 +132,17 @@ describe('warm test services (#2091)', () => {
     expect(builds.every(digest => /^[0-9a-f]{64}$/.test(digest))).toBe(true);
   });
 
+  it('builds from an input named as a plain file, and again when that file changes', async () => {
+    const repo = repository(declaration({ build: { inputs: ['apps/server/drizzle/0001.sql', 'apps/server/missing.json'], command: fake('build', '{digest}') } }));
+    const m = machine();
+    await (await m.warm.pieceFor(repo.server, [...VITEST, 'test/a.test.ts'], 'lease-1', signal()))!.drop();
+    writeFileSync(join(repo.dir, 'apps/server/drizzle/0001.sql'), 'create table t();\n');
+    await (await m.warm.pieceFor(repo.server, [...VITEST, 'test/a.test.ts'], 'lease-2', signal()))!.drop();
+    const builds = m.lines('builds');
+    expect(builds).toHaveLength(2);
+    expect(builds[0]).not.toBe(builds[1]);
+  });
+
   it('starts the service again when it dies', async () => {
     const repo = repository(), m = machine();
     await m.warm.pieceFor(repo.server, [...VITEST], 'lease-1', signal());
