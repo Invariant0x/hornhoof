@@ -40,8 +40,8 @@ import { createTask } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import { readWorldLiveState } from './live-data.js';
 import { isAllowedCompanyTheme, worldPackForTheme } from './packs/index.js';
-
-const MAX_STORED_RELOCATIONS = 200;
+import { registerWorldRewardsRoutes } from './rewards-routes.js';
+import { MAX_STORED_RELOCATIONS, WORLD_LAYOUT_BYTES } from './stored-layout.js';
 
 function requireWorldCeo(me: Person): void {
   if (!me.isOwner || me.viaHead) {
@@ -128,6 +128,7 @@ async function restoreCompanyAgentNames(db: Ctx['db'], me: Person): Promise<Worl
 
 export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
+  registerWorldRewardsRoutes(app, ctx);
 
   /* Strictly read-only live world snapshot of the signed-in person's company. */
   app.get('/api/world/state', async req => {
@@ -272,7 +273,7 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /* Persists the generated/grown city layout into the isolated world_layouts table without touching work tables. */
-  app.put('/api/world/layout', async req => {
+  app.put('/api/world/layout', { bodyLimit: WORLD_LAYOUT_BYTES }, async req => {
     const me = await requirePerson(req, db);
     const body = WorldLayoutSaveSchema.parse(req.body);
     await db
@@ -384,10 +385,10 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
       taskDepartmentId = null;
     }
 
-    const title = `Перестроить ${body.buildingLabel}`.slice(0, 120);
-    const brief = `Принять приказ на перестройку "${body.buildingLabel}" с (${body.fromCol}, ${body.fromRow}) на (${body.toCol}, ${body.toRow}) и отчитаться.`.slice(0, 600);
+    const title = `Move ${body.buildingLabel}`.slice(0, 120);
+    const brief = `Accept the order to move "${body.buildingLabel}" from (${body.fromCol}, ${body.fromRow}) to (${body.toCol}, ${body.toRow}) and report.`.slice(0, 600);
     const taskBody = [
-      `God's Word relocation order / Приказ на перестройку здания.`,
+      `God's Word relocation order.`,
       `Building: ${body.buildingLabel} (${body.buildingId}, kind=${body.buildingKind})`,
       `Current tile: (${body.fromCol}, ${body.fromRow})`,
       `Target tile: (${body.toCol}, ${body.toRow})`,
@@ -403,6 +404,7 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
       assigneeAgentId,
       executor: false,
       small: true,
+      askedByPersonId: me.id,
     });
     await wakeAll(ctx, wakes);
 

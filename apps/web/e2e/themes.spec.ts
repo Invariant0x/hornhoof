@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
-import { LANGUAGES, type Language, type Messages } from '../src/i18n';
+import { say } from '@hornhoof/protocol';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../src/i18n';
 import { collectionText } from '../src/skins/collection';
 import { BUILTIN_SKINS, builtinSkin, type BuiltinSkinId } from '../src/skins/registry';
 import { COLOR_TOKENS, type Skin } from '../src/skins/roles';
@@ -30,9 +31,9 @@ const fontsOf = (choice: string) => {
   const { fonts } = builtinSkin(choice) ?? OWN;
   return `${fonts.display[0]} ${fonts.body[0]}`;
 };
-const nameOf = (words: Messages, language: Language, choice: string) => (builtinSkin(choice) ? words.skins.names[choice as BuiltinSkinId] : OWN.name[language]);
+const nameOf = (words: Messages, language: ShippedLanguage, choice: string) => (builtinSkin(choice) ? words.skins.names[choice as BuiltinSkinId] : say(OWN.name, language));
 
-async function messagesFor(locale: Language): Promise<Messages> {
+async function messagesFor(locale: ShippedLanguage): Promise<Messages> {
   const dictionary = await import(`../src/i18n/${locale}.ts`) as Record<string, Messages>;
   const messages = dictionary[locale];
   if (!messages) throw new Error(`No dictionary export for shipped locale ${locale}`);
@@ -40,7 +41,7 @@ async function messagesFor(locale: Language): Promise<Messages> {
 }
 
 /* Only the first page of a test starts from these; what the test changes later stays for the next page. */
-async function prepare(page: Page, language: Language, skin: string | null, own = true) {
+async function prepare(page: Page, language: ShippedLanguage, skin: string | null, own = true) {
   await serveApi(page);
   /* Keep CompanyLink above Themes static so its random-name check timer never shifts geometry mid-switch. */
   await page.route('**/api/link', route => route.fulfill({ json: { link: { name: 'acme', url: 'https://acme.hornhoof.org' }, domain: 'hornhoof.org' } }));
@@ -101,8 +102,8 @@ async function renderedLength(page: Page): Promise<number> {
 }
 
 /* The longest and the shortest shipped language on these screens, and a shipped right-to-left one once there is one. */
-async function chooseLanguages(page: Page): Promise<Language[]> {
-  const ranked: { id: Language; characters: number }[] = [];
+async function chooseLanguages(page: Page): Promise<ShippedLanguage[]> {
+  const ranked: { id: ShippedLanguage; characters: number }[] = [];
   for (const { id } of LANGUAGES) {
     const words = await messagesFor(id);
     await page.evaluate(language => localStorage.setItem('hh-lang', language), id);
@@ -221,7 +222,7 @@ async function lowercaseHeight(page: Page, font: string): Promise<number> {
 const skinCard = (dialog: Locator, name: string) => dialog.locator('.skin-card').filter({ has: dialog.page().getByRole('heading', { name, exact: true }) });
 
 /* Applies a skin with a click on its card and waits until the page, the card's state and the line under the heading say so. */
-async function pick(page: Page, dialog: Locator, words: Messages, language: Language, choice: string) {
+async function pick(page: Page, dialog: Locator, words: Messages, language: ShippedLanguage, choice: string) {
   const name = nameOf(words, language, choice);
   await dialog.getByRole('button', { name: `${words.skins.apply}: ${name}`, exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', choice);

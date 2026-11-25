@@ -1,7 +1,5 @@
 ---
 id: dev-api-design
-title: { en: "API and interface design", ru: "Проектирование API и интерфейсов" }
-description: { en: "Designs routes, messages and module interfaces that are hard to misuse.", ru: "Проектирует маршруты, сообщения и интерфейсы модулей, которыми трудно воспользоваться неправильно." }
 kind: checklist
 sources: [addyosmani/agent-skills skills/api-and-interface-design/SKILL.md, wshobson/agents plugins/backend-development/skills/api-design-principles/SKILL.md]
 ---

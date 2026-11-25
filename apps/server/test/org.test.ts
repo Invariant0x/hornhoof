@@ -54,10 +54,11 @@ describe('GET /api/org', () => {
     ]);
 
     const org = (await c.app.inject({ url: '/api/org', ...as(c.ceo) })).json();
+    /* An error that retries by itself is no failure while its retry waits; one that does not retry is. */
     const employees = org.departments.flatMap((d: { employees: { id: string }[] }) => d.employees);
-    expect(employees.find((a: { id: string }) => a.id === c.agent.id)).toMatchObject({ failure: { kind: 'cut', text: cut!.failure!.text, at: +at }, retry: { attempt: 1, max: 4, at: +at + 60000, kind: 'cut' } });
+    expect(employees.find((a: { id: string }) => a.id === c.agent.id)).toMatchObject({ failure: null, retry: { attempt: 1, max: 4, at: +at + 60000, kind: 'cut' } });
     expect(employees.find((a: { id: string }) => a.id === c.head.id)).toMatchObject({ failure: { kind: 'refused', text: refused!.failure!.text, at: +at }, retry: null });
-    expect(employees.find((a: { id: string }) => a.id === c.watcher.id)).toMatchObject({ failure: { kind: 'network', text: network!.failure!.text, at: +at }, retry: { attempt: 2, max: 4, at: +at + 120000, kind: 'network' } });
+    expect(employees.find((a: { id: string }) => a.id === c.watcher.id)).toMatchObject({ failure: null, retry: { attempt: 2, max: 4, at: +at + 120000, kind: 'network' } });
     expect(org.orchestrator).toMatchObject({ failure: null, retry: null });
   });
 

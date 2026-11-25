@@ -1,7 +1,5 @@
 ---
 id: orch-staff
-title: { en: "Staff a team", ru: "Подбирать и настраивать сотрудников" }
-description: { en: "Builds an authorized roster and adjusts employees to the work they are assigned.", ru: "Формирует согласованный состав и настраивает сотрудников под их назначение." }
 kind: procedure
 ---
 You can staff an authorized team and maintain its employees' assignments.

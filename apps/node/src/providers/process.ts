@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { closeSync, constants, fchownSync, fstatSync, lchownSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { isRootUser, type JobUser } from '../isolation.js';
@@ -31,18 +31,32 @@ type SpawnOptions = {
   onLine?: (line: string) => void;
   /* The built-in node runs each key's program as that key's user. */
   user?: JobUser | null;
+  /* What the program reads on its standard input, which then ends. Without it, the program reads nothing. */
+  input?: string;
 };
 
-/* Runs a program with no input, reads stdout line by line and stops the whole process group at the timeout or when the signal aborts. */
-export function runProgram({ bin, args, env, cwd, timeoutMs, signal, onLine, user }: SpawnOptions): Promise<Finished> {
+/* A program reads a pipe when it has input, and nothing otherwise. */
+const stdinFor = (input: string | undefined) => (input === undefined ? 'ignore' : 'pipe');
+
+/* Gives a program its input and ends it. A program that ends before it read all of it only ends the writing: its exit
+   tells how it went. */
+function feed(child: ChildProcess, input: string | undefined): void {
+  if (!child.stdin) return;
+  child.stdin.on('error', () => {});
+  child.stdin.end(input);
+}
+
+/* Runs a program, reads stdout line by line and stops the whole process group at the timeout or when the signal aborts. */
+export function runProgram({ bin, args, env, cwd, timeoutMs, signal, onLine, user, input }: SpawnOptions): Promise<Finished> {
   return new Promise(resolve => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(bin, args, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: true, uid: user?.uid, gid: user?.gid });
+      child = spawn(bin, args, { env, cwd, stdio: [stdinFor(input), 'pipe', 'pipe'], detached: true, uid: user?.uid, gid: user?.gid });
     } catch (err) {
       /* A program that cannot start as its user ends at once, as one that cannot be found does. */
       return resolve({ code: null, signal: null, at: new Date().toISOString(), output: err instanceof Error ? err.message : String(err), timedOut: false });
     }
+    feed(child, input);
     let output = '';
     let partial = '';
     let timedOut = false;

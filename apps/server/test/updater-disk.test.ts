@@ -215,6 +215,23 @@ const filterBy = (items, filters, isContainer = false) => items.filter(item => f
     process.stdout.write('Total reclaimed space: ' + reclaimed + '\\n');
     return;
   }
+  if (args[0] === 'image' && args[1] === 'prune') {
+    if (args.includes('-a') || args.includes('--all')) { process.exitCode = 2; return; }
+    let bytes = 0;
+    state.images = state.images.filter(img => {
+      const tags = (img.RepoTags || []).filter(t => t !== '<none>:<none>');
+      const digests = (img.RepoDigests || []).filter(d => d !== '<none>@<none>');
+      const inUse = state.containers.some(c => c.Image === img.Id);
+      if (tags.length === 0 && digests.length === 0 && !inUse) {
+        bytes += img.Size || 0;
+        return false;
+      }
+      return true;
+    });
+    save();
+    process.stdout.write('Total reclaimed space: ' + bytes + 'B\\n');
+    return;
+  }
   if (args[0] === 'cp') {
     const src = args[1];
     const dst = args[2];
@@ -454,10 +471,64 @@ describe('updater, Docker disk care', () => {
     expect(bigCache.readDelivered('c-node').parts.buildCache).toBe(2 * GIB);
     expect(bigCache.readDelivered('c-node').cleaned).toEqual([{ part: 'buildCache', bytes: 4 * GIB, at: expect.any(String) }]);
 
-    /* Disk below threshold (15 GiB < max(10%, 20 GiB)): prunes even though cache is 6 GiB. */
-    const lowDisk = dockerWorld({ ...base, buildCacheSize: '6GiB', diskTotalKb: 100 * 1024 * 1024, diskFreeKb: 15 * 1024 * 1024 });
+    /* Disk below threshold (15 GB < max(10%, 20 GB)): prunes all unused build cache without holding back recent cache. */
+    const lowDisk = dockerWorld({ ...base, buildCacheSize: '6GB', diskTotalKb: 100 * 1_000_000, diskFreeKb: 15 * 1_000_000 });
     expect((await runUpdaterStep(stand(), 'disk_care', lowDisk.env())).code).toBe(0);
-    expect(lowDisk.calls()).toContain('docker builder prune -f --filter until=72h');
+    expect(lowDisk.calls()).toContain('docker builder prune -f');
+  });
+
+  it('prunes dangling images and build cache on a machine short of space in decimal GB while never touching volumes, tagged images, or stopped containers', async () => {
+    const w = dockerWorld({
+      images: [
+        { Id: 'sha256:app2', Created: iso(-100), Size: 400 * MIB, RepoTags: [`${APP}:0.43.0`], RepoDigests: null },
+        { Id: 'sha256:app1', Created: iso(-200), Size: 380 * MIB, RepoTags: [`${APP}:0.42.0`], RepoDigests: null },
+        { Id: 'sha256:foreign-tagged', Created: iso(-5000), Size: 900 * MIB, RepoTags: ['postgres:17'], RepoDigests: ['postgres@sha256:1111'] },
+        { Id: 'sha256:dangling-unused', Created: iso(-600), Size: 650 * MIB, RepoTags: ['<none>:<none>'], RepoDigests: [] },
+        { Id: 'sha256:dangling-stopped-runner', Created: iso(-700), Size: 500 * MIB, RepoTags: [], RepoDigests: [] },
+      ],
+      containers: [
+        { Id: 'c-node', Name: '/hh-node', Image: 'sha256:app2', Created: iso(-100), SizeRw: 10 * MIB, State: { Running: true, Status: 'running' }, Config: { Labels: { 'hornhoof.subscription': 'p1' } }, Mounts: [{ Type: 'volume', Name: 'hh-node-data' }] },
+        { Id: 'c-stopped-runner', Name: '/runner-prev', Image: 'sha256:dangling-stopped-runner', Created: iso(-86_400 * 5), SizeRw: 120 * MIB, State: { Running: false, Status: 'exited' }, Config: { Labels: {} }, Mounts: [{ Type: 'volume', Name: 'runner-cache' }] },
+      ],
+      volumes: [
+        { Name: 'hh-node-data', CreatedAt: iso(-200_000), Labels: {}, Size: '66.1GB' },
+        { Name: 'runner-cache', CreatedAt: iso(-200_000), Labels: {}, Size: '9GB' },
+      ],
+      networks: [],
+      buildCacheSize: '800MB',
+      reclaimOnPrune: '800MB',
+      buildCacheAfterPrune: '0B',
+      diskTotalKb: Math.floor((126 * 1_000_000_000) / 1024),
+      diskFreeKb: Math.floor((18.5 * 1_000_000_000) / 1024),
+    });
+
+    expect((await runUpdaterStep(stand(), 'disk_care', w.env())).code).toBe(0);
+    expect(w.calls()).toContain('docker image prune -f --filter dangling=true');
+    expect(w.calls()).toContain('docker builder prune -f');
+    expect(w.calls().some(c => c.startsWith('docker volume rm') || c.startsWith('docker volume prune') || c.startsWith('docker container prune') || c.startsWith('docker system prune'))).toBe(false);
+    expect(w.state().images.map(i => i.Id).sort()).toEqual(['sha256:app1', 'sha256:app2', 'sha256:dangling-stopped-runner', 'sha256:foreign-tagged']);
+    expect(w.state().containers.map(c => c.Id).sort()).toEqual(['c-node', 'c-stopped-runner']);
+    expect(w.state().volumes.map(v => v.Name).sort()).toEqual(['hh-node-data', 'runner-cache']);
+    expect(w.readDelivered('c-node').cleaned).toEqual(
+      expect.arrayContaining([
+        { part: 'images', bytes: 650 * MIB, at: expect.any(String) },
+        { part: 'buildCache', bytes: 800_000_000, at: expect.any(String) },
+      ]),
+    );
+
+    /* 21 GB decimal free on a 126 GB disk is above the 20 GB decimal threshold (even though under 20 GiB = 21.47 GB), so neither dangling-image nor build-cache prune runs. */
+    const roomyDecimal = dockerWorld({
+      images: [{ Id: 'sha256:dangling-unused', Created: iso(-600), Size: 300 * MIB, RepoTags: ['<none>:<none>'], RepoDigests: [] }],
+      containers: [{ Id: 'c-node', Name: '/hh-node', Image: 'sha256:n', Created: iso(-100), SizeRw: 0, State: { Running: true, Status: 'running' }, Config: { Labels: { 'hornhoof.subscription': 'p1' } }, Mounts: [] }],
+      volumes: [],
+      networks: [],
+      buildCacheSize: '800MB',
+      reclaimOnPrune: '800MB',
+      diskTotalKb: Math.ceil((126 * 1_000_000_000) / 1024),
+      diskFreeKb: Math.ceil((21 * 1_000_000_000) / 1024),
+    });
+    expect((await runUpdaterStep(stand(), 'disk_care', roomyDecimal.env())).code).toBe(0);
+    expect(roomyDecimal.calls().some(c => c.startsWith('docker image prune') || c.startsWith('docker builder prune'))).toBe(false);
   });
 
   it('paces passes to at most once an hour and skips while an update is active', async () => {

@@ -150,4 +150,27 @@ describe('a store of bundles', () => {
     expect(await reasonOf(store.verify(b.id))).toBe('hash');
     expect(await reasonOf(store.verify(randomUUID()))).toBe('format');
   });
+
+  it('tidies an orphan head only when no writer holds its bundle', async () => {
+    const s = await sealer();
+    const dir = folder();
+    const store = new BundleStore(dir);
+    const kept = await s.seal(new Date());
+    await store.take(Readable.from([kept.whole]), s.check);
+    const [orphan, busy] = [randomUUID(), randomUUID()];
+    writeFileSync(join(dir, `${orphan}.head`), '{"manifest":"{}"}', { mode: 0o600 });
+    writeFileSync(join(dir, `${busy}.head`), '{"manifest":"{}"}', { mode: 0o600 });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const writing = store.alone(busy, () => gate);
+    store.tidy();
+    expect(readdirSync(dir).sort()).toEqual([`${busy}.head`, `${kept.id}.age`, `${kept.id}.head`].sort());
+    release();
+    await writing;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    store.tidy();
+    expect(readdirSync(dir).sort()).toEqual([`${kept.id}.age`, `${kept.id}.head`]);
+  });
 });

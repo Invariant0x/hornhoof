@@ -8,6 +8,10 @@ import { QUERY_MAX_MS } from './lease.js';
 /* The keeper's own way to the database: plain statements, one after another. */
 export type Sql = { query<R = Record<string, unknown>>(text: string, params?: unknown[]): Promise<{ rows: R[] }> };
 
+/* What a session that sets nothing itself commits under in this database, and where that comes from, as Postgres words
+   it: 'configuration file' for a postgresql.conf or postgresql.auto.conf, 'command line', 'database' or 'user'. */
+export type CommitSetting = { setting: string; source: string };
+
 /* The lease as the database holds it. The keeper alone writes it: the app and the agents only stand on it, through
    net.assert_lease, and have no right to these tables. */
 export type LeaseStore = {
@@ -22,6 +26,10 @@ export type LeaseStore = {
   endSessions(): Promise<number>;
   /* What keeps this machine from leading, a line each; none when every fence holds. */
   problems(): Promise<string[]>;
+  /* What a session that sets no commit setting of its own gets here. net.assert_lease lets a commit through only under on. */
+  commitSetting(): Promise<CommitSetting>;
+  /* Puts it right for the sessions there are and the ones to come, as the server's own file: ALTER SYSTEM and a reload. */
+  commitOn(): Promise<void>;
   /* How many rows older than a week it removed, of the journal, the sources and the kept answers of tool calls, while this
      machine keeps the data alone and nobody reads them. */
   prune(batch?: number): Promise<number>;
@@ -140,6 +148,8 @@ const PROBLEMS = `SELECT line FROM (
       WHERE current_setting('max_prepared_transactions') <> '0'
   ) found ORDER BY at, line`;
 
+const COMMIT_SETTING = `SELECT setting, source FROM pg_settings WHERE name = 'synchronous_commit'`;
+
 type ClosableSql = Sql & { close?(): Promise<void> };
 
 /* Operations' role is named after the database, which does not change under a connection; the orchestrator's sessions are the app's. */
@@ -182,18 +192,26 @@ async function checkOthersHoldData(bg: Sql, machineId: string): Promise<boolean 
   }
 }
 
-async function closeSqlPair(sql: ClosableSql, bg: ClosableSql): Promise<void> {
+async function closeSessions(sql: ClosableSql, bg: ClosableSql, plain?: ClosableSql): Promise<void> {
   try {
     await sql.close?.();
   } finally {
-    if (bg !== sql) await bg.close?.();
+    try {
+      if (bg !== sql) await bg.close?.();
+    } finally {
+      await plain?.close?.();
+    }
   }
 }
 
 const serverStatementTimeoutMs = (given: number | (() => number), currentMs: number): number =>
   Math.max(1, Math.ceil(typeof given === 'function' ? Math.max(currentMs, QUERY_MAX_MS) : currentMs));
 
-export function leaseStore(sql: ClosableSql, opts: { machineId: string; backgroundSql?: ClosableSql }): LeaseStore {
+/* plain: a session that sets nothing, for what a session gets of the database; without one the keeper's own session says,
+   which holds a commit setting of its own. It is closed after each look, since a session keeps the settings it opened with.
+   backgroundSql: a second session of the keeper for the checks and the pruning, so that they never hold up the renewal of
+   the lease on the first. */
+export function leaseStore(sql: ClosableSql, opts: { machineId: string; backgroundSql?: ClosableSql; plain?: ClosableSql }): LeaseStore {
   const bg = opts.backgroundSql ?? sql;
   const agentRoles = roleLookup();
   const endSessions = async (): Promise<number> => (await sql.query<{ ended: number }>(END_SESSIONS, [APP_NAME, await agentRoles(sql)])).rows[0]!.ended;
@@ -212,19 +230,31 @@ export function leaseStore(sql: ClosableSql, opts: { machineId: string; backgrou
     fence,
     endSessions,
     problems: async () => (await bg.query<{ line: string }>(PROBLEMS, [REFUSED_NAME_PATTERN, await agentRoles(bg), SOURCE_TABLES])).rows.map(row => row.line),
+    async commitSetting() {
+      try {
+        return (await (opts.plain ?? sql).query<CommitSetting>(COMMIT_SETTING)).rows[0]!;
+      } finally {
+        await opts.plain?.close?.();
+      }
+    },
+    async commitOn() {
+      await sql.query(`ALTER SYSTEM SET synchronous_commit = 'on'`);
+      await sql.query('SELECT pg_reload_conf()');
+    },
     prune: (batch = PRUNE_BATCH) => pruneJournal(bg, opts.machineId, batch),
     othersHoldData: () => checkOthersHoldData(bg, opts.machineId),
-    close: () => closeSqlPair(sql, bg),
+    close: () => closeSessions(sql, bg, opts.plain),
   };
 }
 
-/* One connection at a time under the keeper's name: each connect and each query has timeoutMs, and the Postgres session
-   also carries statement_timeout so a timed-out statement cancels on the server instead of lingering after drop().
-   One that fails or runs out drops its connection without waiting for it to end, so the next query opens a new one.
-   A timeout given as a function is read at each connect and each query, so it can follow what the disk measures.
-   A commit counts here once this machine wrote it (synchronous_commit local): the lease is a fact of this machine
-   alone. Queries run one after another, each waiting for the one before to settle. */
-export function keeperSql(url: string, opts: { timeoutMs?: number | (() => number) } = {}): Sql & { close(): Promise<void> } {
+/* One connection at a time under the keeper's name, with no statement timeout of the database's own: each connect and each
+   query has timeoutMs, and one that fails or runs out drops its connection without waiting for it to end, so the next
+   query opens a new one. A timeout given as a function is read at each connect and each query, so it can follow what
+   the disk measures. A commit counts here once this machine wrote it (synchronous_commit local): the lease is a fact
+   of this machine alone. Its Postgres session also carries statement_timeout, so a timed-out statement is cancelled on
+   the server instead of lingering after the drop. Queries run one after another, each waiting for the one before to
+   settle. plain: a session with no setting of its own, as any session left to the database's would be. */
+export function keeperSql(url: string, opts: { timeoutMs?: number | (() => number); plain?: boolean } = {}): Sql & { close(): Promise<void> } {
   const given = opts.timeoutMs ?? 2000;
   const timeoutMs = (): number => (typeof given === 'function' ? given() : given);
   let client: pg.Client | null = null;
@@ -240,7 +270,7 @@ export function keeperSql(url: string, opts: { timeoutMs?: number | (() => numbe
     const next = new pg.Client({
       connectionString: stripSettings(url),
       application_name: KEEPER_NAME,
-      options: `-c synchronous_commit=local -c statement_timeout=${serverStatementTimeoutMs(given, ms)}`,
+      ...(opts.plain ? {} : { options: `-c synchronous_commit=local -c statement_timeout=${serverStatementTimeoutMs(given, ms)}` }),
       connectionTimeoutMillis: ms,
     });
     keepErrors(next);
@@ -278,13 +308,18 @@ export const UNNAMED_MACHINE = 'unnamed';
 
 /* The lease is held in this machine's database, so without one there is none to hold. A machine without an id, as a
    company started from the compose file by hand is, still leads: under a name of its own, alone, and in no network.
-   Lease writes and background maintenance use separate connections so slow catalog checks or pruning cannot starve
+   Lease writes and background maintenance use separate connections, so slow catalog checks or pruning cannot starve
    ten-second lease renewals. */
-export function leaseOfMachine(config: { databaseUrl?: string | null; machineId: string | null }, log: (line: string) => void, open: (url: string) => ClosableSql = keeperSql): LeaseStore | null {
+export function leaseOfMachine(
+  config: { databaseUrl?: string | null; machineId: string | null },
+  log: (line: string) => void,
+  open: (url: string) => Sql & { close?(): Promise<void> } = keeperSql,
+  plain: (url: string) => Sql & { close?(): Promise<void> } = url => keeperSql(url, { plain: true, timeoutMs: 5000 }),
+): LeaseStore | null {
   if (!config.databaseUrl) {
     log('The keeper takes no lease: DATABASE_URL is not set.');
     return null;
   }
   if (!config.machineId) log('HORNHOOF_MACHINE_ID is not set, so this machine leads under a name of its own and joins no network. Run the install command to give it one.');
-  return leaseStore(open(config.databaseUrl), { machineId: config.machineId ?? UNNAMED_MACHINE, backgroundSql: open(config.databaseUrl) });
+  return leaseStore(open(config.databaseUrl), { machineId: config.machineId ?? UNNAMED_MACHINE, backgroundSql: open(config.databaseUrl), plain: plain(config.databaseUrl) });
 }

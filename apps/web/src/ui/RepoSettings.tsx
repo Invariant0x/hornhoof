@@ -22,6 +22,14 @@ function commandChange(typed: string, saved: string) {
   return command === saved ? {} : { fullTestCommand: command || null };
 }
 
+const savedWorkflow = (repository: Repository | null | undefined) => repository?.releaseWorkflow ?? '';
+
+/* Sent only when it changed; an empty field says there is none named. */
+function workflowChange(typed: string, saved: string) {
+  const path = typed.trim();
+  return path === saved ? {} : { releaseWorkflow: path || null };
+}
+
 function FullCommandLine({ command }: { command: string }) {
   const t = useT();
   return <small className="repo-command">{command ? t.dept.fullCommandIs(command) : t.dept.noFullCommand}</small>;
@@ -38,6 +46,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
   const [authorEmail, setAuthorEmail] = useState('');
   const [memory, setMemory] = useState('');
   const [fullCommand, setFullCommand] = useState('');
+  const [releaseWorkflow, setReleaseWorkflow] = useState('');
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
@@ -66,6 +75,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
     setAuthorEmail(repository?.author?.email ?? '');
     setMemory(repository?.testMemoryGb ? String(repository.testMemoryGb) : '');
     setFullCommand(savedCommand(repository));
+    setReleaseWorkflow(savedWorkflow(repository));
     setFailure(null);
     setEditing(true);
   }
@@ -77,7 +87,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
     /* Sent only when it changed; an empty field takes the default again. */
     const gb = memory.trim() ? Number(memory) : null;
     const testMemory = gb !== (repository?.testMemoryGb ?? null) ? { testMemoryGb: gb } : {};
-    const body = { url: url.trim(), branch: branch.trim() || 'main', ...(token.trim() ? { token: token.trim() } : {}), ...author, ...testMemory, ...commandChange(fullCommand, savedCommand(repository)) };
+    const body = { url: url.trim(), branch: branch.trim() || 'main', ...(token.trim() ? { token: token.trim() } : {}), ...author, ...testMemory, ...commandChange(fullCommand, savedCommand(repository)), ...workflowChange(releaseWorkflow, savedWorkflow(repository)) };
     void run(() => api.put(path, body));
   }
 
@@ -95,6 +105,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
         <Field label={t.dept.authorEmail}>{p => <input {...p} {...NOT_A_LOGIN} type="email" value={authorEmail} onChange={e => setAuthorEmail(e.target.value)} maxLength={200} autoComplete="off" />}</Field>
         <Field label={t.dept.testMemory} hint={t.dept.testMemoryHint}>{p => <input {...p} {...NOT_A_LOGIN} type="number" min={1} max={512} step={1} value={memory} onChange={e => setMemory(e.target.value)} autoComplete="off" />}</Field>
         <Field label={t.dept.fullCommand} hint={t.dept.fullCommandHint}>{p => <input {...p} {...NOT_A_LOGIN} value={fullCommand} onChange={e => setFullCommand(e.target.value)} maxLength={4000} autoComplete="off" />}</Field>
+        <Field label={t.dept.releaseWorkflow} hint={t.dept.releaseWorkflowHint}>{p => <input {...p} {...NOT_A_LOGIN} value={releaseWorkflow} onChange={e => setReleaseWorkflow(e.target.value)} maxLength={250} placeholder=".github/workflows/release.yml" autoComplete="off" />}</Field>
         <div className="form-foot">
           <button className="btn" type="submit" disabled={busy || !url.trim() || !authorName.trim() !== !authorEmail.trim()}>{t.common.save}</button>
           <button className="btn ghost" type="button" onClick={() => setEditing(false)}>{t.common.cancel}</button>
@@ -122,6 +133,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
       {repository.author && <small>{t.dept.commitsAs(repository.author.name, repository.author.email)}</small>}
       {repository.testMemoryGb !== undefined && <small>{t.dept.testMemoryIs(repository.testMemoryGb)}</small>}
       <FullCommandLine command={savedCommand(repository)} />
+      <small className="repo-command">{savedWorkflow(repository) ? t.dept.releaseWorkflowIs(savedWorkflow(repository)) : t.dept.noReleaseWorkflow}</small>
       {asking ? (
         <div className="repo-actions">
           <span>{t.dept.removeAsk}</span>

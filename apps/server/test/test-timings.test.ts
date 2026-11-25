@@ -7,6 +7,7 @@ import { developmentStages } from './templates-once.js';
 import { pipelineReport } from '../src/modules/tasks/pipeline-report.js';
 import { keepTimings, timingsOfLog } from '../src/modules/testruns/timings.js';
 import { setUpCompany, testApp } from './helpers.js';
+import { looseFiles, stored } from './files-fixture.js';
 
 const OLD_LOG = `$ git clone --branch task-299 https://github.com/acme/shop
 At a490ff989e491ca255a8aa6f64de9c16754ead7f.
@@ -83,7 +84,7 @@ async function runOf() {
     const [part] = await db.insert(testParts).values({ companyId, runId: row!.id, part: 1, status }).returning();
     if (log !== null) {
       const bytes = Buffer.from(log);
-      await db.insert(attachments).values({ companyId, jobId: job!.id, agentId: bruno!.id, taskId: task!.id, name: `${kind}-${number}-1.log`, mediaType: 'text/plain', bytes, size: bytes.length });
+      await db.insert(attachments).values({ companyId, jobId: job!.id, agentId: bruno!.id, taskId: task!.id, name: `${kind}-${number}-1.log`, mediaType: 'text/plain', sha256: await stored(db, bytes), size: bytes.length });
     }
     return part!;
   };
@@ -97,13 +98,13 @@ describe('keeping what the logs of a turn said', () => {
     const { db, companyId, taskId, run } = await runOf();
     const told = await run(1, 'tests', file('test/a.test.ts', 100));
     const silent = await run(2, 'tests', 'cargo test');
-    await keepTimings(db, companyId, [taskId]);
+    await keepTimings(db, companyId, [taskId], looseFiles());
     const [kept] = await db.select().from(testPartTimings).where(eq(testPartTimings.partId, told.id));
     expect(kept!.files.map(f => f.file)).toEqual(['test/a.test.ts']);
     expect((await db.select().from(testPartTimings).where(eq(testPartTimings.partId, silent.id)))[0]!.files).toEqual([]);
 
-    await db.update(attachments).set({ bytes: Buffer.from(file('test/changed.test.ts', 1)) });
-    await keepTimings(db, companyId, [taskId]);
+    await db.update(attachments).set({ sha256: await stored(db, file('test/changed.test.ts', 1)) });
+    await keepTimings(db, companyId, [taskId], looseFiles());
     expect((await db.select().from(testPartTimings).where(eq(testPartTimings.partId, told.id)))[0]!.files.map(f => f.file)).toEqual(['test/a.test.ts']);
   });
 
@@ -112,14 +113,14 @@ describe('keeping what the logs of a turn said', () => {
     await run(1, 'work', file('test/a.test.ts', 100));
     await run(2, 'tests', file('test/b.test.ts', 100), 'running');
     await run(3, 'tests', null);
-    await keepTimings(db, companyId, [taskId]);
+    await keepTimings(db, companyId, [taskId], looseFiles());
     expect(await db.select().from(testPartTimings)).toEqual([]);
   });
 
   it('shows the turn its test times, by package and file, slowest first', async () => {
     const { db, companyId, run } = await runOf();
     await run(1, 'tests', [file('test/a.test.ts', 100), file('test/b.test.ts', 300), timingLine({ kind: 'package', package: 'apps/server', tests: 40, medianTestMs: 2, slowerThanMedian: 19 })].join('\n'));
-    const report = await pipelineReport(db, companyId, 7);
+    const report = await pipelineReport(db, companyId, 7, undefined, looseFiles());
     const dev = report.departments[0]!;
     const value = (key: string) => dev.rows.find(r => r.key === key)?.value;
     expect(value('tests.total')).toBe(0.4);
@@ -137,7 +138,7 @@ describe('keeping what the logs of a turn said', () => {
   it('names the files over 30 s and the tests over 1 s, also for a turn kept before such lists', async () => {
     const { db, companyId, run } = await runOf();
     await run(1, 'tests', [file('test/a.test.ts', 100), file('test/b.test.ts', 40_000)].join('\n'));
-    const dev = (await pipelineReport(db, companyId, 7)).departments[0]!;
+    const dev = (await pipelineReport(db, companyId, 7, undefined, looseFiles())).departments[0]!;
     expect(dev.tests.overBudgetFiles.map(f => [f.file, f.totalMs])).toEqual([['test/b.test.ts', 40_000]]);
     expect(dev.tests.overBudgetTests).toEqual([{ package: 'apps/server', file: 'test/b.test.ts', name: 'slow in test/b.test.ts', ms: 20_000 }]);
 
@@ -147,7 +148,7 @@ describe('keeping what the logs of a turn said', () => {
       delete d.tests.overBudgetTests;
     }
     await db.update(turnSnapshots).set({ facts: kept!.facts });
-    const older = (await pipelineReport(db, companyId, 7)).departments[0]!;
+    const older = (await pipelineReport(db, companyId, 7, undefined, looseFiles())).departments[0]!;
     expect(older.tests.overBudgetFiles.map(f => f.file)).toEqual(['test/b.test.ts']);
     expect(older.tests.overBudgetTests.map(t => t.name)).toEqual(['slow in test/b.test.ts']);
   });

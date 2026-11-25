@@ -227,4 +227,38 @@ describe('Stage 5 residents, role behaviors, 7 live states, wake cooldown and 15
     stepResidentSimulation(sim, 0.2);
     expect(walker.walkPhase).toBeCloseTo(phaseStationary, 6);
   });
+
+  /* #1983: masons carry blocks to the site and lay them there; on the way home they carry nothing. */
+  it('lays the stone at the work site, not at home, and leaves home with the next one', () => {
+    const live = createHornhoofLiveFixture();
+    const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: live.company.seed, mapSize: 150 });
+    const synced = syncLiveSnapshotToCity(EGYPT_WORLD_PACK, map, live);
+    const sim = createResidentSimulation(EGYPT_WORLD_PACK, synced.city, live);
+    const builders = sim.residents.filter(r => r.archetype === 'builder' && r.liveState === 'working');
+    expect(builders.length).toBeGreaterThanOrEqual(4);
+    const near = (r: (typeof builders)[number], t: { col: number; row: number }) => Math.hypot(r.col - t.col, r.row - t.row);
+    let laidAtSite = 0;
+    let waitedAtHome = 0;
+    /* Only the pauses at the end of a walk count; a resident may start mid-route with a pause of its own. */
+    const walked = new Set<string>();
+    for (let tick = 0; tick < 1600; tick++) {
+      stepResidentSimulation(sim, 0.1);
+      for (const b of builders) {
+        if (b.actionTimer <= 0) walked.add(b.id);
+        if (b.actionTimer <= 0 || !walked.has(b.id)) continue;
+        const atSite = near(b, b.workTile) < near(b, b.homeTile);
+        if (atSite) {
+          expect(b.pose, `${b.name} at the site`).toBe('building');
+          expect(b.carrying, `${b.name} lays the stone it brought`).toBe('none');
+          laidAtSite++;
+        } else {
+          expect(b.pose, `${b.name} at home`).toBe('carrying_stone');
+          expect(b.carrying).toBe('stone');
+          waitedAtHome++;
+        }
+      }
+    }
+    expect(laidAtSite).toBeGreaterThan(0);
+    expect(waitedAtHome).toBeGreaterThan(0);
+  });
 });

@@ -2,8 +2,6 @@
 id: VID-GEN
 department: video_production
 kind: member
-title: { en: "Shot operator", ru: "Оператор съемки и создания кадров" }
-description: { en: "Makes or captures takes and handles camera and light when assigned.", ru: "Снимает или создает кадры и отвечает за камеру и свет, если это поручено." }
 tier: standard
 effort: high
 perProduct: false
