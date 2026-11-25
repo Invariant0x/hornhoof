@@ -753,9 +753,9 @@ describe('Machines', () => {
       { ...MACHINES[0]!, id: 'g3', hostname: 'late-link', data: held({ number: 4, copy: { line: 'stopped', why: 'path_late', attempts: 0, since: '2026-11-24T19:30:00.000Z' } }) },
     ]);
     const slow = await openCard('weak-link');
-    expect(within(slow).getByText('Копия: не делается: связь этой машины с сервером компании слишком медленная для неё')).toBeInTheDocument();
+    expect(within(slow).getByText('Копия: не делается: связь этой машины с сервером компании слишком медленная для нее')).toBeInTheDocument();
     const late = await openCard('late-link');
-    expect(within(late).getByText('Копия: не делается: связь этой машины с сервером компании отвечает слишком поздно для неё')).toBeInTheDocument();
+    expect(within(late).getByText('Копия: не делается: связь этой машины с сервером компании отвечает слишком поздно для нее')).toBeInTheDocument();
   });
 
   const names = () => screen.getAllByRole('button', { name: /^Open the card of / }).map(button => button.getAttribute('aria-label')!.replace('Open the card of ', ''));
