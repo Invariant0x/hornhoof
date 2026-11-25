@@ -322,6 +322,7 @@ type MachineControls = {
   cancelAdd: (machineId: string, id: string) => unknown;
   lend: (machine: MachineView, value: boolean) => unknown;
   keepBackups: (machine: MachineView, value: boolean) => unknown;
+  setArea: (id: string, bytes: number | null) => unknown;
   disconnect: (machine: MachineView) => unknown;
   refresh: () => Promise<void>;
   fail: (err: unknown) => void;
@@ -348,6 +349,39 @@ function OwnerSettings({ machine, editable, onLend, onKeep }: { machine: Machine
     items.push([t.backups.title, <>{keeps}{(machine.heldBackups ?? 0) > 0 && <> <span className="muted">{t.machines.backupsHeld(machine.heldBackups ?? 0)}</span></>}</>]);
   }
   return <Facts items={items} />;
+}
+
+const GIB = 1024 ** 3;
+/* The area a machine gives the company's files unless its owner set another, as the server's files/area.ts has it. */
+const DEFAULT_AREA = 10 * GIB;
+const AREAS = [5, 10, 20, 50, 100, 200, 500].map(n => n * GIB);
+
+/* The area of the machine's disk the company's files may take, what they take there and what that disk has free. Its
+   owner, or someone who sees the whole company, sets it on a computer someone joined; the CEO, on the server's own. */
+function FilesArea({ row, editable, controls }: { row: MachineRow; editable: boolean; controls: MachineControls }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const store = row.fileStore;
+  if (!store) return null;
+  const gb = (bytes: number) => gigabytes(language, bytes);
+  const sizes = [...new Set([...AREAS, ...(store.limitBytes ? [store.limitBytes] : [])])].sort((a, b) => a - b);
+  const room = editable ? (
+    <div className="select-wrap">
+      <select className="lang-select" aria-label={t.machines.filesAreaLabel(row.hostname)} value={store.limitBytes === null ? 'default' : String(store.limitBytes)}
+        onChange={e => controls.setArea(store.id, e.target.value === 'default' ? null : Number(e.target.value))}>
+        <option value="default">{t.machines.filesAreaDefault(gb(DEFAULT_AREA))}</option>
+        <option value="0">{t.machines.filesAreaNone}</option>
+        {sizes.map(bytes => <option key={bytes} value={String(bytes)}>{t.machines.filesAreaSize(gb(bytes))}</option>)}
+      </select>
+    </div>
+  ) : <span>{store.areaBytes === 0 ? t.machines.filesAreaNone : t.machines.filesAreaSize(gb(store.areaBytes))}</span>;
+  const items: [string, React.ReactNode][] = [[t.machines.filesAreaRoom, room], [t.machines.filesAreaTake, <bdi key="take">{t.machines.gbOf(gb(store.usedBytes), gb(store.areaBytes))}</bdi>]];
+  if (store.diskFree !== null) items.push([t.machines.filesAreaFree, <bdi key="free">{t.machines.filesAreaSize(gb(store.diskFree))}</bdi>]);
+  return (
+    <CardBlock title={t.machines.filesArea}>
+      <Facts items={items} />
+    </CardBlock>
+  );
 }
 
 function PlanPicker({ machine, addable, shown, picking, controls }: { machine: MachineView; addable: SubView[]; shown: ActiveCommand | null; picking: boolean; controls: MachineControls }) {
@@ -756,6 +790,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
         <ServerBlock row={row} me={me} order={order} refresh={controls.refresh} />
         <SystemBlock row={row} editable={editable} controls={controls} />
         {m && <OwnerBlock machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking || core)} controls={controls} />}
+        <FilesArea row={row} editable={row.fileStore?.id === m?.id ? editable : me.person.isOwner} controls={controls} />
       </div>
       {m && <MachineConnections key={m.id} id={m.id} hostname={m.hostname} online={row.online} />}
     </CardFrame>
@@ -904,6 +939,14 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       setMachines(list => list?.map(x => (x.id === m.id ? { ...x, keepsBackups } : x)) ?? null);
     });
 
+  /* The area is set on the row the card names, which for the computer the server runs on is the server's own; the list is
+     read again, as the server says what the setting gives. */
+  const setArea = (id: string, fileStoreLimitBytes: number | null) =>
+    run(async () => {
+      await api.patch(`/api/machines/${id}`, { fileStoreLimitBytes });
+      await load();
+    });
+
   const disconnect = (m: MachineView) =>
     run(async () => {
       setConfirm(null);
@@ -958,7 +1001,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           search={search}
           filters={machineFilters(t)}
           card={row => <MachineDetails row={row} subs={subs} me={me} now={now} order={{ shown: priority, last: Math.max(1, ...rows.map(one => placeOf(one) ?? 0)), moving }} controls={{
-            picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, disconnect, refresh: load, fail: setFailure,
+            picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, setArea, disconnect, refresh: load, fail: setFailure,
           }} />}
         />
       )} />

@@ -187,22 +187,34 @@ The task's view lists its files.
 
 ## How much room do task files have?
 
-The files live in the company's file store on the server's disk, in its `FILES_DIR` volume, not in the database. Each file is sealed and named by its sha256, and the database keeps only what describes it, so no copy of the database and no backup grows with the files.
+The files live in the company's file store, not in the database. Each file is kept sealed on as many of the company's machines as the CEO sets in Company settings, two by default, one copy to a machine, so losing one machine loses no file. The database and its backups keep only each file's name, size and hash.
 
 - One task holds up to 500 MB of files.
 - The whole company holds up to 2 GB, or as many megabytes as `TASK_FILES_MB` in `.env` says. The same content counts once, however many tasks carry it.
 - The files of a turn go 30 days after it closes.
 - The files of a task outside any turn go 30 days after the task closes.
-- A file that no task or message names any more leaves the store a day later.
+- The logs and files of a test or work run go 30 days after the run ends.
+- A file that no task, message or run names any more leaves the machines a day later.
+
+## Which machines keep the files?
+
+Every machine of the company with a keeper gives the files an area of its disk, 10 GB unless its owner sets another in the machine's settings, or none. For each file the leading machine picks as many machines as the CEO asked for, or as many as keep files when there are fewer:
+
+- the leading machine first, when its area has room, as it reads the file at once;
+- then one off site, so a house lost to fire, theft or flood takes no file with it;
+- then the one with the most of its area free.
+
+A machine away for up to a day, as a laptop asleep, keeps its files and takes the new ones once it is back. A machine away for longer has its files copied to another one, and lets them go when it comes back. A machine whose area is lowered or set to none, or a lower number of copies, lets a file go only after the other machines keep it as many times as asked. With no room elsewhere the file stays where it is, and Company settings shows what waits.
 
 ## How do files leave the database after an update from 0.43?
 
 After the update the server copies each file of the database into the store while it serves, checks each one there by its hash, and reads it from the store from then on. It deletes nothing by itself: the bytes stay in the database until the CEO says yes.
 
-- Once every file on the server is copied, the server writes a reconciliation in its log: how many files, distinct contents and bytes, how many files are not on this server (a big file lost before), the size of the database, and the digest of the list.
+- A file counts as copied once the machines picked for it keep it, as many as the CEO asked for, whether or not they are online at that minute.
+- Once every file on the server is copied, the server writes a reconciliation in its log: how many files, distinct contents and bytes, how many files are not on this server (a big file kept on another machine's disk, or one lost before), the size of the database, and a digest of the list of every file's id, sha256 and size.
 - The CEO, or the orchestrator for him, reads it with `GET /api/files/move` and says yes with `POST /api/files/move/approve` and that digest. Nobody else can.
 - Only then does the server clear the bytes of exactly the files on that list, each only while the database still finds them the bytes the store keeps. It then drops the old column, gives the database's room back with `VACUUM FULL`, and writes its size before and after.
-- Until then the files of tasks outside any turn stay. The files of turns closed 30 days ago go as before.
+- Until then the two rules that came with the store wait too: the files of tasks outside any turn and of old runs stay. The files of turns closed 30 days ago go as before.
 
 A comment, message, report or reason that carries a file pasted as a long run of base64 or hex is refused. The refusal says how to put the file on the task instead.
 

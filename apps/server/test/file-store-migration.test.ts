@@ -95,8 +95,7 @@ describe('the files of an installation from before the store', () => {
 
     /* The app stops right after it stored a file and before its row gave up the bytes. */
     class Stopping extends Files {
-      override async put(...args: Parameters<Files['put']>): ReturnType<Files['put']> {
-        await super.put(...args);
+      override async copiesStand(): Promise<boolean> {
         throw new Error('the app stopped');
       }
     }
@@ -107,13 +106,12 @@ describe('the files of an installation from before the store', () => {
     const changed = Buffer.from('changed under the mover');
     let changedOnce = false;
     class Changing extends Files {
-      override async put(...args: Parameters<Files['put']>): ReturnType<Files['put']> {
-        const kept = await super.put(...args);
-        if (!changedOnce && kept.sha256 === sha(old[6]!.bytes)) {
+      override async copiesStand(on: FilesDb, sha256: string): Promise<boolean> {
+        if (!changedOnce && sha256 === sha(old[6]!.bytes)) {
           changedOnce = true;
-          await args[0].execute(sql`UPDATE attachments SET bytes = ${changed}, size = ${changed.length} WHERE id = ${old[6]!.id}`);
+          await on.execute(sql`UPDATE attachments SET bytes = ${changed}, size = ${changed.length} WHERE id = ${old[6]!.id}`);
         }
-        return kept;
+        return super.copiesStand(on, sha256);
       }
     }
     /* Started again, it moves in rounds of a few rows: a clock that moves on with every look ends each round early. */
@@ -167,7 +165,7 @@ describe('the files of an installation from before the store', () => {
     /* Its disk file goes only with the CEO's yes. */
     expect(existsSync(join(filesDir, elsewhere.id))).toBe(true);
     await approveAll(db);
-    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, cleared: 1, finished: true });
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 0, cleared: 1, finished: true });
     expect(existsSync(join(filesDir, elsewhere.id))).toBe(false);
     expect((await fileBytes(ctx, elsewhere.id)).equals(elsewhere.bytes)).toBe(true);
   });
@@ -175,31 +173,47 @@ describe('the files of an installation from before the store', () => {
 
 const withBytes = async (db: FilesDb) => rowsOf<{ n: number }>(await db.execute(sql`SELECT count(*)::int AS n FROM attachments WHERE bytes IS NOT NULL`))[0]!.n;
 const nameOf = async (db: FilesDb, id: string) => rowsOf<{ sha256: string | null }>(await db.execute(sql`SELECT sha256 FROM attachments WHERE id = ${id}`))[0]!.sha256;
+/* Another machine the company has, which keeps its files and keeps none of them yet: the store picks it for each file
+   the mover stores. */
+const holder = async (db: FilesDb) => {
+  const [person] = rowsOf<{ id: string }>(await db.execute(sql`INSERT INTO people (company_id, name, email, status, scope_kind) VALUES (${COMPANY}, 'Owner', 'owner@example.com', 'active', 'company') RETURNING id`));
+  const [machine] = rowsOf<{ id: string }>(
+    await db.execute(sql`INSERT INTO machines (company_id, person_id, machine_key, hostname, role, network_id, report_at)
+      VALUES (${COMPANY}, ${person!.id}, 'other-key', 'other', 'worker', 'other-net', now()) RETURNING id`),
+  );
+  return { keeps: (sha256: string) => db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id, verified) VALUES (${sha256}, ${machine!.id}, true)`) };
+};
+
 describe('the mover', () => {
   it('leaves the bytes in Postgres while the server has no FILES_DIR to keep them in, and says so once', async () => {
     const file: Old = { id: randomUUID(), bytes: randomBytes(5000) };
     const { db } = await upgraded([file], folder());
     const config = { secret: Buffer.from(TEST_SECRET, 'base64') } as Config;
     const files = new Files(config);
-    expect(await moveOldFiles({ db, config, files })).toEqual({ moved: 0, finished: false, stays: 'no_files_dir' });
-    expect(await moveOldFiles({ db, config, files })).toEqual({ moved: 0, finished: false });
+    expect(await moveOldFiles({ db, config, files })).toEqual({ moved: 0, waiting: 0, finished: false, stays: 'no_files_dir' });
+    expect(await moveOldFiles({ db, config, files })).toEqual({ moved: 0, waiting: 0, finished: false });
     expect([await withBytes(db), await columnsOf(db), await nameOf(db, file.id)]).toEqual([1, ['bytes', 'sha256'], null]);
     expect((await fileBytes({ db, config, files }, file.id)).equals(file.bytes)).toBe(true);
   });
 
-  it('names each row by its stored file once the copy opens to its bytes, and clears them only after the yes', async () => {
+  it('names no row by its stored file until a second machine keeps the file, and then each as its file is kept', async () => {
     const filesDir = folder();
     const [one, two]: Old[] = [{ id: randomUUID(), bytes: randomBytes(3000) }, { id: randomUUID(), bytes: randomBytes(4000) }];
     const { db } = await upgraded([one!, two!], filesDir);
     const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
     const ctx = { db, config, files: new Files(config) };
-    expect(await moveOldFiles(ctx)).toMatchObject({ moved: 2, finished: false, ready: { files: 2 } });
+    const other = await holder(db);
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 2, finished: false });
+    expect(await withBytes(db)).toBe(2);
     expect((await ctx.files.store().list()).map(file => file.sha256).sort()).toEqual([sha(one!.bytes), sha(two!.bytes)].sort());
-    expect([await nameOf(db, one!.id), await nameOf(db, two!.id), await withBytes(db)]).toEqual([sha(one!.bytes), sha(two!.bytes), 2]);
-    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, finished: false });
+    await other.keeps(sha(one!.bytes));
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 1, waiting: 1, finished: false });
+    expect([await nameOf(db, one!.id), await nameOf(db, two!.id), await withBytes(db)]).toEqual([sha(one!.bytes), null, 2]);
+    await other.keeps(sha(two!.bytes));
+    expect(await moveOldFiles(ctx)).toMatchObject({ moved: 1, waiting: 0, finished: false, ready: { files: 2 } });
     expect(await withBytes(db)).toBe(2);
     await approveAll(db);
-    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, cleared: 2, finished: true, roomBack: { before: expect.any(Number), after: expect.any(Number) } });
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 0, cleared: 2, finished: true, roomBack: { before: expect.any(Number), after: expect.any(Number) } });
     expect(await columnsOf(db)).toEqual(['sha256']);
     for (const file of [one!, two!]) expect((await fileBytes(ctx, file.id)).equals(file.bytes)).toBe(true);
   });
@@ -227,7 +241,7 @@ describe('the mover', () => {
         return kept;
       }
     }
-    expect(await moveOldFiles({ db, config, files: new Spoiling(config) })).toEqual({ moved: 1, finished: false });
+    expect(await moveOldFiles({ db, config, files: new Spoiling(config) })).toEqual({ moved: 1, waiting: 0, finished: false });
     expect([await nameOf(db, swapped!.id), await nameOf(db, broken!.id), await nameOf(db, fine!.id), await withBytes(db)]).toEqual([null, null, sha(fine!.bytes), 3]);
     for (const file of [swapped!, broken!]) expect((await fileBytes({ db, config, files: new Files(config) }, file.id)).equals(file.bytes)).toBe(true);
   });
@@ -239,31 +253,53 @@ describe('the mover', () => {
     writeFileSync(join(filesDir, big.id), big.bytes.subarray(0, 4000));
     const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
     const ctx = { db, config, files: new Files(config) };
-    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, finished: true });
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 0, finished: true });
     expect([await nameOf(db, big.id), existsSync(join(filesDir, big.id))]).toEqual([null, true]);
     writeFileSync(join(filesDir, big.id), big.bytes);
     const whole = await moveOldFiles(ctx);
-    expect(whole).toMatchObject({ moved: 1, finished: true, ready: { files: 1, bytes: big.bytes.length } });
+    expect(whole).toMatchObject({ moved: 1, waiting: 0, finished: true, ready: { files: 1, bytes: big.bytes.length } });
     expect([await nameOf(db, big.id), existsSync(join(filesDir, big.id))]).toEqual([sha(big.bytes), true]);
     await approveMove(db, whole.ready!.digest, 'person:ceo');
-    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, cleared: 1, finished: true });
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 0, cleared: 1, finished: true });
     expect(existsSync(join(filesDir, big.id))).toBe(false);
   });
 
-  it('names no row by a content the store is letting go', async () => {
+  it('keeps what it stored for a second machine that is away for more than a day, and moves it once that machine has it', async () => {
+    const filesDir = folder();
+    const file: Old = { id: randomUUID(), bytes: randomBytes(6000) };
+    const { db } = await upgraded([file], filesDir);
+    const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
+    const ctx = { db, config, files: new Files(config) };
+    const other = await holder(db);
+    const start = Date.now();
+    expect(await moveOldFiles(ctx)).toMatchObject({ moved: 0, waiting: 1 });
+    /* The store's round and the mover's go on each minute while the other machine is away. */
+    for (const at of [start, start + UNUSED_MS / 2, start + UNUSED_MS + 60_000, start + 2 * UNUSED_MS]) {
+      await markUnused(db, new Date(at));
+      await dropDue(ctx, new Date(at));
+      expect(await moveOldFiles(ctx)).toMatchObject({ moved: 0, waiting: 1 });
+    }
+    expect(ctx.files.store().has(sha(file.bytes))).toBe(true);
+    await other.keeps(sha(file.bytes));
+    expect(await moveOldFiles(ctx)).toMatchObject({ moved: 1, waiting: 0, finished: false, ready: { files: 1 } });
+    await approveAll(db);
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 0, cleared: 1, finished: true, roomBack: { before: expect.any(Number), after: expect.any(Number) } });
+    expect((await fileBytes(ctx, file.id)).equals(file.bytes)).toBe(true);
+  });
+
+  it('names no row by a content the store is letting go, though a second machine kept it', async () => {
     const filesDir = folder();
     const file: Old = { id: randomUUID(), bytes: randomBytes(2000) };
     const { db } = await upgraded([file], filesDir);
     const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
-    /* The store's round gives the content its time to go just after the mover stored it. */
+    /* The store's round gives the content its time to go just as the second machine says it keeps it. */
     class Going extends Files {
-      override async put(...args: Parameters<Files['put']>): ReturnType<Files['put']> {
-        const kept = await super.put(...args);
-        await args[0].execute(sql`UPDATE net.files SET drop_at = now() WHERE sha256 = ${kept.sha256}`);
-        return kept;
+      override async copiesStand(on: FilesDb, sha256: string): Promise<boolean> {
+        await on.execute(sql`UPDATE net.files SET drop_at = now() WHERE sha256 = ${sha256}`);
+        return true;
       }
     }
-    expect(await moveOldFiles({ db, config, files: new Going(config) })).toEqual({ moved: 0, finished: false });
+    expect(await moveOldFiles({ db, config, files: new Going(config) })).toEqual({ moved: 0, waiting: 0, finished: false });
     expect([await withBytes(db), await nameOf(db, file.id)]).toEqual([1, null]);
   });
 
@@ -333,7 +369,7 @@ describe('the bytes of the moved files', () => {
 
     const first = await moveOldFiles(ctx);
     const ready = { digest: digestOf(here), files: 5, contents: 4, bytes: 760_000, notHere: 1, databaseBytes: expect.any(Number) };
-    expect(first).toEqual({ moved: 5, finished: false, ready });
+    expect(first).toEqual({ moved: 5, waiting: 0, finished: false, ready });
     expect(first.ready!.databaseBytes).toBeGreaterThan(0);
     /* Every file is read from the store now, and nothing of the old ones went: not a byte, not the column, not the disk file. */
     for (const file of here) {
@@ -342,7 +378,7 @@ describe('the bytes of the moved files', () => {
     }
     expect([await withBytes(db), await columnsOf(db), existsSync(join(filesDir, here[4]!.id))]).toEqual([6, ['bytes', 'sha256'], true]);
     /* Rounds go on with no yes: nothing more is made or cleared. */
-    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, finished: false });
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 0, finished: false });
     expect(await fileMoves(db)).toEqual([{ ...ready, madeAt: expect.any(String), approvedAt: null, approvedBy: null, clearedAt: null, databaseBytesAfter: null, left: 5 }]);
     expect(await withBytes(db)).toBe(6);
 
@@ -353,7 +389,7 @@ describe('the bytes of the moved files', () => {
     await expect(approveMove(db, ready.digest, 'person:ceo')).rejects.toMatchObject({ status: 409 });
 
     const cleared = await moveOldFiles(ctx);
-    expect(cleared).toEqual({ moved: 0, cleared: 5, finished: true, roomBack: { before: expect.any(Number), after: expect.any(Number) } });
+    expect(cleared).toEqual({ moved: 0, waiting: 0, cleared: 5, finished: true, roomBack: { before: expect.any(Number), after: expect.any(Number) } });
     expect(cleared.roomBack!.after).toBeLessThan(cleared.roomBack!.before);
     expect([await columnsOf(db), existsSync(join(filesDir, here[4]!.id))]).toEqual([['sha256'], false]);
     for (const file of here) expect((await fileBytes(ctx, file.id)).equals(file.bytes)).toBe(true);
@@ -364,11 +400,11 @@ describe('the bytes of the moved files', () => {
     /* The machine with the away file leads: its file is copied, and its disk file waits for a yes of its own. */
     writeFileSync(join(filesDir, away.id), away.bytes);
     const later = await moveOldFiles({ db, config, files: new Files(config) });
-    expect(later).toEqual({ moved: 1, finished: true, ready: { digest: digestOf([away]), files: 1, contents: 1, bytes: 4000, notHere: 0, databaseBytes: expect.any(Number) } });
-    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, finished: true });
+    expect(later).toEqual({ moved: 1, waiting: 0, finished: true, ready: { digest: digestOf([away]), files: 1, contents: 1, bytes: 4000, notHere: 0, databaseBytes: expect.any(Number) } });
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 0, finished: true });
     expect(existsSync(join(filesDir, away.id))).toBe(true);
     await approveMove(db, later.ready!.digest, 'person:ceo');
-    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, cleared: 1, finished: true });
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 0, cleared: 1, finished: true });
     expect(existsSync(join(filesDir, away.id))).toBe(false);
     expect((await fileBytes(ctx, away.id)).equals(away.bytes)).toBe(true);
   });
@@ -393,7 +429,7 @@ describe('the bytes of the moved files', () => {
     expect(again).toMatchObject({ moved: 1, finished: false, ready: { digest: digestOf([{ ...changing!, bytes: changed }]), files: 1 } });
     expect(await withBytes(db)).toBe(1);
     await approveMove(db, again.ready!.digest, 'person:ceo');
-    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, cleared: 1, finished: true, roomBack: { before: expect.any(Number), after: expect.any(Number) } });
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 0, cleared: 1, finished: true, roomBack: { before: expect.any(Number), after: expect.any(Number) } });
     expect((await fileBytes(ctx, changing!.id)).equals(changed)).toBe(true);
   });
 
@@ -411,7 +447,7 @@ describe('the bytes of the moved files', () => {
        and its store keeps neither. Nothing is cleared there, and the big file stays on the disk of this one. */
     const otherConfig = { ...config, filesDir: folder() } as Config;
     const other = { db, config: otherConfig, files: new Files(otherConfig) };
-    expect(await moveOldFiles(other)).toEqual({ moved: 0, finished: false });
+    expect(await moveOldFiles(other)).toEqual({ moved: 0, waiting: 0, finished: false });
     expect([await withBytes(db), await nameOf(db, small!.id), await nameOf(db, big!.id), existsSync(join(filesDir, big!.id))]).toEqual([2, null, sha(big!.bytes), true]);
     /* The small one is read from Postgres there, and moves into that store, to wait for a yes of its own. */
     expect((await fileBytes(other, small!.id)).equals(small!.bytes)).toBe(true);
@@ -424,7 +460,7 @@ describe('the bytes of the moved files', () => {
     const sealed = readFileSync(copy);
     sealed[sealed.length - 1] ^= 1;
     writeFileSync(copy, sealed);
-    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, finished: false });
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 0, finished: false });
     expect([await nameOf(db, big!.id), existsSync(join(filesDir, big!.id))]).toEqual([null, true]);
     expect((await fileBytes(ctx, big!.id)).equals(big!.bytes)).toBe(true);
   });

@@ -5,7 +5,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
-import { agents, attachments, companies, departments, jobs, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { agents, attachments, companies, departments, jobs, subscriptions, tasks, testRuns, turns } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
 import { finishMove } from '../src/modules/files/mover.js';
 import { dropDue, markUnused } from '../src/modules/files/sweep.js';
@@ -38,8 +38,15 @@ async function company() {
     const kept = await app.ctx.files.putBytes(db, bytes);
     return (await db.insert(attachments).values({ companyId, jobId: job!.id, agentId: bruno!.id, taskId, name, mediaType: 'application/octet-stream', sha256: kept.sha256, size: kept.size }).returning())[0]!;
   };
+  const run = async (taskId: string, runNumber: number, finishedAt: Date) =>
+    (await db.insert(testRuns).values({ companyId, number: runNumber, taskId, agentId: bruno!.id, jobId: job!.id, kind: 'tests', command: 'npm test', timeoutMs: 1000, status: 'passed', finishedAt }).returning())[0]!;
+  /* A log or a file a part of the run made, which names its run as the run puts it on the task. */
+  const runFile = async (testRun: { id: string; taskId: string }, name: string, bytes: Buffer) => {
+    const kept = await app.ctx.files.putBytes(db, bytes);
+    return (await db.insert(attachments).values({ companyId, jobId: job!.id, agentId: bruno!.id, taskId: testRun.taskId, testRunId: testRun.id, name, mediaType: 'application/octet-stream', sha256: kept.sha256, size: kept.size }).returning())[0]!;
+  };
   const ids = async () => (await db.select(idOnly(attachments)).from(attachments)).map(row => row.id).sort();
-  return { app, db, task, turn, file, ids };
+  return { app, db, task, turn, file, run, runFile, ids };
 }
 
 describe('the store lets go of files by itself', () => {
@@ -55,20 +62,25 @@ describe('the store lets go of files by itself', () => {
       outsideClosedLongAgo: await c.file((await c.task({ status: 'done', closedAt: ago(31) })).id, 'b.bin', randomBytes(1000)),
     };
     const open = await c.task();
+    const [ended, recent] = [await c.run(open.id, 5, ago(31)), await c.run(open.id, 6, ago(29))];
+    const goneOfRun = [await c.runFile(ended, 'tests-5-1.log', randomBytes(100)), await c.runFile(ended, 'test-5-1-shot.png', randomBytes(100))];
     const kept = [
       await c.file((await c.task({ turnId: recentTurn.id })).id, 'shared.bin', shared),
       await c.file((await c.task({ status: 'done', closedAt: ago(29) })).id, 'c.bin', randomBytes(1000)),
       await c.file(open.id, 'd.bin', randomBytes(1000)),
-      /* A run's log on an open task stays with its task. */
+      await c.runFile(recent, 'tests-6-1.log', randomBytes(100)),
       await c.file(open.id, 'tests-55-1.log', randomBytes(100)),
+      /* An agent's own files on the open task, named as a run's would be, are no run's: they stay (#2036). */
+      await c.file(open.id, 'test-5-plan.md', randomBytes(100)),
+      await c.file(open.id, 'tests-5-2.log', randomBytes(100)),
     ];
 
-    expect(await dropOldFiles(c.app.ctx, now)).toBe(3);
+    expect(await dropOldFiles(c.app.ctx, now)).toBe(5);
     expect(await c.ids()).toEqual(kept.map(row => row.id).sort());
 
     /* The bytes no row names wait a day; the content another row still names stays. */
     const store = c.app.ctx.files.store();
-    const unnamed = [gone.ofOldTurn, gone.outsideClosedLongAgo].map(row => row.sha256!);
+    const unnamed = [gone.ofOldTurn, gone.outsideClosedLongAgo, ...goneOfRun].map(row => row.sha256!);
     expect(await markUnused(c.db, now)).toBe(0);
     expect(await markUnused(c.db, new Date(now.getTime() + DAY - 60_000))).toBe(0);
     expect(await markUnused(c.db, new Date(now.getTime() + DAY + 60_000))).toBe(unnamed.length);
@@ -89,12 +101,14 @@ describe('the store lets go of files by itself', () => {
     const ago = (days: number) => new Date(now.getTime() - days * DAY);
     const ofOldTurn = await c.file((await c.task({ turnId: (await c.turn(ago(31))).id })).id, 'a.bin', randomBytes(1000));
     const outside = await c.file((await c.task({ status: 'done', closedAt: ago(31) })).id, 'b.bin', randomBytes(1000));
+    const open = await c.task();
+    const ofRun = await c.runFile(await c.run(open.id, 5, ago(31)), 'tests-5-1.log', randomBytes(100));
     expect(await dropOldFiles(ctx, now)).toBe(1);
     expect(await c.ids()).not.toContain(ofOldTurn.id);
-    expect(await c.ids()).toEqual([outside.id]);
+    expect(await c.ids()).toEqual([outside.id, ofRun.id].sort());
     /* Once the column went, as it goes after the CEO's yes, the rules of this version take their files too. */
     expect(await finishMove(ctx)).toBe(true);
-    expect(await dropOldFiles(ctx, now)).toBe(1);
+    expect(await dropOldFiles(ctx, now)).toBe(2);
     expect(await c.ids()).toEqual([]);
   });
 

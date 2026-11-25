@@ -173,7 +173,7 @@ async function eachBatch(q: Query, select: string, work: (rows: Row[]) => Promis
 const jsonOf = (columns: string[], alias: string): string => `jsonb_build_object(${columns.map(name => `'${name}', ${alias}.${quote(name)}`).join(', ')})`;
 
 /* The text files of the store, as the mask reads and rewrites them: a text that changes is kept as a new file, and the
-   one it was goes from the store at once, unless a row still names it. */
+   one it was goes from the machines at once, unless a row still names it. */
 export type StoredTexts = { read: (sha256: string) => Promise<Buffer>; write: (bytes: Buffer) => Promise<{ sha256: string; size: number }> };
 
 /* A file the store has no copy of any more, as on a machine that leads after another kept it, has nothing left to mask:
@@ -202,6 +202,8 @@ export async function maskCompanyRows(q: Query, facts: Facts, company: string, m
   if (!UUID.test(company)) throw new Error('A company id is a uuid.');
   let changed = 0;
   const left = new Set<string>();
+  /* The rows of files it changed: the store's backup forgets what they named before, which may hold the secret. */
+  const filesChanged = new Set<string>();
   const tables = [...facts.tables.values()].filter(t => t.key.length > 0 && (proseColumns(t).length > 0 || t.name === 'attachments') && scopeOf(t, company));
   /* The old bytes of a file not moved into the store yet are no column of the merge's shape, but are read here all the same. */
   const oldBytes = (await q("SELECT 1 AS there FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'attachments' AND column_name = 'bytes'")).length > 0;
@@ -218,6 +220,7 @@ export async function maskCompanyRows(q: Query, facts: Facts, company: string, m
         const masked = maskRow(t, row, mask);
         const now = masked || stored ? { ...masked, ...stored } : null;
         if (!now) continue;
+        if (t.name === 'attachments') filesChanged.add(String(row.id));
         await q(
           `UPDATE public.${quote(t.name)} t SET ${Object.keys(now).map(name => `${quote(name)} = r.${quote(name)}`).join(', ')}
            FROM jsonb_populate_record(NULL::public.${quote(t.name)}, $1::jsonb) r WHERE ${t.key.map(k => `t.${quote(k)} = r.${quote(k)}`).join(' AND ')}`,
@@ -229,8 +232,12 @@ export async function maskCompanyRows(q: Query, facts: Facts, company: string, m
   }
   for (const t of tables) changed += await maskCopies(q, t, company, mask, texts, left);
   changed += await maskParked(q, company, mask);
-  /* The text as it was leaves the store at the next round, not after the day an unused file waits. */
+  /* The text as it was leaves the machines at the next look, not after the day an unused file waits. */
   for (const sha256 of left) await q('UPDATE net.files SET drop_at = now() WHERE sha256 = $1 AND NOT EXISTS (SELECT 1 FROM public.attachments WHERE sha256 = $1)', [sha256]);
+  /* The store's backup keeps neither: a row of a file as it was, which may name the secret, is no name to put back, and
+     with no name left of the text as it was, the backup's next round lets it go at once. A file's row as it is now is
+     named again. */
+  if (filesChanged.size) await q('DELETE FROM net.file_backup_names WHERE company_id = $1::uuid AND attachment_id = ANY($2::uuid[])', [company, `{${[...filesChanged].join(',')}}`]);
   return changed;
 }
 

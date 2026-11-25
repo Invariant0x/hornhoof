@@ -155,7 +155,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
 
 /* What a round of the mover did, in the log of the server. */
 function tellMoveRound(ctx: Ctx, round: MoveRound): void {
-  if (round.moved > 0) ctx.log.info({ moved: round.moved }, 'Files copied from the database into the store and checked there.');
+  if (round.moved > 0 || round.waiting > 0) ctx.log.info({ moved: round.moved, waiting: round.waiting }, 'Files copied from the database into the store and checked there.');
   if (round.ready) {
     ctx.log.warn({ ...round.ready }, 'Every file of the database on this machine is in the store and checked. Its bytes stay in the database until the CEO says yes to this reconciliation (POST /api/files/move/approve with its digest).');
   }

@@ -1,6 +1,6 @@
 import { PICTURE_BYTES, FILE_BYTES, checkUploadRoom, checkPictureRoom, checkRoom, onTask, type UploadRoom } from './file-policy.js';
 import { Readable } from 'node:stream';
-import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -64,8 +64,9 @@ export function pictureType(b: Buffer): 'image/png' | 'image/jpeg' | 'image/webp
   return null;
 }
 
-/* Removes the files on the tasks of turns closed 30 days or more before now, on tasks of no turn closed as long ago, and
-   people's pictures sent as long ago or never sent, and says how many went. Their bytes go from the store a day after no row names them (modules/files/sweep), and a big file
+/* Removes the files on the tasks of turns closed 30 days or more before now, on tasks of no turn closed as long ago, the
+   logs and files of test and work runs that ended as long ago, and people's pictures sent as long ago or never sent, and
+   says how many went. Their bytes go from the store a day after no row names them (modules/files/sweep), and a big file
    of 0.43 still on this machine's disk goes with its row. While the database still holds bytes of earlier versions only
    the rules of 0.43 apply: the files the rules of this version let go of wait for the CEO's yes to the move, which clears
    the bytes and drops the column (modules/files/move). */
@@ -85,8 +86,10 @@ export async function dropOldFiles(ctx: Pick<Ctx, 'db' | 'config'>, now: Date): 
   if (await hasOldBytes(db)) return loose.length + ofTurns.length;
   const closed = db.select(idOnly(tasks)).from(tasks).where(and(isNull(tasks.turnId), lt(tasks.closedAt, cutoff)));
   const outside = await db.delete(attachments).where(inArray(attachments.taskId, closed)).returning({ id: attachments.id });
+  /* A run's files name their run; a file named like one, which an agent or a person put on the task, is no run's. */
+  const ofRuns = await db.execute(sql`DELETE FROM attachments a USING test_runs r WHERE a.test_run_id = r.id AND r.finished_at < ${cutoff.toISOString()}::timestamptz RETURNING a.id`);
   await dropLeftOnDisk(ctx, cutoff);
-  return loose.length + ofTurns.length + outside.length;
+  return loose.length + ofTurns.length + outside.length + (Array.isArray(ofRuns) ? ofRuns : (ofRuns as { rows: unknown[] }).rows).length;
 }
 
 /* A file as a request brings it: into the store as it comes, never whole in memory, with its first bytes, which say
@@ -392,6 +395,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         .returning({ id: attachments.id });
       const row = { id: kept!.id, name, pic };
       /* Answered once a second machine keeps it too, or after a short while, as the copy goes on. */
+      await ctx.files.settled(db, taken.sha256);
       if (toChat && row.name) {
         await appendEvent(ctx, {
           companyId: job.companyId,
