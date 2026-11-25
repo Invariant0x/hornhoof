@@ -509,7 +509,7 @@ describe('the registry over HTTP', () => {
       failed: async () => undefined,
     };
     const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), said: string[] = [];
-    const build = deferred<void>();
+    const build = deferred() as { promise: Promise<void>; resolve: () => void };
     let building = false;
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     onTestFinished(() => { build.resolve(); vi.useRealTimers(); });
