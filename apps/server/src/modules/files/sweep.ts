@@ -106,6 +106,27 @@ export async function adoptNamed(ctx: Pick<Ctx, 'db' | 'files'>): Promise<number
   return adopted;
 }
 
+/* The contents of record this machine's store keeps that no copy of record says it keeps, as a database of step 1, or
+   one recorded before this machine had its row, has them: each is recorded as this machine's copy, a page a round, so
+   the machines picked for the files count it and fetch them from here. Says how many were. */
+export async function adoptOwn(ctx: Pick<Ctx, 'db' | 'files'>): Promise<number> {
+  const { db, files } = ctx;
+  const mine = await files.machineId(db);
+  if (!mine) return 0;
+  const store = files.store();
+  const page = rowsOf<{ sha256: string }>(
+    await db.execute(sql`SELECT f.sha256 FROM net.files f WHERE f.drop_at IS NULL AND f.sha256 COLLATE "C" > ${files.ownedThrough}
+      AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256 AND c.machine_id = ${mine}) ORDER BY f.sha256 COLLATE "C" LIMIT ${DROP_BATCH}`),
+  ).map(row => row.sha256);
+  const here = page.filter(sha256 => store.has(sha256));
+  if (here.length) {
+    await db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id, verified) SELECT sha256, ${mine}, true FROM unnest(${`{${here.join(',')}}`}::text[]) AS kept (sha256)
+      ON CONFLICT (sha256, machine_id) DO UPDATE SET verified = true`);
+  }
+  files.ownedThrough = page.length < DROP_BATCH ? '' : page.at(-1)!;
+  return here.length;
+}
+
 /* The files this machine keeps and is not picked for, as an upload with no room here or a read left them: those whose
    copies wanted stand on machines picked for them go, the longest kept first, until what is left fits the room for
    them. One of them a row names again, or an upload records again, under its record's lock, is kept. Says how many went. */
@@ -148,6 +169,7 @@ const GIFT_LIFE_MS = 86_400_000;
 export async function storeRound(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Promise<void> {
   const { db, files } = ctx;
   await adoptNamed(ctx);
+  await adoptOwn(ctx);
   const mine = await files.machineId(db);
   /* The machine the backup is on, before files are placed, so no live copy is placed on it to go again. */
   await pickBackupMachine(db, mine, now);

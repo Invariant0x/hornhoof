@@ -217,6 +217,22 @@ describe('where the files of the store are kept', () => {
     expect(await s.app.ctx.files.copiesStand(s.db, kept.sha256)).toBe(true);
   });
 
+  it("takes the files a server kept in its store before the network, as step 1 leaves them, as its own copies, and gives them to a second machine", async () => {
+    const s = await stand();
+    const [kept, lost] = [await s.app.ctx.files.putBytes(s.db, randomBytes(3000)), await s.app.ctx.files.putBytes(s.db, randomBytes(3000))];
+    /* A database of step 1 records the files and no copy of them; one of them is gone from the server's disk. */
+    await s.db.execute(sql`DELETE FROM net.file_targets`);
+    await s.db.execute(sql`DELETE FROM net.file_copies`);
+    rmSync(join(s.leaderDir, 'store', lost.sha256.slice(0, 2), lost.sha256));
+    const two = await s.worker('two');
+    await s.round();
+    expect([await s.copiesOf(kept.sha256), await s.copiesOf(lost.sha256)]).toEqual([[s.server.id], []]);
+    expect(await s.targetsOf(kept.sha256)).toEqual([s.server.id, two].sort());
+    const { holder } = s.holderOn(two);
+    await holder.lookOnce();
+    expect(await s.copiesOf(kept.sha256)).toEqual([s.server.id, two].sort());
+  });
+
   it('keeps each file on as many machines as the CEO asks, one off site first, and lets a copy go only once the others keep it', async () => {
     const s = await stand();
     /* The machine at home has more room free; the one off site is picked all the same. */

@@ -75,6 +75,8 @@ export class Files {
   checkedThrough = '';
   placedThrough = '';
   trimmedThrough = '';
+  /* The last name the store's round looked through for contents this machine's store keeps with no copy of record. */
+  ownedThrough = '';
   /* The most this machine keeps of files it is not picked for, as a read or an upload left them, until their copies stand
      elsewhere: transitRoomOf its disk unless set. */
   transitBytes: number | null = null;
