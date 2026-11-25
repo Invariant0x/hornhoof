@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Changed
+
+- A copy of the company's data that its keeper gave up can be made again from the machine's card with "Try again", the CEO's alone. The company server gives no data to a machine whose path to it is measured too weak for a copy: under 2 Mbps, a rate at which the whole database would take over six hours, or a round trip over 1.5 seconds. A copy that is not whole on such a path is dropped with its slots on the server and waits, and goes on by itself once the path is no longer measured so; the machine's card says which, and Failures holds one card for each copy given up, with what to do.
+
 ## [0.44.0] - 2026-11-24
 
 ### Fixed
