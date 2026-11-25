@@ -447,7 +447,7 @@ describe('the bytes of the moved files', () => {
        and its store keeps neither. Nothing is cleared there, and the big file stays on the disk of this one. */
     const otherConfig = { ...config, filesDir: folder() } as Config;
     const other = { db, config: otherConfig, files: new Files(otherConfig) };
-    expect(await moveOldFiles(other)).toEqual({ moved: 0, finished: false });
+    expect(await moveOldFiles(other)).toEqual({ moved: 0, waiting: 0, finished: false });
     expect([await withBytes(db), await nameOf(db, small!.id), await nameOf(db, big!.id), existsSync(join(filesDir, big!.id))]).toEqual([2, null, sha(big!.bytes), true]);
     /* The small one is read from Postgres there, and moves into that store, to wait for a yes of its own. */
     expect((await fileBytes(other, small!.id)).equals(small!.bytes)).toBe(true);
@@ -460,7 +460,7 @@ describe('the bytes of the moved files', () => {
     const sealed = readFileSync(copy);
     sealed[sealed.length - 1] ^= 1;
     writeFileSync(copy, sealed);
-    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, finished: false });
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, waiting: 0, finished: false });
     expect([await nameOf(db, big!.id), existsSync(join(filesDir, big!.id))]).toEqual([null, true]);
     expect((await fileBytes(ctx, big!.id)).equals(big!.bytes)).toBe(true);
   });
