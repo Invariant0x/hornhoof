@@ -11,7 +11,7 @@ import { certificates, machines } from '../src/db/schema.js';
 import type { TunnelSettings } from '../src/modules/link/tunnel.js';
 import { CERT_FILE } from '../src/modules/keeper/certificate.js';
 import { COPY_STATE, copyName } from '../src/modules/keeper/copy.js';
-import { FollowKeeper, OWN_APP_AFTER_MS, type FollowKeeperOptions } from '../src/modules/keeper/follow.js';
+import { copyBusy, FollowKeeper, OWN_APP_AFTER_MS, type FollowKeeperOptions } from '../src/modules/keeper/follow.js';
 import type { Sql } from '../src/modules/keeper/lease-store.js';
 import { machineKey, writePrivately } from '../src/modules/keeper/machine-keys.js';
 import { fsyncP99 } from '../src/modules/keeper/measures.js';
@@ -171,6 +171,15 @@ function askingAt(port: number, certDir: string) {
 
 /* These run the company's server with its keeper and a follower beside it, on the controlled clock: every keeper's round
    is a step the test takes, so no test waits for a timer of its own, and a busy machine only takes longer per round. */
+describe('what keeps the disk of a machine with a copy busy by itself', () => {
+  it('is its copy poured in, made again or not begun, and a database that led being saved', () => {
+    const at = (state: string) => ({ state, progress: null, error: null, at: null, name: null, old: null }) as unknown as Parameters<typeof copyBusy>[0];
+    expect(copyBusy(null)).toBe(true);
+    for (const state of ['making', 'remaking', 'saving']) expect(copyBusy(at(state)), state).toBe(true);
+    for (const state of ['ready', 'stopped']) expect(copyBusy(at(state)), state).toBe(false);
+  });
+});
+
 describe('the keeper of a machine that keeps a copy', () => {
   beforeEach(controlledTime);
 

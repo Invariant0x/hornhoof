@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:f
 import { availableParallelism, tmpdir, totalmem, uptime } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { KEEP_SAMPLES, Measures, SAMPLE_MS, fsyncP99, keepLatest } from '../src/modules/keeper/measures.js';
+import { COMMIT_PROBE, KEEP_SAMPLES, Measures, SAMPLE_MS, commitProbe, fsyncP99, keepLatest } from '../src/modules/keeper/measures.js';
+import { createTestSql } from './helpers.js';
 
 const PROBE_FILE = 'fsync-probe';
 const folders: string[] = [];
@@ -103,19 +104,59 @@ describe('Measures', () => {
     expect([gone.filesDiskFree, gone.filesDiskTotal]).toEqual([undefined, undefined]);
   });
 
-  it('takes no sample while the machine makes its copy of the company\'s data', async () => {
-    /* Pouring the copy in slows the disk down by itself: what the disk does then says nothing of the disk. */
-    const dir = tempFolder();
-    let copying = true;
-    const measures = new Measures({ dir, copying: () => copying });
+  it('reports no sample taken while the machine is busy with its own writes, and the lease still goes by it', async () => {
+    /* Pouring a copy in, saving what a database that led held, or a dump of the database keep the disk busy by
+       themselves: a write timed then says nothing of the disk the company is ranked by. The lease's statements wait
+       for that same disk, though, so what they may take still counts every sample. */
+    let busy = true;
+    let ms = 500;
+    const measures = new Measures({ dir: tempFolder(), busy: () => busy, probe: { time: async () => ms } });
     running.push(measures);
     for (let taken = 0; taken < 10; taken++) await measures.sample();
     expect(measures.snapshot().fsyncP99Ms).toBeNull();
-    expect(existsSync(join(dir, PROBE_FILE))).toBe(false);
-    /* Once the copy is made, the samples count again. */
-    copying = false;
+    expect(measures.fsyncP99()).toBeNull();
+    expect(measures.leaseFsyncP99()).toBe(500);
+    /* Once the machine is done with them, its samples count again. */
+    busy = false;
+    ms = 3;
     for (let taken = 0; taken < 10; taken++) await measures.sample();
-    expect(measures.snapshot().fsyncP99Ms).toBeGreaterThanOrEqual(0);
+    expect(measures.snapshot().fsyncP99Ms).toBe(3);
+    expect(measures.leaseFsyncP99()).toBe(500);
+  });
+
+  it('reports no sample during which the machine became busy', async () => {
+    let busy = false;
+    const measures = new Measures({ dir: tempFolder(), busy: () => busy, probe: { time: async () => { busy = true; return 700; } } });
+    running.push(measures);
+    for (let taken = 0; taken < 10; taken++) {
+      busy = false;
+      await measures.sample();
+    }
+    expect(measures.fsyncP99()).toBeNull();
+    expect(measures.leaseFsyncP99()).toBe(700);
+  });
+
+  it('times the probe it is given in place of a write to its folder, and closes it when it stops', async () => {
+    const dir = tempFolder();
+    const close = vi.fn(async () => undefined);
+    const measures = new Measures({ dir, probe: { time: async () => 4, close } });
+    for (let taken = 0; taken < 10; taken++) await measures.sample();
+    expect(existsSync(join(dir, PROBE_FILE))).toBe(false);
+    expect(measures.snapshot().fsyncP99Ms).toBe(4);
+    measures.stop();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds nothing up while a probe hangs: both p99s answer at once, and no second probe piles up', async () => {
+    vi.useFakeTimers();
+    const time = vi.fn(() => new Promise<number>(() => undefined));
+    const measures = new Measures({ dir: tempFolder(), sampleMs: 1, probe: { time } });
+    running.push(measures);
+    measures.start();
+    for (let ticks = 0; ticks < 5; ticks++) await vi.advanceTimersByTimeAsync(1);
+    expect(time).toHaveBeenCalledTimes(1);
+    expect(measures.fsyncP99()).toBeNull();
+    expect(measures.leaseFsyncP99()).toBeNull();
   });
 
   it('writes 4096 new random bytes for each sample', async () => {
@@ -187,5 +228,34 @@ describe('Measures', () => {
     await tick(sample);
     expect(sample).toHaveBeenCalledTimes(3);
     expect(existsSync(join(dir, PROBE_FILE))).toBe(true);
+  });
+});
+
+describe('the commit probe of the machine\'s database', () => {
+  it('times a commit of its own that touches no table, no row and no journal, so a copy that runs it sends nothing', async () => {
+    const { sql: run } = await createTestSql();
+    const statements: string[] = [];
+    const probe = commitProbe({ query: async (text, params) => { statements.push(text); return run.query(text, params); } });
+    const journal = async () => (await run.query<{ n: string }>('SELECT count(*)::text AS n FROM net.journal')).rows[0]!.n;
+    const xid = async () => BigInt((await run.query<{ x: string }>('SELECT pg_current_xact_id()::text AS x')).rows[0]!.x);
+    const before = { journal: await journal(), xid: await xid() };
+    expect(await probe.time()).toBeGreaterThanOrEqual(0);
+    expect(statements).toEqual([COMMIT_PROBE]);
+    /* It committed a transaction of its own, which the database flushes to its disk before it answers... */
+    expect(await xid()).toBeGreaterThan(before.xid + 1n);
+    /* ...and one that writes no row and locks no table: nothing reaches the journal, so nothing goes to another machine. */
+    expect(await journal()).toBe(before.journal);
+    await run.query('BEGIN');
+    await run.query(COMMIT_PROBE);
+    const locked = (await run.query<{ name: string }>(`SELECT c.relname::text AS name FROM pg_locks l JOIN pg_class c ON c.oid = l.relation
+      JOIN pg_namespace n ON n.oid = c.relnamespace WHERE l.pid = pg_backend_pid() AND l.locktype = 'relation' AND n.nspname NOT IN ('pg_catalog', 'information_schema')`)).rows;
+    await run.query('ROLLBACK');
+    expect(locked).toEqual([]);
+  });
+
+  it('closes the session it times on', async () => {
+    const close = vi.fn(async () => undefined);
+    await commitProbe({ query: async () => ({ rows: [] }), close }).close?.();
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });
