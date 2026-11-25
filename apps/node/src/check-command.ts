@@ -10,7 +10,8 @@ import { checkGroupProcess, type CheckGroup } from './check-group.js';
 const Frame = z.discriminatedUnion('type', [
   z.object({ type: z.literal('unavailable') }),
   z.object({ type: z.literal('queued'), position: z.number().int().positive() }),
-  z.object({ type: z.literal('slot'), lease: z.string() }),
+  /* env: the variables of the slot's pieces of warm test services (#2091), which the command gets. */
+  z.object({ type: z.literal('slot'), lease: z.string(), env: z.record(z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/), z.string().max(4096)).optional() }),
   z.object({ type: z.enum(['stdout', 'stderr']), data: z.string().max(2 * 1024 * 1024) }),
   z.object({ type: z.literal('exit'), code: z.number().int().min(0).max(255).nullable() }),
   z.object({ type: z.literal('error'), message: z.string() }),
@@ -81,7 +82,7 @@ function ask(env: NodeJS.ProcessEnv, body: object, signal: AbortSignal): Promise
   return fetch(url, { method: 'POST', headers: { 'x-hh-pid': String(process.pid) }, signal, body: JSON.stringify(body) });
 }
 
-type Held = { lease: string; rest: AsyncGenerator<Frame> };
+type Held = { lease: string; env: Record<string, string>; rest: AsyncGenerator<Frame> };
 
 /* The lease of the slot the machine gave, which stays this command's while the request stays open, and the rest of the
    request's stream. */
@@ -97,7 +98,7 @@ async function slot(command: string[], env: NodeJS.ProcessEnv, signal: AbortSign
     });
     if (next.done) throw new Error('The machine check bridge ended before admission.');
     if (next.value.type === 'unavailable') return undefined;
-    if (next.value.type === 'slot') return { lease: next.value.lease, rest };
+    if (next.value.type === 'slot') return { lease: next.value.lease, env: next.value.env ?? {}, rest };
     await show(next.value);
   }
 }
@@ -192,7 +193,7 @@ async function waited(command: string[], env: NodeJS.ProcessEnv): Promise<number
     if (!group || group.group !== child.pid || group.session !== child.pid) throw new Error('The waiting check group cannot be identified.');
     const held = await slot(command, env, stop.signal, { pid: child.pid, started: group.started });
     stop.signal.throwIfAborted();
-    child.send({ command, env: held ? { ...env, HH_CHECK_SLOT: held.lease } : env, managed: Boolean(held) });
+    child.send({ command, env: held ? { ...env, ...held.env, HH_CHECK_SLOT: held.lease } : env, managed: Boolean(held) });
     if (held) void lapsed(held.rest).then(async why => {
       if (ended) return;
       cancel('SIGTERM');

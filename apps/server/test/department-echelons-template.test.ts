@@ -107,11 +107,11 @@ describe('the route of every department template', () => {
     expect(templates.roles.get('FIN-AUDIT')!.skills).toContainEqual(expect.objectContaining({ id: 'fin-independent-recompute', on: true }));
   });
 
-  it('gives the turnkey team of Development the skills of every echelon: plan, review, security, tests and release', () => {
-    expect(templates.teams.get('DEV-TEAM')!.skills).toEqual([
-      'dev-plan-review', 'dev-api-design', 'dev-review-diff', 'dev-review-fix', 'dev-review-verdict', 'dev-security-review', 'dev-security-fix',
-      'dev-threat-model', 'dev-test-gaps', 'dev-e2e-tests', 'dev-test-environment', 'dev-ci-release', 'dev-release-notes',
-    ]);
+  /* The Hotfix unit fixes and ships a patch release; its Security read is the department's own, never its member's. */
+  it('gives the Hotfix unit of Development the skills to prove a fix and ship a patch, and no check of its own work to stand for Review and Security', () => {
+    const skills = templates.teams.get('DEV-TEAM')!.skills;
+    expect(skills).toEqual(['dev-test-gaps', 'dev-e2e-tests', 'dev-test-environment', 'dev-ci-release', 'dev-release-notes']);
+    for (const check of ['dev-review-diff', 'dev-review-fix', 'dev-security-review', 'dev-security-fix']) expect(skills, check).not.toContain(check);
   });
 
   it('uses the declared result type for submission and acceptance', () => {

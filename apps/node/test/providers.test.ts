@@ -32,6 +32,8 @@ const KIMI_SESSION = 'k1m1c0de-0000-4000-8000-000000000001';
 const AGY_NEW = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
 const AGY_RESUMED = '9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f';
 const AGY_FLAGS = ['--output-format', 'stream-json', '--print-timeout', '0s', '--dangerously-skip-permissions'];
+/* A one-shot call tells agy its limit, so agy too ends the call there (#2069). */
+const agyCallFlags = (limit: string) => ['--output-format', 'stream-json', '--print-timeout', limit, '--dangerously-skip-permissions'];
 /* What fixtures/agy-usage.json, agy's real /usage output, tells of the plan: the fuller group speaks for the plan as a whole,
    and each group keeps its own windows. */
 const AGY_GEMINI_WINDOWS = [
@@ -59,6 +61,8 @@ const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approval
 type Logged = {
   name: string; argv: string[]; cwd: string; pid: number; env: Record<string, string>; grandchild?: number;
   mcpConfig?: { path: string; mode: number; json: unknown }; agentsMd?: string; kimiMcp?: unknown; agyMcp?: { mode: number; json: unknown };
+  /* The prompt agy read: from its --print flag, or from its standard input. */
+  prompt?: string;
 };
 
 let dir: string;
@@ -735,12 +739,13 @@ describe('Antigravity CLI', () => {
   it('runs a prompt in print mode with every tool allowed in its own home, and goes on in the conversation it named', async () => {
     const a = adapter('antigravity');
     const first = await a.run(input());
-    expect(lastRun().argv).toEqual(['--print=say ready', ...AGY_FLAGS]);
+    expect(lastRun().argv).toEqual(AGY_FLAGS);
+    expect(lastRun().prompt).toBe('say ready');
     expect(lastRun().env).toMatchObject({ HOME: home, AGY_CLI_DISABLE_AUTO_UPDATE: 'true' });
     expect(first).toMatchObject({ ok: true, sessionId: AGY_NEW, result: expect.stringMatching(/^Git rebase destructively rewrites .* base commit\.$/) });
 
     const again = await a.run(input({ sessionId: AGY_NEW, model: 'Gemini 4 Argon', effort: 'high' }));
-    expect(lastRun().argv).toEqual(['--print=say ready', ...AGY_FLAGS, '--conversation', AGY_NEW, '--model', 'Gemini 4 Argon', '--effort', 'high']);
+    expect(lastRun().argv).toEqual([...AGY_FLAGS, '--conversation', AGY_NEW, '--model', 'Gemini 4 Argon', '--effort', 'high']);
     expect(again).toMatchObject({ ok: true, sessionId: AGY_RESUMED, result: 'apple' });
   });
 
@@ -1001,14 +1006,50 @@ describe('one-shot calls', () => {
   });
 
   it('run Antigravity once in print mode in a new conversation', async () => {
-    const res = await adapter('antigravity').oneCall!(input({ sessionId: AGY_NEW }));
-    expect(lastRun().argv).toEqual(['--print=say ready', ...AGY_FLAGS]);
+    const res = await adapter('antigravity').oneCall!(input({ sessionId: AGY_NEW, timeoutMs: 120_000 }));
+    expect(lastRun().argv).toEqual(agyCallFlags('120s'));
+    expect(lastRun().prompt).toBe('say ready');
     expect(res).toMatchObject({ ok: true, sessionId: AGY_NEW });
   });
 
   it('report a failed call as agent_failed, as a turn', async () => {
     process.env.FAKE_MODE = 'fail';
     for (const provider of ['claude', 'codex'] as const) expect(await adapter(provider).oneCall!(input())).toMatchObject({ ok: false, error: 'agent_failed' });
+  });
+});
+
+describe('a long prompt to Antigravity (#2069)', () => {
+  /* Over the 64 KB at which agy, given its prompt in --print=, hung for good. Its last line holds what the model is asked
+     for, as in the calls that proved on a-host that agy reads the whole of such a prompt on its standard input. */
+  const LONG = `Reply with the code word on the last line.\n${'Filler line: the quick brown fox jumps over the lazy dog.\n'.repeat(1800)}The code word is: HH2069`;
+
+  it.each(['run', 'oneCall'] as const)('%s gives agy a prompt of over 64 KB whole on its standard input, and none of it as an argument', async how => {
+    expect(LONG.length).toBeGreaterThan(64 * 1024);
+    const res = await adapter('antigravity')[how]!(input({ prompt: LONG, timeoutMs: 120_000 }));
+    expect(res).toMatchObject({ ok: true });
+    expect(lastRun().prompt).toBe(LONG);
+    expect(lastRun().argv.join(' ')).not.toContain('HH2069');
+  });
+
+  it('ends a one-shot call with no limit of its own after 30 minutes, though agy never answers, and tells agy that limit', async () => {
+    process.env.FAKE_MODE = 'hang';
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const call = adapter('antigravity').oneCall!(input({ timeoutMs: 0 }));
+      const child = await hangingChild();
+      expect(lastRun().argv).toEqual(agyCallFlags('1800s'));
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
+      await eventually(() => !alive(child));
+      await vi.runAllTimersAsync();
+      expect(await call).toMatchObject({ ok: false, error: 'timeout' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads a call agy cut short at its own print timeout as a timeout', async () => {
+    process.env.FAKE_MODE = 'print_timeout';
+    expect(await adapter('antigravity').oneCall!(input({ timeoutMs: 120_000 }))).toMatchObject({ ok: false, error: 'timeout' });
   });
 });
 

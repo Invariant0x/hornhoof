@@ -808,8 +808,8 @@ teams:
     title: "Turnkey team"
     description: "Each member owns the work and its checks from start to finish."
   DEV-TEAM:
-    title: "Turnkey team"
-    description: "Each member owns the work and its checks from start to finish."
+    title: "Hotfix"
+    description: "Takes only urgent work and ships the fix past the pipeline: each fix gets its own Security read before its patch release."
   DSN-TEAM:
     title: "Turnkey team"
     description: "Each member owns the work and its checks from start to finish."
