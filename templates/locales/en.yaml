@@ -815,7 +815,7 @@ teams:
     description: "Each member owns the work and its checks from start to finish."
   DEV-TEAM:
     title: "Hotfix"
-    description: "Takes only urgent work and ships the fix past the pipeline: a fix gets its own Security read only when it touches access, secrets or root processes."
+    description: "Takes only urgent work and ships the fix past the pipeline: a fix gets its own Security read only when it touches access, secrets, root processes, deletion of data or files, or the checks themselves."
   DSN-TEAM:
     title: "Turnkey team"
     description: "Each member owns the work and its checks from start to finish."

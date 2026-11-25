@@ -83,7 +83,7 @@ describe('the Hotfix unit of the Development template', () => {
     expect(skill).toMatch(/Check only the files you touched, locally in your own workspace[^.]*type check, lint and the one or two test files/);
     expect(skill).toMatch(/Run no whole suite, no run_tests, no browser or end-to-end test/);
     expect(skill).toMatch(/Land it on the branch the task names/);
-    expect(skill).toMatch(/touches access, secrets or root processes gets its own independent Security read[^.]*any other fix goes on the strength of the release's batch stages/);
+    expect(skill).toMatch(/touches access, secrets, root processes, deletion of data or files, or the checks themselves gets its own independent Security read[^.]*any other fix goes on the strength of the release's batch stages/);
     expect(skill).toMatch(/Report in three lines: the cause, the change, and what you ran/);
   });
 

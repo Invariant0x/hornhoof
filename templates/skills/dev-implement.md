@@ -15,6 +15,6 @@ You can implement an assigned software change from its brief to a proved result.
 
 When the project has an author check, run it in your own workspace on your exact commit before you submit, and read its actual result before claiming readiness. Submitting starts no test run, so submission alone is not a passed check.
 
-Security reads the whole turn branch once, after Review and before Tests, and fixes what it finds there; nothing goes to main without that pass; the hotfix lane's fix gets its own Security read before its patch release when it touches access, secrets or root processes, and any other hotfix rests on the batch stages of the release.
+Security reads the whole turn branch once, after Review and before Tests, and fixes what it finds there; nothing goes to main without that pass; the hotfix lane's fix gets its own Security read before its patch release when it touches access, secrets, root processes, deletion of data or files, or the checks themselves; any other hotfix rests on the batch stages of the release.
 
 Do not publish, change production data or broaden access without the appropriate explicit approval. If the same attempts fail without a new hypothesis, report the evidence and missing condition rather than continuing to guess.

@@ -8,6 +8,6 @@ Read the cause before you touch code: reproduce the failure or follow the failin
 
 Check only the files you touched, locally in your own workspace: the type check, lint and the one or two test files that cover the change. Run no whole suite, no run_tests, no browser or end-to-end test: the batch stages of the release cover your fix. Land it on the branch the task names.
 
-A fix that touches access, secrets or root processes gets its own independent Security read before it ships; any other fix goes on the strength of the release's batch stages.
+A fix that touches access, secrets, root processes, deletion of data or files, or the checks themselves gets its own independent Security read before it ships; any other fix goes on the strength of the release's batch stages.
 
 Report in three lines: the cause, the change, and what you ran.
