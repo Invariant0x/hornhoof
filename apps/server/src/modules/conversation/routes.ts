@@ -12,7 +12,7 @@ import type { Person } from '../../auth/session.js';
 import { agentFor, type AgentRow } from '../agents/find.js';
 import { answerDirectly } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
-import { lastEvents, listEvents } from '../events/store.js';
+import { hasHistory, lastEvents, listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
 import { answerBy, answerForAssistant, answerInTelegram, FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, turnPrompt, whoIs, type Standing, type WrittenFrom } from './prompt.js';
@@ -161,7 +161,7 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (agent.kind !== 'orchestrator') return { started: false };
     const started = await onAgent(ctx, agent.id, async () => {
       if (!(await agentState(ctx, agent.id)).ready) return false;
-      if ((await listEvents(db, agent.id, 0, 1)).length) return false;
+      if (await hasHistory(db, agent.id)) return false;
       const [open] = await db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.kind, 'conversation'), inArray(jobs.status, ['queued', 'running']))).limit(1);
       if (open) return false;
       const [company] = await db.select(only(companies, 'template')).from(companies).where(eq(companies.id, me.companyId)).limit(1);

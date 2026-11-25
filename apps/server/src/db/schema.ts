@@ -1068,7 +1068,7 @@ export const agentEventArchives = pgTable(
     index('agent_event_archives_sha256').on(t.sha256),
     index('agent_event_archives_job_ids').using('gin', t.jobIds),
     index('agent_event_archives_event_ids').using('gin', t.eventIds),
-    index('agent_event_archives_pending').on(t.companyId).where(sql`cleared_at is null`),
+    index('agent_event_archives_pending').on(t.id).where(sql`cleared_at is null`),
   ],
 );
 

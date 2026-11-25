@@ -10,7 +10,7 @@ import { orchestratorOf } from '../conversation/turn-records.js';
 import { pump } from '../conversation/queue.js';
 import { windowNode } from '../conversation/placement.js';
 import { hireEmployee, type Hired, type HiredBy } from '../departments/hire.js';
-import { appendEvent, listEvents } from '../events/store.js';
+import { appendEvent, hasHistory } from '../events/store.js';
 import type { Tx } from '../tasks/state.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { placeableSubscriptions, spotIn, type Serving } from '../tools/staff.js';
@@ -93,7 +93,7 @@ export async function checkRemoval(ctx: Pick<Ctx, 'templates'>, tx: Tx, agent: {
    would keep him from greeting the CEO. */
 export async function tellOrchestrator(ctx: Ctx, companyId: string, department: string, hired: Hired[]): Promise<void> {
   const orchestrator = await orchestratorOf(ctx, companyId);
-  if (!orchestrator || !(await listEvents(ctx.db, orchestrator.id, 0, 1)).length) return;
+  if (!orchestrator || !(await hasHistory(ctx.db, orchestrator.id))) return;
   await appendEvent(ctx, { companyId, agentId: orchestrator.id, kind: 'applied', data: { proposalId: null, kind: 'staff', department, hired: hired.map(({ id, name, role }) => ({ id, name, role })) } });
 }
 

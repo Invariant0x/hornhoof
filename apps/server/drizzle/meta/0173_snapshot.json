@@ -311,7 +311,7 @@
           "name": "agent_event_archives_pending",
           "columns": [
             {
-              "expression": "company_id",
+              "expression": "id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

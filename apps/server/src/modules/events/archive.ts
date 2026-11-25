@@ -23,7 +23,8 @@ export const KEPT_MARKS = ['failureCase', 'silentJob', 'operationsPending', 'ope
 /* The jobs one round looks at, and the most events one file holds; a job's events go into one file whole. */
 export const JOBS_A_ROUND = 100;
 export const FILE_EVENTS = 1_000;
-/* How often the round runs once it caught up: at every minute round while it is behind, else once an hour. */
+/* How often the round looks for jobs to archive once it caught up: at every minute round while it is behind, else once
+   an hour. The archives waiting for their copies are looked at every minute. */
 export const IDLE_EVERY_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 const ENDED = ['done', 'failed', 'obsolete'] as const;
@@ -125,14 +126,15 @@ export async function archiveRound(ctx: Pick<Ctx, 'db' | 'files' | 'config'>, no
     full ||= done.full;
   }
   cleared += await clearStanding(ctx, now);
-  const [waiting] = await ctx.db.select({ id: agentEventArchives.id }).from(agentEventArchives).where(isNull(agentEventArchives.clearedAt)).limit(1);
-  return { archived, cleared, behind: full || waiting !== undefined };
+  return { archived, cleared, behind: full };
 }
 
-/* The round as the minute round runs it: at once while it is behind, else an hour after the last one. */
+/* The round as the minute round runs it: the archives that wait for their copies every minute, and the jobs to archive at
+   once while the last look found more than one round takes, else an hour after it. */
 const nextRound = new WeakMap<object, number>();
 export async function pacedArchiveRound(ctx: Pick<Ctx, 'db' | 'files' | 'config'>, now = new Date()): Promise<ArchiveRound | null> {
-  if ((nextRound.get(ctx.db) ?? 0) > now.getTime()) return null;
+  if (!ctx.config.filesDir) return null;
+  if ((nextRound.get(ctx.db) ?? 0) > now.getTime()) return { archived: 0, cleared: await clearStanding(ctx, now), behind: false };
   const round = await archiveRound(ctx, now);
   nextRound.set(ctx.db, round.behind ? 0 : now.getTime() + IDLE_EVERY_MS);
   return round;
@@ -199,7 +201,7 @@ function chunksOf(rows: readonly Row[]): Row[][] {
    changed meanwhile, as by a secret hidden, is read again at a later round, and the file left behind goes with the store's
    round as no row names it. */
 async function keepArchive(ctx: Pick<Ctx, 'db' | 'files'>, companyId: string, chunk: Row[]): Promise<number> {
-  const events: ArchivedEvent[] = chunk.map(({ agentId: _agent, ...event }) => event);
+  const events: ArchivedEvent[] = chunk.map(row => ({ id: row.id, seq: row.seq, kind: row.kind, data: row.data, jobId: row.jobId, personId: row.personId, createdAt: row.createdAt }));
   const kept = await ctx.files.putBytes(ctx.db, archiveBytes(events));
   return ctx.db.transaction(async tx => {
     const ids = events.map(event => event.id);
@@ -223,10 +225,15 @@ async function keepArchive(ctx: Pick<Ctx, 'db' | 'files'>, companyId: string, ch
 }
 
 /* The archives not cleared yet whose file stands on as many machines as the company asks for: their events leave the
-   table. Says how many left. */
+   table. A few are looked at a round, each in its turn, so those whose copies cannot stand yet keep none of the others
+   waiting. Says how many events left. */
+const clearedAfter = new WeakMap<object, string>();
 async function clearStanding(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Promise<number> {
   const x = agentEventArchives;
-  const waiting = await ctx.db.select({ id: x.id, sha256: x.sha256 }).from(x).where(isNull(x.clearedAt)).orderBy(asc(x.createdAt)).limit(JOBS_A_ROUND);
+  const after = clearedAfter.get(ctx.db);
+  const waiting = await ctx.db.select({ id: x.id, sha256: x.sha256 }).from(x).where(and(isNull(x.clearedAt), after ? gt(x.id, after) : undefined)).orderBy(asc(x.id)).limit(JOBS_A_ROUND);
+  if (waiting.length < JOBS_A_ROUND) clearedAfter.delete(ctx.db);
+  else clearedAfter.set(ctx.db, waiting.at(-1)!.id);
   let cleared = 0;
   for (const archive of waiting) {
     if (!(await ctx.files.copiesStand(ctx.db, archive.sha256))) continue;

@@ -7,7 +7,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentEventArchives, agentEvents, agents, companies, departments, jobs, people, subscriptions, turns, type AgentEventKind } from '../src/db/schema.js';
 import { FIRST_CONTACT_ACTION } from '../src/modules/conversation/prompt.js';
 import { archiveRound, HISTORY_DAYS } from '../src/modules/events/archive.js';
-import { earlierTalk } from '../src/modules/events/store.js';
+import { earlierTalk, hasHistory } from '../src/modules/events/store.js';
 import { backupRound } from '../src/modules/files/backup.js';
 import { hideSecretIn, storedTexts } from '../src/modules/tasks/hide-secret.js';
 import { as } from './helpers-basic.js';
@@ -141,6 +141,19 @@ describe('the old history of agents', () => {
     expect(await s.round()).toMatchObject({ archived: 0, stays: 'no_files_dir' });
     const left = new Set(await s.raw());
     expect(old.archived.every(e => left.has(e.id))).toBe(true);
+  });
+
+  it('counts an agent whose whole history is archived as one whose conversation began', async () => {
+    const s = await stand();
+    const [quiet] = await s.db.insert(agents).values({ companyId: s.acme.id, kind: 'worker', name: 'Quiet', model: '' }).returning();
+    const ended = daysAgo(20);
+    const [done] = await s.db.insert(jobs).values({ companyId: s.acme.id, agentId: quiet!.id, subscriptionId: (await s.job(null)).subscriptionId, prompt: 'Work', timeoutMs: 60_000, status: 'done', createdAt: ended, finishedAt: ended }).returning();
+    await s.db.insert(agentEvents).values({ companyId: s.acme.id, agentId: quiet!.id, jobId: done!.id, kind: 'text', data: { text: 'Hello there' }, createdAt: ended });
+    expect(await hasHistory(s.db, quiet!.id)).toBe(true);
+    await s.round();
+    expect(await s.db.select({ id: agentEvents.id }).from(agentEvents).where(eq(agentEvents.agentId, quiet!.id))).toEqual([]);
+    expect(await hasHistory(s.db, quiet!.id)).toBe(true);
+    expect(await hasHistory(s.db, s.owner.id)).toBe(false);
   });
 
   it('answers a first contact from the archive', async () => {

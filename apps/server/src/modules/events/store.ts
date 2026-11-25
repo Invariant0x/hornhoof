@@ -4,7 +4,7 @@ import { and, asc, countDistinct, desc, eq, gt, inArray, isNotNull, isNull, lt, 
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentSpot } from '../../auth/access.js';
-import { agentEvents, agents, jobs, people, type AgentEventKind } from '../../db/schema.js';
+import { agentEventArchives, agentEvents, agents, jobs, people, type AgentEventKind } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { HORNHOOF, agentParty, incomingEnvelope, messageData, readMessage, type MessageEnvelope, type MessageParty } from './parties.js';
 import { notStep } from '../tools/steps.js';
@@ -167,6 +167,13 @@ export async function listEvents(db: Db, agentId: string, after: number, limit =
   const reach = rows.length === limit ? rows.at(-1)!.seq : undefined;
   const archived = await archivedRows({ db, files }, { agentId, after, before: reach, newest: false, limit });
   return together(rows, archived, false, limit).map(view);
+}
+
+/* Whether the agent's conversation began: an event of it is in the table, or in an archive of its old history. */
+export async function hasHistory(db: Db, agentId: string): Promise<boolean> {
+  if ((await listEvents(db, agentId, 0, 1)).length) return true;
+  const [archived] = await db.select({ id: agentEventArchives.id }).from(agentEventArchives).where(eq(agentEventArchives.agentId, agentId)).limit(1);
+  return archived !== undefined;
 }
 
 /* An agent's newest events, or the newest before seq, oldest first: a window keeps only its last ones and reads further back

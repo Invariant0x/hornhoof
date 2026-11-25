@@ -21,5 +21,5 @@ CREATE INDEX "agent_event_archives_agent_seq" ON "agent_event_archives" USING bt
 CREATE INDEX "agent_event_archives_sha256" ON "agent_event_archives" USING btree ("sha256");--> statement-breakpoint
 CREATE INDEX "agent_event_archives_job_ids" ON "agent_event_archives" USING gin ("job_ids");--> statement-breakpoint
 CREATE INDEX "agent_event_archives_event_ids" ON "agent_event_archives" USING gin ("event_ids");--> statement-breakpoint
-CREATE INDEX "agent_event_archives_pending" ON "agent_event_archives" USING btree ("company_id") WHERE cleared_at is null;--> statement-breakpoint
+CREATE INDEX "agent_event_archives_pending" ON "agent_event_archives" USING btree ("id") WHERE cleared_at is null;--> statement-breakpoint
 CREATE INDEX "jobs_ended" ON "jobs" USING btree ("company_id",coalesce("finished_at", "created_at")) WHERE "jobs"."status" in ('done', 'failed', 'obsolete');
