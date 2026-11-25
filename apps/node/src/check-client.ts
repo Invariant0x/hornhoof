@@ -11,6 +11,7 @@ export class CheckClient {
   private connected = false;
   private refusal: string | null = null;
   refusalChanged: (() => void) | undefined;
+  recheckRefusal: (() => Promise<void>) | undefined;
   isOnline(): boolean { return this.connected; }
   /* Pending claims can be granted at any time. Aborted holders still own their slot during cleanup. */
   leaseIds(): string[] { return [...this.entries.keys()]; }
@@ -56,6 +57,8 @@ export class CheckClient {
   }
 
   async acquire(options: SlotOptions = {}): Promise<CheckLease> {
+    options.signal?.throwIfAborted();
+    if (this.refusal) await this.recheckRefusal?.();
     options.signal?.throwIfAborted();
     if (this.refusal) throw new Error(this.refusal);
     if (!this.connected) throw new Error('Machine check queue is offline.');

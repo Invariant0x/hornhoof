@@ -1,5 +1,5 @@
 {
-  "id": "a58ff0c5-e39d-4135-a63a-0b3274b483e3",
+  "id": "7dd1d327-ad14-4c14-92e2-3f0acee25b5c",
   "prevId": "668e35c5-58fd-43fa-ae53-fb725d8c8ec2",
   "version": "7",
   "dialect": "postgresql",
@@ -429,6 +429,56 @@
           ],
           "isUnique": false,
           "where": "data->>'operatorEvidenceId' is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_operator_delivery": {
+          "name": "agent_events_operator_delivery",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "job_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "(data->'operatorDelivery'->>'id')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "data->'operatorDelivery'->>'id' is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_operator_evidence_delivery": {
+          "name": "agent_events_operator_evidence_delivery",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "(data->'operatorEvidence'->>'deliveryId')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "data->'operatorEvidence'->>'deliveryId' is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -5441,6 +5491,102 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "jobs_agent_conversation_ended": {
+          "name": "jobs_agent_conversation_ended",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "coalesce(\"finished_at\", \"created_at\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"jobs\".\"kind\" = 'conversation' and \"jobs\".\"status\" in ('done', 'failed')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "jobs_agent_conversation_retry_waiting": {
+          "name": "jobs_agent_conversation_retry_waiting",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"jobs\".\"kind\" = 'conversation' and \"jobs\".\"status\" = 'queued' and \"jobs\".\"not_before\" is not null and \"jobs\".\"continue_of\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "jobs_agent_conversation_obsolete": {
+          "name": "jobs_agent_conversation_obsolete",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "coalesce(\"finished_at\", \"created_at\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"jobs\".\"kind\" = 'conversation' and \"jobs\".\"status\" = 'obsolete'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -6950,31 +7096,6 @@
           "value": "(\"node_connections\".\"disconnected_at\" IS NULL) = (\"node_connections\".\"cause\" IS NULL)"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.node_stream_floors": {
-      "name": "node_stream_floors",
-      "schema": "",
-      "columns": {
-        "stream": {
-          "name": "stream",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "upto": {
-          "name": "upto",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.nodes": {

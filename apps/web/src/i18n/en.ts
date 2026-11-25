@@ -1146,6 +1146,8 @@ export const en = {
       /* A part a node keeps in its own folder, which is a Docker volume, so it is already inside the volumes. */
       inVolumes: (name: string) => `${name}, in the volumes`,
       docker: (free: string, total: string) => `Docker's own disk: ${free} GB free of ${total} GB`,
+      copiesTitle: 'Largest working copies',
+      copyTask: (task: number) => `task #${task}`,
       low: (since: string) => `Short of disk space since ${since}: it takes no new checks or builds until space is back. Its turns go on.`,
       mark: 'Low on disk',
     },
@@ -2118,10 +2120,10 @@ export const en = {
     machineLowTakes: (parts: string) => `Hornhoof takes: ${parts}.`,
     machineLowCleaned: (parts: string) => `Removed in the last 24 hours: ${parts}.`,
     machineLowGoesOn: 'It keeps running its turns, but takes no new checks or builds until space is back.',
-    machineLowKept: 'Not removed: a person needs to check it',
+    machineLowKept: 'Not removed automatically',
     machineLowKeptRow: (task: number | null, gb: string, why: string) => `${task === null ? '' : `task ${task}, `}${gb} GB, ${why}`,
     machineLowKeptWhy: { uncommitted: 'changes not committed', unpushed: 'commits not pushed', ignored: 'ignored files not on a remote' },
-    machineLowDo: 'What to do: remove files you no longer need from this machine, or give Docker more disk space.',
+    machineLowDo: 'Operations is notified to check this machine and free space. You do not need to run any commands.',
     /* The company's database past its line, for the CEO: nothing waits for an answer, and the card goes by itself. */
     databaseLarge: (line: string) => `The company's database is larger than ${line} GB`,
     databaseLargeNow: (gb: string) => `It takes ${gb} GB now. It holds only records and text, as its files lie in the file store, so it should stay well under the line.`,

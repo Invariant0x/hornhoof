@@ -1195,8 +1195,15 @@
     {
       "idx": 171,
       "version": "7",
-      "when": 1795583968045,
-      "tag": "0172_node_stream_floors",
+      "when": 1795631214986,
+      "tag": "0172_hot_query_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "7",
+      "when": 1795631659520,
+      "tag": "0173_node_stream_floors",
       "breakpoints": true
     }
   ]

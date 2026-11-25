@@ -1,4 +1,5 @@
 import { SECRET } from '../../db/agent-sql.js';
+import { storedLayoutProblem } from '../world/stored-layout.js';
 
 /* Whose a conflict is. The first five are the CEO's: people, what they reach, the plans and the machines the company
    runs on, and protected, the records only a person's guarded route or one of Hornhoof's own gateways writes (what
@@ -24,6 +25,8 @@ export type TableRule = {
   afterRestore?: 'skip';
   /* Columns never taken from the source. */
   hereOnly?: readonly string[];
+  /* Why a row is not one the app would save, or null: a row the app refuses is never written by a merge either. */
+  check?: (row: Readonly<Record<string, unknown>>) => string | null;
 };
 
 const rows = (topic: Topic, more: Omit<TableRule, 'kind' | 'topic'> = {}): TableRule => ({ kind: 'rows', topic, ...more });
@@ -123,7 +126,7 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(['companies', 'departments', 'teams', 'agents', 'improvements', 'improvement_submissions', 'test_parts', 'backlog_items', 'briefings', 'map_layouts'], rows('work')),
   /* The company's city and the CEO's orders to move its buildings: its world, kept apart from its work tables, compared
      row by row like a person's map, and two that differ are the orchestrator's to settle. */
-  world_layouts: rows('work'),
+  world_layouts: rows('work', { check: storedLayoutProblem }),
   /* The cards of Hornhoof's own feedback inbox and who sent each: a card only the source holds whose number or finding the
      leader gave another card stays out. */
   ...each(['feedback_inbox', 'feedback_signals', 'feedback_submissions'], rows('work')),
