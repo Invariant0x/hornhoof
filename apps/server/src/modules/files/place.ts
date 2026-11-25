@@ -2,7 +2,7 @@ import { sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { sameHome } from '../backups/holders.js';
 import { DEFAULT_AREA_BYTES, floorOf, headroomOf } from './area.js';
-import { storeBackupMachines } from './backup.js';
+import { storeBackupMachines } from './backup-settings.js';
 
 /* Where the files of the store are kept. Each file is picked machines to keep it: as many as the copies setting asks, as
    far as the company has machines that keep files, each copy on another machine. The leading machine first, where it

@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { FilesDb } from './files.js';
+import { backupSettings } from './backup-settings.js';
 import { NAMED, SET_ASIDE } from './named.js';
 import { better, LOST_MS, machineSeats } from './place.js';
 import { StoreRefused } from './store.js';
@@ -10,7 +11,6 @@ import { StoreRefused } from './store.js';
    that keeps it reports none into net.file_copies, so it takes no copy's place and lets no copy go. The leading machine
    keeps it, in a folder of its own beside its live store, while no other machine keeps files. */
 
-export const KEEP_DAYS = 30;
 export const MAX_KEEP_DAYS = 3650;
 const DAY_MS = 24 * 60 * 60 * 1000;
 /* How many contents one round brings into the backup here, and one look of a machine names, so a store of many files
@@ -20,12 +20,6 @@ const BATCH = 200;
 const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 const listOf = (values: string[]) => `{${values.join(',')}}`;
 const iso = (at: Date | string | null | undefined): string | null => (at == null ? null : new Date(at).toISOString());
-
-/* The days the backup keeps a content no row names, and the machine other than the leading one picked to keep it. */
-export async function backupSettings(db: FilesDb): Promise<{ keepDays: number; machineId: string | null }> {
-  const [row] = rowsOf<{ keep_days: number; machine_id: string | null }>(await db.execute(sql`SELECT keep_days, machine_id FROM net.file_backup_settings`));
-  return { keepDays: row?.keep_days ?? KEEP_DAYS, machineId: row?.machine_id ?? null };
-}
 
 /* Sets the days the backup keeps a content no row names; its next round lets go of what was kept longer. */
 export async function setKeepDays(db: FilesDb, days: number, by: string): Promise<void> {
@@ -41,13 +35,6 @@ export async function backsUpStore(db: FilesDb, machineId: string, sha256?: stri
   if (sha256 === undefined) return picked === machineId;
   const [row] = rowsOf<{ machine_id: string | null }>(await db.execute(sql`SELECT machine_id FROM net.file_backups WHERE sha256 = ${sha256}`));
   return row !== undefined && (picked === machineId || row.machine_id === machineId);
-}
-
-/* The machines other than the leading one that keep the store's backup: placement keeps live copies off them while the
-   other machines that keep files are as many as the copies asked for. */
-export async function storeBackupMachines(db: FilesDb): Promise<string[]> {
-  const { machineId } = await backupSettings(db);
-  return machineId === null ? [] : [machineId];
 }
 
 /* The machine the backup is on: the one picked, while it keeps files, away or not, so what only it keeps is not left
