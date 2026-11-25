@@ -808,7 +808,7 @@ describe("an agent's live terminal in its window", () => {
     terms[0]!.type('old\r');
     clock.mockReturnValue(now + 60_000);
     for (let i = 0; i < 300; i++) terms[0]!.type('k');
-    await note('Too much text was typed while the terminal was disconnected. Wait for it to connect, then type again.', 'alert');
+    await note('Too much text was typed before the terminal was ready. Wait until it is ready, then type again.', 'alert');
     ws.opened();
     clock.mockRestore();
     expect(ws.sent).toHaveLength(255);

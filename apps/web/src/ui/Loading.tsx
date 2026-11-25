@@ -143,9 +143,13 @@ const idOfFailure = (failure: unknown): number => {
 };
 
 /* A part that failed because the server is away is asked again by itself, after a growing wait, until it comes: nothing for
-   the person to press, and nothing to say, since the service road says it. */
+   the person to press, and nothing to say, since the service road says it. A part an update refused does not ask on a timer:
+   the page that asked is the old build until the update panel has looked at the build the server runs now, and it asks all
+   its parts again, by the connection coming back, only once it has (or reloads, where the build differs). */
+const refusedByUpdate = (failure: unknown): boolean => failure instanceof ApiFailure && failure.reason === 'maintenance';
+
 function useAskAgainWhileAway(missing: LoadPart[]): void {
-  const away = missing.filter(p => !p.quiet && isAway(p.failure));
+  const away = missing.filter(p => !p.quiet && isAway(p.failure) && !refusedByUpdate(p.failure));
   const tries = useRef(0);
   const asking = useRef(away);
   asking.current = away;

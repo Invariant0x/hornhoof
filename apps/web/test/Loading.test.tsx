@@ -152,7 +152,7 @@ describe('the wait of one load', () => {
     expect(missing.load).toHaveBeenCalledTimes(1);
     later(1);
     expect(missing.load).toHaveBeenCalledTimes(2);
-    rerender(<Shown parts={[{ ...missing, failure: new ApiFailure(503, 'unavailable', 'Updating.', 'maintenance') }]} />);
+    rerender(<Shown parts={[{ ...missing, failure: new ApiFailure(502, 'unavailable', 'Starting.', 'starting') }]} />);
     later(4_000);
     expect(missing.load).toHaveBeenCalledTimes(3);
     expect(container.querySelector('.load-fail')).toBeNull();
@@ -161,6 +161,15 @@ describe('the wait of one load', () => {
     rerender(<Shown parts={[{ ...missing, data: [1], failure: null }]} />);
     later(RING_MIN_MS);
     expect(phase(container)).toBe('done');
+  });
+
+  it('does not ask on a timer a part an update refused: it waits for the connection to come back, once the page has seen which build runs', () => {
+    const missing = part(undefined, new ApiFailure(503, 'unavailable', 'Updating.', 'maintenance'));
+    const { container } = render(<Shown parts={[missing]} />);
+    later(60_000);
+    expect(missing.load).not.toHaveBeenCalled();
+    expect(phase(container)).toBe('loading');
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('says a state of the service road in place of the ring of a page area while one stands: the logo and the same line, nothing to press', () => {
