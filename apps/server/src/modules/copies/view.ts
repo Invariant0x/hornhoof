@@ -23,7 +23,7 @@ export type CopyLine =
   | { line: 'behind'; minutes: number }
   | { line: 'asleep'; since: string | null }
   /* Its keeper tried again and again and gave the copy up: since when, and after how many attempts in a row. */
-  | { line: 'stopped'; why: 'disk_full' | 'setup' | 'gave_up' | null; since?: string; attempts?: number };
+  | { line: 'stopped'; why: 'disk_full' | 'setup' | 'gave_up' | 'path_slow' | 'path_late' | null; since?: string; attempts?: number };
 
 /* A machine's part in holding the company's data. number, why: its place in the order and the key of the words for it,
    as the ranking stored it. pin: the place the CEO gave it by hand, or 'none' when he keeps it from the server. unfit:
@@ -72,7 +72,7 @@ function savingLine(ctx: Ctx, id: string): CopyLine {
 
 function stoppedLine(ctx: Ctx, row: Row): CopyLine {
   const gaveUp = gaveUpOf(ctx, row.id);
-  if (gaveUp) return { line: 'stopped', why: 'gave_up', since: gaveUp.since, attempts: gaveUp.attempts };
+  if (gaveUp) return { line: 'stopped', why: gaveUp.why === 'failed' ? 'gave_up' : gaveUp.why === 'slow' ? 'path_slow' : 'path_late', since: gaveUp.since, attempts: gaveUp.attempts };
   return { line: 'stopped', why: row.copyError === 'disk_full' || row.copyError === 'setup' ? row.copyError : null };
 }
 

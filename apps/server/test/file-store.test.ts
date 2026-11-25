@@ -36,6 +36,19 @@ describe('the file store of one machine', () => {
     expect((await store.list()).map(file => file.sha256)).toEqual([kept.sha256]);
   });
 
+  it('lays the file it seals over one there under its name that does not open with this key, as a store a database before left', async () => {
+    const store = new FileStore(folder());
+    const bytes = randomBytes(100_000);
+    /* A folder of files kept again under a new database, which made a key of its own. */
+    const stale = await store.put(Readable.from([bytes]), randomBytes(32));
+    const kept = await store.put(Readable.from([bytes]), key);
+    expect(kept).toMatchObject({ sha256: stale.sha256, size: bytes.length, fresh: true });
+    expect(kept.sealedSha256).not.toBe(stale.sealedSha256);
+    expect(sha(readFileSync(store.path(kept.sha256)))).toBe(kept.sealedSha256);
+    expect((await buffer(store.open(kept.sha256, key))).equals(bytes)).toBe(true);
+    expect(everything(store.dir)).toEqual([kept.sha256]);
+  });
+
   it('keeps nothing of a file past its room, or of one that stops coming', async () => {
     const store = new FileStore(folder(), 50);
     const room = { bytes: 1000, full: () => new Error('no room') };

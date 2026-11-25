@@ -43,8 +43,9 @@ export function replicasOf(ctx: Ctx, machineId: string, holdsCopy: boolean, comp
   return bytes === 0 ? { count: 0, bytes, companies: [] } : { count: 1, bytes, companies: [{ name: company, bytes }] };
 }
 
-/* A copy its keeper gave up for good, as it says: since when, and after how many attempts in a row. */
-export type GaveUpDetail = { since: string; attempts: number };
+/* A copy its keeper gave up for good, as it says: since when, after how many attempts in a row, and why: it failed again
+   and again, or the path to it is too slow or too late for a copy. */
+export type GaveUpDetail = { since: string; attempts: number; why: 'failed' | 'slow' | 'late' };
 const gaveUpDetails = new WeakMap<Ctx, Map<string, GaveUpDetail>>();
 
 export function noteGaveUp(ctx: Ctx, machineId: string, gaveUp: GaveUpDetail | null): void {
@@ -56,6 +57,11 @@ export function noteGaveUp(ctx: Ctx, machineId: string, gaveUp: GaveUpDetail | n
 
 export function gaveUpOf(ctx: Ctx, machineId: string): GaveUpDetail | undefined {
   return gaveUpDetails.get(ctx)?.get(machineId);
+}
+
+/* Every copy given up, by its machine's id. */
+export function gaveUpAll(ctx: Ctx): [string, GaveUpDetail][] {
+  return [...(gaveUpDetails.get(ctx) ?? [])];
 }
 
 /* What a former leader's keeper says it waits on while saving what it did, and since when. */

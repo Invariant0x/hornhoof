@@ -36,7 +36,7 @@ import {
   advanceRelocationStep,
   applyBridgeRule,
   bindCityMap,
-  canPlaceFootprint,
+  canMoveBuildingTo,
   createCity,
   deserializeCityLayout,
   growBuildingForProgress,
@@ -622,7 +622,8 @@ export function syncLiveSnapshotToCity(
   };
 }
 
-/* Validates whether a building can be relocated onto (toCol, toRow) without overlapping roads, walls, or other footprints. */
+/* Validates whether a building can be relocated onto (toCol, toRow): no overlap with roads, walls or other footprints, and a
+   door the streets reach, the same check the move itself makes when it is applied. */
 export function canRelocateBuildingTo(
   city: CityState,
   map: GeneratedWorldMap,
@@ -633,7 +634,7 @@ export function canRelocateBuildingTo(
   const b = city.buildings.find(item => item.id === buildingId);
   if (!b) return false;
   if (b.col === toCol && b.row === toRow) return false;
-  return canPlaceFootprint(city, map, toCol, toRow, b.spanCol, b.spanRow, b.id, true);
+  return canMoveBuildingTo(city, map, b, toCol, toRow);
 }
 
 /* Converts placed city buildings into interactive PickableObject bounds for the isometric engine. */

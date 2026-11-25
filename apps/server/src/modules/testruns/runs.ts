@@ -1,4 +1,5 @@
 import { taskFor, logName, type Run } from './run-records.js';
+import { OLD_NODE_REFUSAL_MARK } from '../../locales/ru.js';
 import { WORK_MEMORY_GB, TEST_MINUTES, UNMEASURED_QUIET_MS, OPEN_RUNS, WAIT_MS, AWAY_MS, RERUNS } from './constants.js';
 import type { KeptFiles, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
 import { countOnly, idOnly, only } from '../../db/selections.js';
@@ -570,7 +571,7 @@ type PartEnd = 'passed' | 'failed' | 'refused';
    Hornhoof's sentence on the second. A command never writes the first line of a log: the node writes "$ <command>" or
    where the run stands there first, so no command's output passes for a refusal (#1953, Trinity's F1). */
 const OLD_REFUSAL = 'Hornhoof stopped this command before it started.';
-const OLD_MARK = 'запусти через run_tests';
+const OLD_MARK = OLD_NODE_REFUSAL_MARK;
 export function oldRefusal(log: string): boolean {
   const lines = log.replace(/\s+$/, '').split('\n');
   return (lines.length === 1 && lines[0]!.startsWith(OLD_REFUSAL)) || (lines.length === 2 && lines[0] === OLD_MARK && lines[1]!.startsWith(OLD_REFUSAL));

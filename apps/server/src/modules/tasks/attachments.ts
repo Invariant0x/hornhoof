@@ -1,6 +1,5 @@
 import { PICTURE_BYTES, FILE_BYTES, checkUploadRoom, checkPictureRoom, checkRoom, onTask, type UploadRoom } from './file-policy.js';
 import { Readable } from 'node:stream';
-import { buffer } from 'node:stream/consumers';
 import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -22,8 +21,9 @@ import { refuse, type Task } from './state.js';
 import { seesTask } from './visibility.js';
 import { taskByRef } from './lookup.js';
 import { attachmentJobOf, checkAttachmentTask } from './attachment-token.js';
+import { fileBytes, fileStream } from './file-bytes.js';
 import type { Kept } from '../files/files.js';
-import { dropLeftOnDisk, hasOldBytes, oldFileStream } from '../files/legacy.js';
+import { dropLeftOnDisk, hasOldBytes } from '../files/legacy.js';
 const PER_TURN = 30;
 const NAME_LENGTH = 200;
 /* The files of a turn go this long after it closed. */
@@ -126,17 +126,7 @@ export async function takenBytes(ctx: Pick<Ctx, 'db' | 'files'>, bytes: Buffer):
   return { ...(await ctx.files.putBytes(ctx.db, bytes)), head: bytes.subarray(0, HEAD_BYTES) };
 }
 
-/* A file's bytes as they go out: from the store, or, for a row from before it that is not moved yet, as it was kept. */
-export async function fileStream(ctx: Pick<Ctx, 'db' | 'config' | 'files'>, id: string): Promise<Readable> {
-  const [row] = await ctx.db.select({ sha256: attachments.sha256 }).from(attachments).where(eq(attachments.id, id));
-  if (!row) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
-  return row.sha256 ? ctx.files.open(ctx.db, row.sha256) : oldFileStream(ctx, id);
-}
-
-/* A file's bytes whole, for one small enough to hold. */
-export async function fileBytes(ctx: Pick<Ctx, 'db' | 'config' | 'files'>, id: string): Promise<Buffer> {
-  return buffer(await fileStream(ctx, id));
-}
+export { fileBytes, fileStream } from './file-bytes.js';
 
 function personDownloadType(found: { name: string | null; mediaType?: string }): string {
   if (found.mediaType === 'text/plain') return 'text/plain; charset=utf-8';

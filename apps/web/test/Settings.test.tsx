@@ -439,5 +439,9 @@ describe('the language under Appearance & language', () => {
     expect(decl('.lang-select:focus-visible', 'outline-offset')).toBe('2px');
     expect(decl('.select-wrap::after', 'inset-inline-end')).toBe('14px');
     expect(decl('.select-wrap::after', 'border-bottom')).toBe('2px solid var(--muted)');
+    /* The arrow is the right and bottom strokes turned 45 degrees, so it points down in both directions: a logical
+       side would turn it sideways on a right-to-left page. */
+    expect(decl('.select-wrap::after', 'border-right')).toBe('2px solid var(--muted)');
+    expect(decl('.select-wrap::after', 'border-inline-end')).toBeUndefined();
   });
 });

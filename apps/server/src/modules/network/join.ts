@@ -18,7 +18,7 @@ import { Server } from '../link/client.js';
 import { tunnelSettings } from '../link/link.js';
 import { CERT_DAYS, readEd25519PublicKey, RENEW_AFTER_DAYS, type Issued } from './authority.js';
 import type { Go, LeaderBuild } from './follow.js';
-import { joinMessage } from './join-proof.js';
+import { hostIdOf, joinMessage } from './join-proof.js';
 import { renewedMessage, renewMessage, type Signed } from './renewal.js';
 import { authorityOf, certify, makeAuthorityOnce, networkMachine, peerSecret, revokedSerials } from './store.js';
 
@@ -43,8 +43,8 @@ const machineTaken = () => new ApiError(409, 'conflict', 'This computer is in th
 const renewRefused = () => new ApiError(401, 'unauthorized', 'This renewal is not signed by the machine, or is too old.', 'renew_refused');
 const notLeading = () => new ApiError(503, 'unavailable', 'This server does not lead the company now. Try again in a few seconds.');
 
-/* The id install.sh gives a computer's keeper: the hash of the key the computer joined with. */
-export const hostIdOf = (machineKey: string): string => hashToken(`hornhoof-host:${machineKey}`);
+/* Kept here for its callers; it lives in join-proof.ts so the machine module does not load all of join. */
+export { hostIdOf };
 
 /* Whether a computer, by the key it joined with, is the one this server itself runs on. */
 export function isServerComputer(config: Config, machineKey: string): boolean {

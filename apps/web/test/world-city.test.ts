@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   acceptRelocation,
   advanceRelocationStep,
+  canPlaceFootprint,
   cancelRelocation,
   createCity,
   deserializeCityLayout,
@@ -14,6 +15,7 @@ import {
   verifyCityInvariants,
   type CityState,
 } from '../src/world/city-layout';
+import { canRelocateBuildingTo } from '../src/world/live-sync';
 import { runFiveYearSimulation, SIM_KNOBS, SIM_SEEDS } from '../src/world/simulator';
 import { generateWorldTerrain } from '../src/world/terrain-engine';
 import { DUNGEON_WORLD_PACK } from '../src/world-packs/dungeon/pack';
@@ -174,8 +176,35 @@ describe('Stage 3 pack-agnostic organic city growth, standard 1x1..6x6 footprint
     const house = placeBuilding(city, { id: 'house-1', kind: 'house', departmentId: 'd1', stage: 4 })!;
     expect(city.bridge ?? null).toBeNull();
     /* (62, 63) is free land, but its door would stand where streets, which cross water only on a bridge, cannot come. */
+    expect(canPlaceFootprint(city, map, 62, 63, house.spanCol, house.spanRow, house.id, true)).toBe(true);
     expect(requestRelocation(city, house.id, 62, 63)).toBeNull();
     expect(city.relocations).toEqual([]);
+  });
+
+  /* #2087: the map's preview asks canRelocateBuildingTo, the accepted move requestRelocation; when they disagreed, a move
+     the map showed as possible was dropped as it was applied, the task done and the building where it was. */
+  it('shows a move as possible exactly where it can be made, the far bank refused and its own old place no bar to its door', () => {
+    const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: 'hornhoof', mapSize: 150 });
+    const city = createCity(map, { orderChaos: 0.6 });
+    placeBuilding(city, { id: 'dept-1', kind: 'department', departmentId: 'd1', stage: 3 });
+    const house = placeBuilding(city, { id: 'house-1', kind: 'house', departmentId: 'd1', stage: 4 })!;
+    const targets = [{ col: 62, row: 63 }];
+    for (let dr = -3; dr <= 3; dr++) for (let dc = -3; dc <= 3; dc++) if (dc || dr) targets.push({ col: house.col + dc, row: house.row + dr });
+    let possible = 0;
+    for (const { col, row } of targets) {
+      const req = requestRelocation(city, house.id, col, row, map);
+      expect(req !== null, `${col},${row}`).toBe(canRelocateBuildingTo(city, map, house.id, col, row));
+      if (req) {
+        possible++;
+        cancelRelocation(city, req.id);
+      }
+    }
+    expect(possible).toBeGreaterThan(0);
+    expect(canRelocateBuildingTo(city, map, house.id, 62, 63)).toBe(false);
+    /* One tile back puts the door of a front wall where the house stands now: the house leaves that place, so it is free. */
+    const back = [{ col: house.col - 1, row: house.row }, { col: house.col, row: house.row - 1 }].filter(t => canPlaceFootprint(city, map, t.col, t.row, house.spanCol, house.spanRow, house.id, true));
+    expect(back.length).toBeGreaterThan(0);
+    for (const t of back) expect(canRelocateBuildingTo(city, map, house.id, t.col, t.row), `${t.col},${t.row}`).toBe(true);
   });
 
   it('persists layout snapshots identically and moves buildings only via accepted staged relocation', () => {

@@ -396,6 +396,33 @@ describe('a live program its queue waits behind', () => {
     expect((await c.job(next)).status).toBe('queued');
   });
 
+  /* The node took the turn but still makes it ready (its programs update, its worktree gets its dependencies), so nothing of it
+     reached the program: the session shows the last turn's idle prompt with job=null, or there is no program yet. */
+  const readying = async (c: Awaited<ReturnType<typeof company>>, turn: string, shown: Partial<ProgramView>) => {
+    screens(c, turn).show(shown);
+    c.later(2 * MIN);
+    for (let round = 0; round < 4; round++) {
+      await moveStalledQueues(c.ctx, new Date());
+      c.later(MIN);
+    }
+  };
+
+  it('keeps a turn its program never gave a sign of while the session still shows the last turn idle with job=null', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const next = await c.message(c.hana.id, 'The branch is ready.');
+    await readying(c, turn, { jobId: null });
+    expect((await c.job(turn)).status).toBe('running');
+    expect((await c.job(next)).status).toBe('queued');
+  });
+
+  it('keeps a turn its program never gave a sign of while its node has no program of the employee yet', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    await readying(c, turn, { result: 'refused', reason: 'no_program', state: 'gone', snapshot: null, instance: null, jobId: null, input: 'unknown' });
+    expect((await c.job(turn)).status).toBe('running');
+  });
+
   it('keeps running a turn whose views report no_program: nothing closes a turn on silence alone', async () => {
     const c = await company();
     const turn = await c.message(c.hana.id, 'Plan the release.');
@@ -630,6 +657,18 @@ describe('a turn its node still lists whose program is gone', () => {
     const next = await c.message(c.hana.id, 'Bruno: the branch is pushed.');
     c.later(3 * MIN);
     await c.pulse(c.node, turn, 'tool', start, start);
+    await c.live(c.node, [c.orchestrator.id]);
+    await c.roundHeld(c.node);
+
+    expect((await c.job(turn)).status).toBe('running');
+    expect((await c.job(next)).status).toBe('queued');
+  });
+
+  it('keeps a turn its node holds and still makes ready, before its program gave any sign of it, though no program of the employee runs yet', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const next = await c.message(c.hana.id, 'Bruno: the branch is pushed.');
+    c.later(3 * MIN);
     await c.live(c.node, [c.orchestrator.id]);
     await c.roundHeld(c.node);
 

@@ -5,6 +5,8 @@ import type { CopyOrder } from '../keeper/copy.js';
 import { queryOf } from '../merge/leader.js';
 import { machineSource } from '../merge/source.js';
 import { findThisMachine } from '../network/store.js';
+import { weakPath } from './path.js';
+import { copyRetryAsked } from './retry.js';
 
 /* A replication slot of the server's Postgres. pid: the connection that reads it now, none while nobody does.
    confirmed: how far its reader said it holds the changes. */
@@ -44,7 +46,10 @@ export const slotPrefix = (networkId: string): string => `copy_${networkId.slice
    it is. join: the slot this machine made for the copy when it took the server in the newest planned switch, while the
    copy's row still names an attempt below it: a copy that held everything the leader before had written joins that
    slot, and takes no row again. */
-export async function copyOrder(ctx: Ctx, row: { id: string; networkId: string | null; copyName: string | null; copyOld?: number | null; copyOldLed?: number | null; uploadState?: UploadState | null }): Promise<CopyOrder> {
+export async function copyOrder(
+  ctx: Ctx,
+  row: { id: string; networkId: string | null; copyName: string | null; copyOld?: number | null; copyOldLed?: number | null; uploadState?: UploadState | null; copyState?: string | null; linkMbps?: number | null; linkRttMs?: number | null },
+): Promise<CopyOrder> {
   const q = queryOf(ctx.db);
   const found = row.copyName ? (await ctx.replication.slots()).find(slot => slot.name === row.copyName) : null;
   const slot = !row.copyName ? null : !found ? 'missing' : found.walStatus === 'lost' ? 'lost' : 'ok';
@@ -57,9 +62,13 @@ export async function copyOrder(ctx: Ctx, row: { id: string; networkId: string |
   const upload = !row.uploadState ? null : row.uploadState === 'kept' ? 'wipe' : row.uploadState;
   const attempt = /_(\d+)$/.exec(row.copyName ?? '')?.[1];
   const leader = ctx.config.machineId ?? undefined;
+  /* A copy that is not whole yet is not kept over a path measured too weak for it. */
+  const weak = row.copyState === 'ready' ? null : weakPath(row, sized ? Number(sized.size) : null);
   return {
     slot, leaderSize: sized ? Number(sized.size) : null, migrations: counted?.n ?? null, old, upload, lastAttempt: attempt ? Number(attempt) : null,
     applied: await appliedOf(ctx, row.id),
+    ...(copyRetryAsked(ctx, row.id) ? { retry: true as const } : {}),
+    ...(weak ? { weak } : {}),
     ...(leader === undefined ? {} : { leader, join: await slotToJoin(ctx, row.networkId ?? null, attempt ? Number(attempt) : 0) }),
   };
 }

@@ -506,7 +506,7 @@ function copyText(t: Messages, language: Language, copy: NonNullable<DataView['c
     case 'catching_up': return c.catchingUp;
     case 'behind': return c.behind(copy.minutes);
     case 'asleep': return c.asleep(clock(language, copy.since));
-    case 'stopped': return copy.why === 'disk_full' ? c.stoppedDiskFull : copy.why === 'setup' ? c.stoppedSetup : copy.why === 'gave_up' ? c.stoppedGaveUp(copy.attempts ?? 0, copy.since ? clock(language, copy.since) : null) : c.stopped;
+    case 'stopped': return copy.why === 'disk_full' ? c.stoppedDiskFull : copy.why === 'setup' ? c.stoppedSetup : copy.why === 'gave_up' ? c.stoppedGaveUp(copy.attempts ?? 0, copy.since ? clock(language, copy.since) : null) : copy.why === 'path_slow' ? c.stoppedPathSlow : copy.why === 'path_late' ? c.stoppedPathLate : c.stopped;
   }
 }
 
@@ -622,6 +622,29 @@ function MovePart({ row, data, moving, refresh }: { row: MachineRow; data: DataV
   </>;
 }
 
+/* The CEO's button to make a copy again on a machine whose keeper gave its copy up. */
+function RetryCopy({ row, refresh }: { row: MachineRow; refresh: () => Promise<void> }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const retry = async () => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await api.post(`/api/machines/${row.id}/copy/retry`);
+      await refresh();
+    } catch (err) {
+      setFailure(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <>
+    <div className="entry-actions"><button className="act" type="button" disabled={busy} onClick={() => void retry()}>{t.machines.copy.retryCopy}</button></div>
+    {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+  </>;
+}
+
 /* What the server order shows on a card: the number of the machine the server runs on; for the CEO's order, a machine
    that cannot take the server and why, one with a place or kept out, or one the server was asked to move to; nothing
    for a machine with no place. */
@@ -689,7 +712,12 @@ function ServerBlock({ row, me, order, refresh }: { row: MachineRow; me: Me; ord
   return (
     <CardBlock title={t.cards.serverBlock}>
       {kind && <PriorityPart row={row} me={me} order={order} kind={kind} refresh={refresh} />}
-      {copy.length > 0 && <Part title={t.cards.copyPart}>{copy.map(line => <p key={line}>{line}</p>)}</Part>}
+      {copy.length > 0 && (
+        <Part title={t.cards.copyPart}>
+          {copy.map(line => <p key={line}>{line}</p>)}
+          {me.person.isOwner && row.data?.copy?.line === 'stopped' && row.data.copy.why === 'gave_up' && <RetryCopy row={row} refresh={refresh} />}
+        </Part>
+      )}
     </CardBlock>
   );
 }

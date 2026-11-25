@@ -5,8 +5,9 @@ import { captureWith } from './capture';
 import { LONG_HINT, wholeTextOrg, type Script } from './whole-text-data';
 
 /* The department cards and people chips of the map, the head card, role frames and member chips of a department's screen,
-   and the hint at its foot show every word: no ellipsis, no line clamp and no text cut off or standing out of its frame, in
-   a long pseudo translation, Japanese and right to left as in English and Russian, on a wide screen and on a phone. Where
+   show every word: no ellipsis, no line clamp and no text cut off or standing out of its frame, in
+   a long pseudo translation, Japanese and right to left as in English and Russian, on a wide screen and on a phone. The hint
+   at the foot of a department stands on one row and ends in an ellipsis where its words are wider (#2102). Where
    the words fit the old boxes, the boxes keep their old sizes. Each check is soft, so a look goes through the map, the department and
    far zoom, takes every picture and fails at its end with every cut it found. The run that takes the pictures names its
    phase and folder in WHOLE_TEXT_PHASE and WHOLE_TEXT_SHOTS. */
@@ -475,8 +476,8 @@ async function cutAt(page: Page, screen: keyof typeof CUTS) {
 }
 
 /* The head of Development's word for #1554: the cut follows the bars' real height, as measured, not a constant. As it stands
-   and again after the line of what happened grows by a long text, the cut stands 8 px clear of the bars, and nothing stands
-   under them. */
+   and again after the line of what happened takes a long text, which it ends in an ellipsis on its one row, the cut stands
+   8 px clear of the bars, and nothing stands under them. */
 async function cutFollowsBars(page: Page, screen: keyof typeof CUTS) {
   const check = async (when: string) => {
     const at = await cutAt(page, screen);
@@ -489,8 +490,8 @@ async function cutFollowsBars(page: Page, screen: keyof typeof CUTS) {
   const before = await check('as it stands');
   await page.locator(CUTS[screen].line).first().evaluate((el, text) => { el.textContent = text; }, LONG_HINT);
   await settle(page);
-  const after = await check('after the line grows');
-  expect.soft(before.over - after.over, `${screen}: the line grew taller, so the check means something`).toBeGreaterThan(10);
+  const after = await check('after a long text');
+  expect.soft(Math.abs(before.over - after.over), `${screen}: a long text leaves the line on one row, so the bars stay where they stood`).toBeLessThanOrEqual(1);
 }
 
 /* The map's canvas as it opens, at each of its edges in turn, and then brought to each card and chip a person has not seen
@@ -563,8 +564,8 @@ async function schemaScrolls(page: Page, shot: (where: string) => Promise<void>)
 }
 
 /* The head of Development's word for #1554: the room follows the bars' real height, as measured, not a constant. As it stands
-   and again after the line of what happened grows by a long text, the schema stops at every edge on the room the bars leave
-   it, and the line, which grows up from the bottom, takes that much of the room at the bottom. */
+   and again after the line of what happened takes a long text, which it ends in an ellipsis on its one row, the schema stops
+   at every edge on the room the bars leave it, and the line takes the same room at the bottom. */
 async function schemaFollowsBars(page: Page) {
   const check = async (when: string) => {
     for (const edge of ['left', 'right', 'top'] as const) await schemaStopsAt(page, edge, when);
@@ -573,8 +574,8 @@ async function schemaFollowsBars(page: Page) {
   const before = await check('as it stands');
   await page.locator(SCHEMA.line).first().evaluate((el, text) => { el.textContent = text; }, LONG_HINT);
   await settle(page);
-  const after = await check('after the line grows');
-  expect.soft(before.over - after.over, 'department: the line grew taller, so the check means something').toBeGreaterThan(10);
+  const after = await check('after a long text');
+  expect.soft(Math.abs(before.over - after.over), 'department: a long text leaves the line on one row, so the room stays as it stood').toBeLessThanOrEqual(1);
 }
 
 /* The API fixture, the company of these words, and the version the app root asks for and the updates its shell asks for
@@ -669,10 +670,11 @@ for (const look of LOOKS) {
     expect.soft(ticker!.x >= -1 && ticker!.x + ticker!.width <= view.width + 1 && ticker!.y >= -1 && ticker!.y + ticker!.height <= view.height + 1, 'the hint stands on the screen').toBe(true);
     const rects = await page.evaluate(() => ['.dview .ticker', '.dview .zoom', '.dview .dv-acts'].map(s => document.querySelector(s)?.getBoundingClientRect().toJSON() as DOMRect | null));
     expect.soft(overlap(rects[0]!, rects[1]!) || overlap(rects[0]!, rects[2]!), 'the hint clear of the zoom and the tools').toBe(false);
-    /* The Head of Design's word for #1489 (#1539, N2): the hint keeps its own room, so Show everything puts the schema
-       clear of it, and it takes at most three lines; a longer one folds to three and unfolds whole (at the end). */
+    /* The hint keeps its own room, so Show everything puts the schema clear of it, and by the word of #2102 it stands on one
+       row, ending in an ellipsis where its words are wider than the row. */
     expect.soft(await underHint(page), 'the hint stands over no part of the schema').toEqual([]);
-    expect.soft(await hintLines(page), 'the hint takes at most three lines').toBeLessThanOrEqual(3);
+    expect.soft(await hintLines(page), 'the hint stands on one row').toBe(1);
+    expect.soft(await hint.evaluate(el => getComputedStyle(el).textOverflow), 'the hint ends in an ellipsis').toBe('ellipsis');
 
     /* Zoomed far out, where chips show colours: no word is cut or runs over a chip, and, by the head of Development's word
        for #1489, role names keep their size and the layout holds as it stood. */
@@ -682,14 +684,6 @@ for (const look of LOOKS) {
     const far = await checkSchema(page);
     expect.soft(far.head, 'far zoom keeps the head card').toEqual(head);
     expect.soft(far.chips, 'far zoom moves no chip').toEqual(chips);
-
-    /* Every word of the hint, unfolded by its own button where it folds. */
-    const unfold = page.locator('.dview .ticker [aria-expanded="false"]');
-    if (await unfold.count()) {
-      await unfold.first().click();
-      await settle(page);
-    }
-    expect.soft(await cutTexts(page, '.dview .ticker', '.tx')).toEqual([]);
 
     expect.soft(errors).toEqual([]);
   });
