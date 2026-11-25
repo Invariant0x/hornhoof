@@ -6,7 +6,8 @@ import { freshPglite } from './helpers-db.js';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
 
 describe('migration 0165, the slots of a turn', () => {
-  it('gives the development departments five slots and every other department none, and no old task waits in a queue', async () => {
+  /* A department already at work keeps giving its work out at once: only a new development department starts with slots. */
+  it('gives no existing department slots, the development department neither, and no old task waits in a queue', async () => {
     const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
@@ -23,7 +24,7 @@ describe('migration 0165, the slots of a turn', () => {
 
     const caps = (await db.execute<{ template_key: string; parent_id: string | null; slot_cap: number | null }>(sql`select template_key, parent_id, slot_cap from departments order by template_key, parent_id nulls first`)).rows;
     expect(caps).toEqual([
-      { template_key: 'development', parent_id: null, slot_cap: 5 },
+      { template_key: 'development', parent_id: null, slot_cap: null },
       { template_key: 'development', parent_id: dev, slot_cap: null },
       { template_key: 'marketing', parent_id: null, slot_cap: null },
     ]);

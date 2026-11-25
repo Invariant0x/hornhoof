@@ -40,12 +40,12 @@ export { employeeGroups };
 const workOf = (d: Pick<Department, 'keepsRepository'>) => ({ resultKind: d.keepsRepository === false ? 'document' as const : 'code' as const });
 
 const frameTitle = (f: Frame, language: Language, t: ReturnType<typeof useT>, d: Pick<Department, 'keepsRepository'>) =>
-  f.oneShot ? stageName(t, workOf(d), f.oneShot.stage) : f.team ? f.team.name : f.role ? f.role.title[language] : t.dept.others;
+  f.oneShot ? stageName(t, workOf(d), f.oneShot.stage) : f.team ? f.team.name : f.role ? say(f.role.title, language) : t.dept.others;
 
 function frameDescription(role: NonNullable<Frame['role']>, language: Language, t: ReturnType<typeof useT>): string {
   if (role.schema === 'final_check') return t.dept.finalTurnCheck;
   if (role.schema === 'observer') return t.dept.turnObserver;
-  return role.description[language] ?? '';
+  return say(role.description, language);
 }
 
 function FrameHeading({ frame: f, language, canGive, department }: { frame: Frame; language: Language; canGive: boolean; department: Pick<Department, 'calls' | 'keepsRepository'> }) {

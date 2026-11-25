@@ -10,6 +10,23 @@ import { TurnWords } from '../src/terminal/program-restart.js';
 import { agySteps, LineTail } from '../src/terminal/transcripts.js';
 import { Tmux } from '../src/terminal/tmux.js';
 
+const realSetTimeout = setTimeout;
+const realMoment = () => new Promise<void>(resolve => { realSetTimeout(resolve, 1); });
+/* Moves the fake clock until the work ends. The code under test also waits on real file reads, which land in real time and
+   later on a loaded machine, so every tick leaves a real moment for them: a clock that stops after a number of ticks leaves the
+   work waiting for a timer that no one moves any more, and a test with no time limit then waits for ever. The work's own
+   timeout runs on the same clock, so work that really never ends still ends by it. */
+async function untilSettled<T>(work: Promise<T>): Promise<T> {
+  let settled = false;
+  const mark = () => { settled = true; };
+  work.then(mark, mark);
+  while (!settled) {
+    await vi.advanceTimersByTimeAsync(50);
+    await realMoment();
+  }
+  return work;
+}
+
 const folders: string[] = [];
 const stops: (() => Promise<void>)[] = [];
 function fixture(withOperator = false) {
@@ -37,6 +54,18 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
+});
+
+describe('the fake clock of these tests', () => {
+  it('keeps moving while work waits on real time and then on the fake clock, as a turn reading a transcript does', async () => {
+    vi.useFakeTimers();
+    const work = (async () => {
+      await new Promise<void>(resolve => { realSetTimeout(resolve, 150); });
+      await new Promise<void>(resolve => { setTimeout(resolve, 1000); });
+      return 'done';
+    })();
+    expect(await Promise.race([untilSettled(work), new Promise(resolve => { realSetTimeout(() => resolve('stuck'), 5000); })])).toBe('done');
+  });
 });
 
 describe('Antigravity execution boundaries', () => {
@@ -254,12 +283,7 @@ describe('Antigravity subagent conversations', () => {
       remember: sessionId => { remembered.push(sessionId); }, pollMs: 50, lookMs: 50, readyMs: 1000, toolsMs: 1000,
     });
     vi.useFakeTimers();
-    const finish = async <T>(work: Promise<T>): Promise<T> => {
-      let settled = false;
-      void work.finally(() => { settled = true; });
-      for (let i = 0; i < 200 && !settled; i++) await vi.advanceTimersByTimeAsync(50);
-      return work;
-    };
+    const finish = untilSettled;
     let alive = false;
     let promptText = '';
     vi.spyOn(tmux, 'launch').mockImplementation(async (_name, opts) => {
@@ -397,13 +421,7 @@ describe('Antigravity subagent conversations', () => {
       await Promise.allSettled(runs);
       await host.stop();
     });
-    const settleRun = async <T>(work: Promise<T>): Promise<T> => {
-      let settled = false;
-      void work.finally(() => { settled = true; });
-      for (let i = 0; i < 120 && !settled; i++) await vi.advanceTimersByTimeAsync(50);
-      expect(settled).toBe(true);
-      return work;
-    };
+    const settleRun = untilSettled;
     let currentScreen = idle;
     let promptText = '';
     const entered: string[] = [];
@@ -532,11 +550,7 @@ describe('Antigravity subagent conversations', () => {
     running = run;
     for (let i = 0; i < 60 && delivered.length === 0; i++) await vi.advanceTimersByTimeAsync(50);
     expect(delivered).toEqual(['Resume queued work']);
-    let settled = false;
-    void run.finally(() => { settled = true; });
-    for (let i = 0; i < 60 && !settled; i++) await vi.advanceTimersByTimeAsync(50);
-    expect(settled).toBe(true);
-    expect(await run).toMatchObject({ ok: true, result: 'Delivered.' });
+    expect(await untilSettled(run)).toMatchObject({ ok: true, result: 'Delivered.' });
     expect(c.agent.calls.size).toBe(0);
   });
 
