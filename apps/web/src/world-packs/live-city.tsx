@@ -42,6 +42,11 @@ import {
 } from '../world/residents';
 import { generateWorldTerrain, type GeneratedWorldMap } from '../world/terrain-engine';
 import { registeredWorldPacks, worldPackFromParam } from './registry';
+import { packText } from '../world/pack-text';
+import { loadEveryPackTexts } from './pack-text-load';
+
+/* A demo page shows a pack's words in the language its own switch picks, so every language is at hand. */
+loadEveryPackTexts();
 
 type PackKey = string;
 type ScenarioKey = 'hornhoof' | 'stress150' | 'empty' | 'no_subscription' | 'live';
@@ -468,14 +473,18 @@ function Stage4LiveWorld() {
         return;
       }
       engineRef.current = engine;
+      /* A snapshot sync may have run while the engine loaded and replaced the city and the residents; the engine
+         takes the newest from the refs, which both effects set before any engine resolves, so it moves the residents
+         the page reads (#1983). */
+      const latest = syncRef.current!;
       engine.setCityRenderState({
-        city: synced.city,
-        worldMode: synced.worldMode,
-        emptyLotStakes: synced.emptyLotStakes,
-        districtColors: synced.districtColors,
+        city: latest.city,
+        worldMode: latest.worldMode,
+        emptyLotStakes: latest.emptyLotStakes,
+        districtColors: latest.districtColors,
       });
-      engine.setResidentSimulation(sim);
-      engine.setConstructionSimulation(constructionSim);
+      engine.setResidentSimulation(simRef.current!);
+      engine.setConstructionSimulation(constructionRef.current!);
       engine.flushVisibleBakes();
       setStats(engine.getStats());
 
@@ -868,7 +877,7 @@ function Stage4LiveWorld() {
           >
             {registeredWorldPacks().map(p => (
               <option key={p.id} value={p.id}>
-                {p.name[lang]}
+                {packText(p.name, lang)}
               </option>
             ))}
           </select>
@@ -1075,7 +1084,7 @@ function Stage4LiveWorld() {
                 </strong>
               </div>
               <div style={{ fontSize: 12, color: '#C7BBA2', marginTop: 2 }}>
-                {selectedResident.look.label[lang]} ({t.roleClasses[selectedResident.roleClass]})
+                {packText(selectedResident.look.label, lang)} ({t.roleClasses[selectedResident.roleClass]})
               </div>
             </div>
             <button

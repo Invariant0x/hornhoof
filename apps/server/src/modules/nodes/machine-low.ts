@@ -1,8 +1,7 @@
 import type { DiskReport } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, companies, machines, people } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { agents, machines, people } from '../../db/schema.js';
 import { machineNodes, machineState } from '../testruns/load.js';
 import type { NodeHub } from './hub.js';
 
@@ -54,18 +53,4 @@ export async function machinesLow(ctx: Pick<Ctx, 'db' | 'hub'>, companyId: strin
   const cards = rows.flatMap(row => lowCard(row, saidDisk(ctx.hub, served.filter(n => n.machineId === row.id).map(n => n.id))));
   const names = await keptNames(ctx, companyId, cards.map(card => card.disk));
   return cards.map(card => ({ ...card, names: keptBy(names, card.disk) })).toSorted(longestShortFirst);
-}
-
-const told = new WeakMap<object, Map<string, string>>();
-
-/* Screens ask again when a card comes or goes. The word holds nothing, so it goes to everyone. */
-export async function tellOfMachinesLow(ctx: Pick<Ctx, 'db' | 'hub' | 'bus'>): Promise<void> {
-  const last = told.get(ctx) ?? new Map<string, string>();
-  told.set(ctx, last);
-  for (const { id } of await ctx.db.select(idOnly(companies)).from(companies)) {
-    const state = (await machinesLow(ctx, id)).map(card => `${card.id} ${card.since}`).join();
-    if ((last.get(id) ?? '') === state) continue;
-    last.set(id, state);
-    ctx.bus.publish(id, { type: 'requests', machines: true });
-  }
 }

@@ -68,4 +68,15 @@ describe("a machine's disk from what its nodes say", () => {
       { plan: 's-old', disk: undefined },
     ])).toEqual([{ plan: 's-codex', bytes: 14 * GB }, { plan: 's-claude', bytes: 9 * GB }, { plan: null, bytes: 0 }]);
   });
+
+  it('merges the largest working copies across every node on the machine, biggest first, and leaves copies out when no node reports them', () => {
+    const first = { ...OLDER, copies: [{ agent: 'a', path: 'shop-1', task: 1, bytes: 3 * GB }] } as DiskReport;
+    const second = { ...NEWER, copies: [{ agent: 'b', path: 'shop-2', task: 2, bytes: 8 * GB }, { agent: 'b', path: 'shop', task: null, bytes: GB }] } as DiskReport;
+    expect((together([load(1, first), load(2, second)])?.disk as { copies?: unknown })?.copies).toEqual([
+      { agent: 'b', path: 'shop-2', task: 2, bytes: 8 * GB },
+      { agent: 'a', path: 'shop-1', task: 1, bytes: 3 * GB },
+      { agent: 'b', path: 'shop', task: null, bytes: GB },
+    ]);
+    expect((together([load(1, OLDER), load(2, NEWER)])?.disk as { copies?: unknown })?.copies).toBeUndefined();
+  });
 });

@@ -1,7 +1,5 @@
 ---
 id: hh-task-flow
-title: { en: "Work through tasks", ru: "Работа через задачи" }
-description: { en: "Handles assigned work through the task's named checks and delivery route.", ru: "Ведет свою задачу через указанные в ней проверки до сдачи по назначенному маршруту." }
 kind: core
 ---
 You can deliver a result through the route declared on its task.

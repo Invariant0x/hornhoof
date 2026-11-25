@@ -20,10 +20,12 @@ import {
   type WorldLiveSnapshot,
 } from '@hornhoof/protocol/world';
 import type { CityBuilding, CityState } from './city-layout';
+import { deliverySpotsForBuilding, type DeliverySpot } from './construction';
 import type { Direction8, PackRoleLookSpec, WorldPackManifest } from './manifest';
 import { resolvePackRoleLook } from './manifest';
 import { tileCenterToWorld, worldToScreen, type TileCoord } from './coords';
 import type { CameraState, ViewportSize } from './camera';
+import { text } from './pack-text';
 
 export type ResidentPose =
   | 'walking'
@@ -47,6 +49,10 @@ export type ResidentPose =
 
 export type ResidentCarryKind = 'none' | 'stone' | 'returned_stone' | 'water_jar' | 'scroll';
 export type DeliveryTargetKind = 'monument' | 'statue' | 'department' | 'none';
+
+/* The spot on a building's lot where a resident ends its walk to work there, and the way it faces: into the building
+   (#2001). */
+export type ResidentWorkSpot = Readonly<{ col: number; row: number; facing: Direction8 }>;
 
 export type ResidentEntity = {
   id: string;
@@ -92,15 +98,24 @@ export type ResidentEntity = {
   pokeAnimTimer: number;
   visitedDepartmentIds: string[];
   homeTile: TileCoord;
+  /* The road tile a walk to work ends at; with a work spot, the one beside it. */
   workTile: TileCoord;
   originTile: TileCoord;
+  /* The building the resident works at, and its spot on that building's lot, while it works at one (#2001). */
+  workBuildingId: string | null;
+  workSpot: ResidentWorkSpot | null;
 };
 
 export type ResidentSimulation = {
   packId: string;
   timeSec: number;
+  /* Tiles per second a resident walks so its drawn stride fits one walk cycle, set by the renderer from the sheet it
+     shows; null or unset keeps the resident's own speed. */
+  walkSpeedOf?: (resident: ResidentEntity) => number | null;
+  /* True for a resident drawn from a standing sheet, which then keeps its place instead of strolling (#1983). */
+  standsStillOf?: (resident: ResidentEntity) => boolean;
   altarTile: TileCoord;
-  altarLabel: Readonly<{ en: string; ru: string }>;
+  altarLabel: string;
   residents: ResidentEntity[];
   smokingDepartmentIds: Set<string>;
   stuckDepartmentIds: Set<string>;
@@ -112,6 +127,11 @@ export type ResidentSimulation = {
   deptTiles: Map<string, TileCoord>;
   goalTiles: Map<string, TileCoord>;
   statueTilesByDept: Map<string, TileCoord>;
+  /* The building of each department, and the spots on the lots of the buildings residents bring stones to. */
+  deptBuildingIds: Map<string, string>;
+  workSpotsByBuilding: Map<string, readonly DeliverySpot[]>;
+  /* How many residents each building has handed a spot, so the next takes the next spot. */
+  workSpotTurns: Map<string, number>;
   supplyTiles: TileCoord[];
   emptySupplyTiles: TileCoord[];
   hubTilesByMachine: Map<string, TileCoord>;
@@ -141,12 +161,26 @@ function hashStr(s: string): number {
   return h >>> 0;
 }
 
-function directionFromDelta(dc: number, dr: number): Direction8 {
+/* Where a step of (dc, dr) tiles points on screen, the way a sheet row is drawn: on the 2:1 diamond a column step runs
+   down right and a row step down left, so a step along a road shows as SE, SW, NE or NW (#1983). */
+function facingOfStep(dc: number, dr: number): Direction8 {
   if (Math.abs(dc) < 1e-4 && Math.abs(dr) < 1e-4) return 'S';
-  const angle = Math.atan2(dr, dc);
+  const angle = Math.atan2((dc + dr) / 2, dc - dr);
   const oct = Math.round((angle / (Math.PI * 2)) * 8 + 8) % 8;
   const order: readonly Direction8[] = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
   return order[oct] ?? 'S';
+}
+
+/* Tiles per second a resident walks: what its drawn stride asks for, else its own speed. */
+function walkSpeed(sim: ResidentSimulation, r: ResidentEntity): number {
+  return sim.walkSpeedOf?.(r) ?? r.speedTilesPerSec;
+}
+
+/* A new resident faces its first step on the path (a resident not at work has its focal spot for a path), or the spot it
+   stands round; the camera only with neither. */
+function startFacing(path: readonly TileCoord[], from: number, at: TileCoord, focus: TileCoord): Direction8 {
+  const next = path.slice(from).find(p => Math.hypot(p.col - at.col, p.row - at.row) > 1e-3) ?? focus;
+  return facingOfStep(next.col - at.col, next.row - at.row);
 }
 
 function nearestRoadTile(target: TileCoord, roadTiles: readonly TileCoord[]): TileCoord {
@@ -279,6 +313,59 @@ function frontTileForBuilding(b: CityBuilding, city: CityState, roadSet: Readonl
   return buildingDoor(b);
 }
 
+/* The next spot a building hands a resident who comes to work at it, in turn so several residents spread over its
+   spots, facing into the building; null for no building or one with no spot by a road (#2001). */
+/* How many residents other than `self` hold each of a building's spots now. */
+function heldSpots(
+  residents: readonly ResidentEntity[],
+  buildingId: string,
+  spots: readonly Readonly<{ col: number; row: number }>[],
+  self: string | null,
+): number[] {
+  const held = spots.map(() => 0);
+  for (const r of residents) {
+    const at = r.workSpot;
+    if (r.id === self || r.workBuildingId !== buildingId || !at) continue;
+    const i = spots.findIndex(s => s.col === at.col && s.row === at.row);
+    if (i >= 0) held[i]!++;
+  }
+  return held;
+}
+
+/* The next spot in turn at a building, passing over spots others hold while one is free: a resident sent here from
+   another building never joins someone on a spot (#2001). */
+function takeWorkSpot(
+  sim: Pick<ResidentSimulation, 'workSpotsByBuilding' | 'workSpotTurns' | 'residents'>,
+  buildingId: string | null,
+  self: string | null = null,
+): (ResidentWorkSpot & { approach: TileCoord }) | null {
+  const spots = buildingId ? sim.workSpotsByBuilding.get(buildingId) : undefined;
+  if (!buildingId || !spots || spots.length === 0) return null;
+  const turn = sim.workSpotTurns.get(buildingId) ?? 0;
+  sim.workSpotTurns.set(buildingId, turn + 1);
+  const held = heldSpots(sim.residents, buildingId, spots, self);
+  let pick = turn % spots.length;
+  for (let k = 1; k < spots.length; k++) {
+    const i = (turn + k) % spots.length;
+    if (held[i]! < held[pick]!) pick = i;
+  }
+  const spot = spots[pick]!;
+  return { col: spot.col, row: spot.row, facing: facingOfStep(spot.inward.dc, spot.inward.dr), approach: spot.approach };
+}
+
+/* Each walk to work takes the freest spot of its building again, so a spot a resident gone elsewhere left is taken
+   up and two never stay on one while another is free (#2001); without a spot the walk ends at `fallback`. */
+function retakeWorkSpot(sim: ResidentSimulation, r: ResidentEntity, fallback: TileCoord): void {
+  const spot = takeWorkSpot(sim, r.workBuildingId, r.id);
+  r.workSpot = spot ? { col: spot.col, row: spot.row, facing: spot.facing } : null;
+  r.workTile = spot?.approach ?? fallback;
+}
+
+/* A road route to work, with the one step off the road onto the building's lot when the resident has a spot there. */
+function toWorkSpot(route: TileCoord[], spot: ResidentWorkSpot | null): TileCoord[] {
+  return spot ? [...route, { col: spot.col, row: spot.row }] : route;
+}
+
 function resolveAltarTile(pack: WorldPackManifest, city: CityState, residence: CityBuilding | undefined): TileCoord {
   const anchor = pack.altarAnchor ?? { offsetCol: 3, offsetRow: -2 };
   const baseCol = residence ? residence.col + Math.floor(residence.spanCol / 2) : city.center.col;
@@ -363,11 +450,15 @@ export function createResidentSimulation(
   const residence = city.buildings.find(b => b.kind === 'residence');
   const residenceTile = residence ? frontTileForBuilding(residence, city, roadSet) : { ...city.center };
   const altarTile = resolveAltarTile(pack, city, residence);
-  const altarLabel = pack.altarAnchor?.label ?? { en: "God's Altar", ru: 'Алтарь бога' };
+  const altarLabel = pack.altarAnchor?.label ?? text("God's Altar");
 
   const deptTiles = new Map<string, TileCoord>();
   const goalTiles = new Map<string, TileCoord>();
   const statueTilesByDept = new Map<string, TileCoord>();
+  const deptBuildingIds = new Map<string, string>();
+  const goalBuildingIds = new Map<string, string>();
+  const statueBuildingIdsByDept = new Map<string, string>();
+  const workSpotsByBuilding = new Map<string, readonly DeliverySpot[]>();
   const houseByAgent = new Map<string, CityBuilding>();
   const hubTilesByMachine = new Map<string, TileCoord>();
   const supplyTiles: TileCoord[] = [];
@@ -376,9 +467,21 @@ export function createResidentSimulation(
 
   for (const b of city.buildings) {
     const front = frontTileForBuilding(b, city, roadSet);
-    if (b.kind === 'department' && b.departmentId) deptTiles.set(b.departmentId, front);
-    if (b.kind === 'monument' && b.entityId) goalTiles.set(b.entityId, front);
-    if (b.kind === 'statue' && b.departmentId) statueTilesByDept.set(b.departmentId, front);
+    if (b.kind === 'department' && b.departmentId) {
+      deptTiles.set(b.departmentId, front);
+      deptBuildingIds.set(b.departmentId, b.id);
+    }
+    if (b.kind === 'monument' && b.entityId) {
+      goalTiles.set(b.entityId, front);
+      goalBuildingIds.set(b.entityId, b.id);
+    }
+    if (b.kind === 'statue' && b.departmentId) {
+      statueTilesByDept.set(b.departmentId, front);
+      statueBuildingIdsByDept.set(b.departmentId, b.id);
+    }
+    if (b.kind === 'department' || b.kind === 'monument' || b.kind === 'statue') {
+      workSpotsByBuilding.set(b.id, deliverySpotsForBuilding(b, null, pack, city));
+    }
     if (b.kind === 'house' && b.entityId) houseByAgent.set(b.entityId, b);
     if (b.kind === 'district_hub' && b.districtId) hubTilesByMachine.set(b.districtId, front);
     if (b.kind === 'supply') {
@@ -434,6 +537,9 @@ export function createResidentSimulation(
     deptTiles,
     goalTiles,
     statueTilesByDept,
+    deptBuildingIds,
+    workSpotsByBuilding,
+    workSpotTurns: new Map(),
     supplyTiles,
     emptySupplyTiles,
     hubTilesByMachine,
@@ -498,17 +604,23 @@ export function createResidentSimulation(
     const deptTile = (agent.departmentId && deptTiles.get(agent.departmentId)) || residenceTile;
     let workTile: TileCoord = deptTile;
     let deliveryTargetKind: DeliveryTargetKind = 'department';
+    /* The building the resident works at, when its work is at one: its department's unless a branch below says another. */
+    const deptBuilding = (deptId: string | null | undefined): string | null => (deptId && deptBuildingIds.get(deptId)) || null;
+    let workBuildingId: string | null = deptBuilding(agent.departmentId);
 
     if (liveState === 'waiting_human') {
       workTile = altarTile;
       deliveryTargetKind = 'none';
+      workBuildingId = null;
     } else if (liveState === 'exhausted') {
       const supplyPool = emptySupplyTiles.length > 0 ? emptySupplyTiles : supplyTiles;
       workTile = supplyPool.length > 0 ? supplyPool[idx % supplyPool.length]! : residenceTile;
       deliveryTargetKind = 'none';
+      workBuildingId = null;
     } else if (liveState === 'machine_offline' || liveState === 'upgrading_home' || liveState === 'idle') {
       workTile = homeTile;
       deliveryTargetKind = 'none';
+      workBuildingId = null;
     } else if (liveState === 'turn_failed') {
       workTile = deptTile;
       deliveryTargetKind = 'department';
@@ -518,36 +630,46 @@ export function createResidentSimulation(
         const targetHouse = agent.talkingToAgentId ? houseByAgent.get(agent.talkingToAgentId) : undefined;
         workTile = targetHouse ? frontTileForBuilding(targetHouse, city, roadSet) : deptTile;
         deliveryTargetKind = 'none';
+        workBuildingId = null;
       } else if (roleClass === 'turnkey') {
         const otherDeptId =
           allDepartmentIds.find(did => did !== agent.departmentId) ?? agent.departmentId;
-        workTile = (otherDeptId && deptTiles.get(otherDeptId)) || deptTile;
+        const otherTile = otherDeptId ? deptTiles.get(otherDeptId) : undefined;
+        workTile = otherTile ?? deptTile;
         deliveryTargetKind = 'department';
+        if (otherTile) workBuildingId = deptBuilding(otherDeptId);
       } else if (archetype === 'firefighter' && smokingDepartmentIds.size > 0) {
         const smokeDept = [...smokingDepartmentIds][0]!;
         workTile = deptTiles.get(smokeDept) ?? deptTile;
         deliveryTargetKind = 'department';
+        if (deptTiles.has(smokeDept)) workBuildingId = deptBuilding(smokeDept);
       } else if (archetype === 'patrol' && stuckDepartmentIds.size > 0) {
         const stuckDept = [...stuckDepartmentIds][0]!;
         workTile = deptTiles.get(stuckDept) ?? deptTile;
         deliveryTargetKind = 'department';
+        if (deptTiles.has(stuckDept)) workBuildingId = deptBuilding(stuckDept);
       } else if (archetype === 'gate_guard' || archetype === 'red_team' || archetype === 'inspector_scout') {
         workTile = gateTiles.length > 0 ? gateTiles[idx % gateTiles.length]! : deptTile;
         deliveryTargetKind = 'none';
+        workBuildingId = null;
       } else if (archetype === 'keykeeper' || archetype === 'caravan_runner') {
         workTile = supplyTiles.length > 0 ? supplyTiles[idx % supplyTiles.length]! : deptTile;
         deliveryTargetKind = 'none';
+        workBuildingId = null;
       } else if (archetype === 'machine_keeper' && agent.machineId && hubTilesByMachine.has(agent.machineId)) {
         workTile = hubTilesByMachine.get(agent.machineId)!;
         deliveryTargetKind = 'none';
+        workBuildingId = null;
       } else if (roleClass === 'executor' && archetype === 'builder') {
         const goalId = agent.currentTask?.goalId ?? null;
         if (goalId && goalTiles.has(goalId)) {
           workTile = goalTiles.get(goalId)!;
           deliveryTargetKind = 'monument';
+          workBuildingId = goalBuildingIds.get(goalId) ?? null;
         } else if (agent.departmentId && statueTilesByDept.has(agent.departmentId)) {
           workTile = statueTilesByDept.get(agent.departmentId)!;
           deliveryTargetKind = 'statue';
+          workBuildingId = statueBuildingIdsByDept.get(agent.departmentId) ?? null;
         } else {
           workTile = deptTile;
           deliveryTargetKind = 'department';
@@ -557,9 +679,11 @@ export function createResidentSimulation(
         if (goalId && goalTiles.has(goalId)) {
           workTile = goalTiles.get(goalId)!;
           deliveryTargetKind = 'monument';
+          workBuildingId = goalBuildingIds.get(goalId) ?? null;
         } else if (agent.departmentId && statueTilesByDept.has(agent.departmentId)) {
           workTile = statueTilesByDept.get(agent.departmentId)!;
           deliveryTargetKind = 'statue';
+          workBuildingId = statueBuildingIdsByDept.get(agent.departmentId) ?? null;
         } else {
           workTile = deptTile;
           deliveryTargetKind = 'department';
@@ -567,12 +691,16 @@ export function createResidentSimulation(
       }
     }
 
+    /* At work by a building, the walk ends on its lot: the road route goes to the road beside the spot (#2001). */
+    const spot = liveState === 'working' ? takeWorkSpot(sim, workBuildingId) : null;
+    if (spot) workTile = spot.approach;
+    const workSpot: ResidentWorkSpot | null = spot ? { col: spot.col, row: spot.row, facing: spot.facing } : null;
     const originTile =
       liveState === 'waiting_human' || liveState === 'exhausted' || liveState === 'turn_failed'
         ? workTile
         : homeTile;
     const initialPath =
-      liveState === 'working' ? findRoadRoute(sim, homeTile, workTile) : [originTile];
+      liveState === 'working' ? toWorkSpot(findRoadRoute(sim, homeTile, workTile), workSpot) : [originTile];
     /* Stagger initial path positions deterministically so streets look bustling from frame 0,
        and spread static-state residents around shared focal spots (altar, empty supply, smoking dept). */
     const startIdx =
@@ -630,7 +758,7 @@ export function createResidentSimulation(
       talkingToAgentId: agent.talkingToAgentId ?? null,
       col: startPt.col,
       row: startPt.row,
-      facing: 'S',
+      facing: startFacing(initialPath, startIdx, startPt, basePt),
       walkPhase: (hashStr(agent.id) % 628) / 100,
       speedTilesPerSec:
         archetype === 'firefighter' || archetype === 'red_team'
@@ -650,6 +778,8 @@ export function createResidentSimulation(
       homeTile,
       workTile,
       originTile,
+      workBuildingId: liveState === 'working' ? workBuildingId : null,
+      workSpot,
     };
 
     applyStaticStatePose(entity);
@@ -670,8 +800,11 @@ export function createResidentSimulation(
   const activeCalls = snapshot.activeCalls ?? [];
   const dlLook = resolvePackRoleLook(pack, null, 'day_laborer', 'day_laborer');
   activeCalls.forEach((call, idx) => {
-    const dest = (call.departmentId && deptTiles.get(call.departmentId)) || residenceTile;
-    const route = findRoadRoute(sim, flophouseTile, dest);
+    const workBuildingId = (call.departmentId && deptBuildingIds.get(call.departmentId)) || null;
+    const spot = takeWorkSpot(sim, workBuildingId);
+    const workSpot: ResidentWorkSpot | null = spot ? { col: spot.col, row: spot.row, facing: spot.facing } : null;
+    const dest = spot?.approach ?? ((call.departmentId && deptTiles.get(call.departmentId)) || residenceTile);
+    const route = toWorkSpot(findRoadRoute(sim, flophouseTile, dest), workSpot);
     const startIdx = route.length > 1 ? (idx * 3 + 1) % route.length : 0;
     const pt = route[startIdx] ?? flophouseTile;
     sim.residents.push({
@@ -701,7 +834,7 @@ export function createResidentSimulation(
       talkingToAgentId: null,
       col: pt.col,
       row: pt.row,
-      facing: 'S',
+      facing: startFacing(route, startIdx, pt, dest),
       walkPhase: idx * 1.1,
       speedTilesPerSec: 2.4,
       path: route,
@@ -716,6 +849,8 @@ export function createResidentSimulation(
       homeTile: flophouseTile,
       workTile: dest,
       originTile: flophouseTile,
+      workBuildingId,
+      workSpot,
     });
   });
 
@@ -806,17 +941,36 @@ function applyStaticStatePose(r: ResidentEntity): void {
     return;
   }
   /* Builders, turnkey generalists, road builders and day-laborers carry stones outbound and build! */
-  if (r.leg === 'outbound') {
-    r.carrying = 'stone';
-    r.pose = 'carrying_stone';
-  } else {
-    r.carrying = 'none';
-    r.pose = 'walking';
-  }
+  carrierPose(r);
+}
+
+/* A carrier leaves home with a stone, lays it at the site while it pauses there, and walks back empty (#1983). */
+function carrierPose(r: ResidentEntity): void {
+  const atSite = r.leg === 'inbound';
+  r.carrying = atSite ? 'none' : 'stone';
+  r.pose = !atSite ? 'carrying_stone' : r.actionTimer > 0 ? 'building' : 'walking';
 }
 
 /* Isometric tile distance covered per full walk stride (2*PI radians), preventing foot sliding at any speed. */
 const WALK_STRIDE_TILES = 0.65;
+
+/* An idle resident: drawn from a standing sheet it keeps its place by its house; otherwise a calm stroll round the
+   house, its walkPhase following the actual tile displacement. */
+function stepIdle(sim: ResidentSimulation, r: ResidentEntity, i: number): void {
+  r.pose = 'idle';
+  r.carrying = 'none';
+  if (sim.standsStillOf?.(r)) return;
+  const prevCol = r.col;
+  const prevRow = r.row;
+  const phase = sim.timeSec * 0.7 + i * 0.9;
+  r.col = r.homeTile.col + Math.cos(phase) * 0.45;
+  r.row = r.homeTile.row + Math.sin(phase) * 0.45;
+  const idleMoved = Math.hypot(r.col - prevCol, r.row - prevRow);
+  if (idleMoved > 1e-4) {
+    r.walkPhase += (idleMoved / WALK_STRIDE_TILES) * Math.PI * 2;
+    r.facing = facingOfStep(r.col - prevCol, r.row - prevRow);
+  }
+}
 
 /* Advances all residents smoothly along their road paths and role behavior loops.
    Zero per-frame allocations on the steady path so 150 residents step in < 0.25 ms. */
@@ -839,18 +993,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
     }
 
     if (r.liveState === 'idle') {
-      /* Calm stroll near own house; walkPhase follows actual tile displacement. */
-      const prevCol = r.col;
-      const prevRow = r.row;
-      const phase = sim.timeSec * 0.7 + i * 0.9;
-      r.col = r.homeTile.col + Math.cos(phase) * 0.45;
-      r.row = r.homeTile.row + Math.sin(phase) * 0.45;
-      const idleMoved = Math.hypot(r.col - prevCol, r.row - prevRow);
-      if (idleMoved > 1e-4) {
-        r.walkPhase += (idleMoved / WALK_STRIDE_TILES) * Math.PI * 2;
-      }
-      r.pose = 'idle';
-      r.carrying = 'none';
+      stepIdle(sim, r, i);
       continue;
     }
 
@@ -886,7 +1029,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
         r.carrying = 'none';
         r.pose = 'directing';
       } else {
-        r.pose = r.leg === 'outbound' ? 'building' : 'carrying_stone';
+        carrierPose(r);
       }
       continue;
     }
@@ -894,16 +1037,25 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
     /* Advance along cached road path. */
     const target = r.path[r.pathIndex];
     if (!target) {
+      /* At its spot by the building it works at, a resident turns to the building (#2001). */
+      if (r.leg === 'outbound' && r.workSpot) r.facing = r.workSpot.facing;
       r.leg = r.leg === 'outbound' ? 'inbound' : 'outbound';
       /* Turnkey generalists rotate cleanly across all company departments. */
       if (r.roleClass === 'turnkey' && r.leg === 'outbound' && sim.allDepartmentIds.length > 1) {
         const nextDept = sim.allDepartmentIds[Math.floor(sim.timeSec + i) % sim.allDepartmentIds.length]!;
         const nextTile = sim.deptTiles.get(nextDept);
-        if (nextTile) r.workTile = nextTile;
+        if (nextTile) {
+          const buildingId = sim.deptBuildingIds.get(nextDept) ?? null;
+          r.workBuildingId = buildingId;
+          retakeWorkSpot(sim, r, nextTile);
+        }
+      } else if (r.leg === 'outbound' && r.workSpot) {
+        retakeWorkSpot(sim, r, r.workTile);
       }
       const nextFrom = r.leg === 'outbound' ? r.homeTile : r.workTile;
       const nextTo = r.leg === 'outbound' ? r.workTile : r.homeTile;
-      r.path = findRoadRoute(sim, nextFrom, nextTo);
+      const route = findRoadRoute(sim, nextFrom, nextTo);
+      r.path = r.leg === 'outbound' ? toWorkSpot(route, r.workSpot) : route;
       r.pathIndex = 0;
       r.actionTimer = r.roleClass === 'head' ? 1.4 : r.roleClass === 'checker' ? 1.3 : 0.9;
       applyStaticStatePose(r);
@@ -913,7 +1065,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
     const dc = target.col - r.col;
     const dr = target.row - r.row;
     const dist = Math.hypot(dc, dr);
-    const step = r.speedTilesPerSec * dt;
+    const step = walkSpeed(sim, r) * dt;
 
     let movedTiles = 0;
     if (dist <= step) {
@@ -925,7 +1077,7 @@ export function stepResidentSimulation(sim: ResidentSimulation, dtSec: number): 
       r.col += (dc / dist) * step;
       r.row += (dr / dist) * step;
       movedTiles = step;
-      r.facing = directionFromDelta(dc, dr);
+      r.facing = facingOfStep(dc, dr);
     }
     if (movedTiles > 1e-4) {
       r.walkPhase += (movedTiles / WALK_STRIDE_TILES) * Math.PI * 2;

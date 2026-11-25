@@ -11,15 +11,16 @@ import type {
   TerrainNoiseToolkit,
   TerrainRecipeSpec,
 } from '../../world/manifest';
+import { text } from '../../world/pack-text';
 
 export const DUNGEON_TILE_KINDS: readonly TerrainKindSpec[] = [
-  { id: 'solid_rock', label: { en: 'Solid bedrock (carvable)', ru: 'Сплошная порода (вырубается)' }, color: '#393B47', materialId: 'bedrock', buildable: false, walkable: false, excavatable: true },
-  { id: 'rough_cavern', label: { en: 'Natural cavern', ru: 'Пещера' }, color: '#585A69', materialId: 'cavern_floor', buildable: true, walkable: true },
-  { id: 'start_hall', label: { en: 'Central hall', ru: 'Стартовый зал' }, color: '#7D7A72', materialId: 'hall_stone', buildable: true, walkable: true },
-  { id: 'lava', label: { en: 'Magma river', ru: 'Лавовая река' }, color: '#E85D1F', materialId: 'obsidian', buildable: false, walkable: false, liquid: true },
-  { id: 'cooled_crust', label: { en: 'Obsidian shore', ru: 'Остывший базальт' }, color: '#2E262A', materialId: 'obsidian', buildable: false, walkable: true },
-  { id: 'fungal_grove', label: { en: 'Fungal grove', ru: 'Светящиеся грибы' }, color: '#2F7F7A', materialId: 'fungal', buildable: false, walkable: true },
-  { id: 'ore_vein', label: { en: 'Ore vein', ru: 'Рудная жила' }, color: '#998249', materialId: 'ore', buildable: false, walkable: false, excavatable: true },
+  { id: 'solid_rock', label: text('Solid bedrock (carvable)'), color: '#393B47', materialId: 'bedrock', buildable: false, walkable: false, excavatable: true },
+  { id: 'rough_cavern', label: text('Natural cavern'), color: '#585A69', materialId: 'cavern_floor', buildable: true, walkable: true },
+  { id: 'start_hall', label: text('Central hall'), color: '#7D7A72', materialId: 'hall_stone', buildable: true, walkable: true },
+  { id: 'lava', label: text('Magma river'), color: '#E85D1F', materialId: 'obsidian', buildable: false, walkable: false, liquid: true },
+  { id: 'cooled_crust', label: text('Obsidian shore'), color: '#2E262A', materialId: 'obsidian', buildable: false, walkable: true },
+  { id: 'fungal_grove', label: text('Fungal grove'), color: '#2F7F7A', materialId: 'fungal', buildable: false, walkable: true },
+  { id: 'ore_vein', label: text('Ore vein'), color: '#998249', materialId: 'ore', buildable: false, walkable: false, excavatable: true },
 ];
 
 export const DUNGEON_MATERIAL_IDS = [
@@ -100,7 +101,7 @@ function chooseCentralHall(params: Omit<DungeonSeedParams, 'startCenter'>, baseS
 
 export const DUNGEON_TERRAIN_RECIPE: TerrainRecipeSpec = {
   id: 'dungeon-subterranean',
-  name: { en: 'Subterranean Dungeon', ru: 'Подземелье (порода, пещеры, лава)' },
+  name: text('Subterranean Dungeon'),
   tileKinds: DUNGEON_TILE_KINDS,
   materialIds: DUNGEON_MATERIAL_IDS,
   minBuildableRatio: 0.65,

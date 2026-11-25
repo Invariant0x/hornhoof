@@ -10,6 +10,11 @@ import {
 } from '../world/terrain-engine';
 import { renderProceduralMapPreview } from '../world/terrain-preview';
 import { registeredWorldPacks } from './registry';
+import { packText } from '../world/pack-text';
+import { loadEveryPackTexts } from './pack-text-load';
+
+/* A demo page shows a pack's words in the language its own switch picks, so every language is at hand. */
+loadEveryPackTexts();
 
 /* Multi-pack Stage 2 gallery viewer and smooth-blended isometric inspector.
    Lives outside engine core (src/world-packs/) and mounts any WorldPackManifest with a terrainRecipe. */
@@ -328,7 +333,7 @@ function IsometricInspector({
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
           <strong style={{ fontSize: 13.5, color: '#9BD9FF' }}>
-            {pack.name[lang]} / {map.seed}
+            {packText(pack.name, lang)} / {map.seed}
           </strong>
           <button
             type="button"
@@ -405,7 +410,7 @@ function IsometricInspector({
               Zoom: <strong>{stats.zoomPercent}%</strong> ({stats.cssTileW}x{stats.cssTileH} px) | LOD: {stats.lodId} | Chunks: {stats.visibleChunks} / {stats.totalChunks}
             </div>
             <div>
-              {t.hovered}: {stats.hoveredTile && hoveredSpec ? `(${stats.hoveredTile.col}, ${stats.hoveredTile.row}) [${hoveredSpec.label[lang]}]` : 'none'}
+              {t.hovered}: {stats.hoveredTile && hoveredSpec ? `(${stats.hoveredTile.col}, ${stats.hoveredTile.row}) [${packText(hoveredSpec.label, lang)}]` : 'none'}
             </div>
           </div>
         )}
@@ -420,7 +425,7 @@ function IsometricInspector({
           }}
         >
           {selected && selectedSpec
-            ? `(${selected.col}, ${selected.row}) | ${selectedSpec.label[lang]} (${selectedSpec.buildable ? t.buildableYes : t.buildableNo})`
+            ? `(${selected.col}, ${selected.row}) | ${packText(selectedSpec.label, lang)} (${selectedSpec.buildable ? t.buildableYes : t.buildableNo})`
             : t.clickedPrompt}
         </div>
       </div>
@@ -643,7 +648,7 @@ function Stage2GalleryApp() {
       >
         <div>
           <h1 data-testid="stage2-gallery-title" style={{ margin: 0, fontSize: 19, fontWeight: 700, color: '#9BD9FF' }}>
-            {t.titlePrefix}: {recipe.name[lang]}
+            {t.titlePrefix}: {packText(recipe.name, lang)}
           </h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: '#A9BDD3' }}>{t.subtitle}</p>
         </div>
@@ -666,7 +671,7 @@ function Stage2GalleryApp() {
                 cursor: 'pointer',
               }}
             >
-              {p.name[lang]}
+              {packText(p.name, lang)}
             </button>
           ))}
           {(['ru', 'en'] as const).map(code => (
@@ -716,7 +721,7 @@ function Stage2GalleryApp() {
                 border: '1px solid rgba(255, 255, 255, 0.35)',
               }}
             />
-            <span>{kind.label[lang]}</span>
+            <span>{packText(kind.label, lang)}</span>
           </span>
         ))}
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

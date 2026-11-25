@@ -7,7 +7,10 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, machines, people, publicLinks } from '../src/db/schema.js';
+import { noteGaveUp } from '../src/modules/copies/measured.js';
 import { setPriority } from '../src/modules/copies/priority.js';
+import { copyRetryTaken } from '../src/modules/copies/retry.js';
+import { copyOrder } from '../src/modules/copies/slots.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
@@ -169,5 +172,60 @@ describe("the CEO's choice of a machine's place", () => {
     expect(await c.placeOf(c.b.id)).toEqual([3, expect.any(String), '2']);
     await c.ctx.ranking.now();
     expect(await c.placeOf(c.b.id)).toEqual([2, 'pinned', '2']);
+  });
+});
+
+describe('a copy whose keeper gave it up', () => {
+  const retry = (c: Awaited<ReturnType<typeof company>>, id: string, who: object = as(c.ceo)) => c.app.inject({ method: 'POST', url: `/api/machines/${id}/copy/retry`, ...who });
+  const GAVE_UP = { since: '2026-11-24T20:00:00.000Z', attempts: 4, why: 'failed' as const };
+
+  it('is asked for again by the CEO alone, for a copy that was given up alone, and the keeper is told until it makes one', async () => {
+    const c = await company();
+    /* Nothing was given up: nothing to ask for. */
+    expect(c.refusal(await retry(c, c.b.id))).toEqual([409, 'copy_not_given_up', "This machine's copy was not given up."]);
+    noteGaveUp(c.ctx, c.b.id, GAVE_UP);
+    const p = await invitePerson(c.app, c.ceo, { name: 'Pat', email: 'pat@acme.test', access: { whole: true } });
+    expect(c.refusal(await retry(c, c.b.id, as(p))).slice(0, 2)).toEqual([403, 'not_owner_session']);
+    expect(await copyOrder(c.ctx, await c.rowOf(c.b.id))).not.toHaveProperty('retry');
+    expect((await retry(c, c.b.id)).statusCode).toBe(204);
+    expect(await copyOrder(c.ctx, await c.rowOf(c.b.id))).toMatchObject({ retry: true });
+    /* Another machine's copy is not asked for. */
+    expect(await copyOrder(c.ctx, await c.rowOf(c.a.id))).not.toHaveProperty('retry');
+    /* The keeper still says it gave the copy up: the word stands. Once it makes one, it does not. */
+    copyRetryTaken(c.ctx, 'another-machine');
+    expect(await copyOrder(c.ctx, await c.rowOf(c.b.id))).toMatchObject({ retry: true });
+    copyRetryTaken(c.ctx, c.b.id);
+    expect(await copyOrder(c.ctx, await c.rowOf(c.b.id))).not.toHaveProperty('retry');
+    /* The orchestrator acts for the CEO. */
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    expect((await retry(c, c.b.id, { headers: orchestratorHeaders(c.owner.id, orchestrator!.id) })).statusCode).toBe(204);
+    expect(c.refusal(await retry(c, '00000000-0000-4000-8000-000000000000')).slice(0, 2)).toEqual([404, 'machine_unknown']);
+  });
+
+  it('is told of a path measured too weak for a copy that is not whole, and of none else', async () => {
+    const c = await company();
+    const weak = { linkMbps: 1, linkRttMs: 40 };
+    expect(await copyOrder(c.ctx, { ...(await c.rowOf(c.b.id)), ...weak, copyState: 'making' })).toMatchObject({ weak: 'slow' });
+    expect(await copyOrder(c.ctx, { ...(await c.rowOf(c.b.id)), linkMbps: 100, linkRttMs: 4000, copyState: 'remaking' })).toMatchObject({ weak: 'late' });
+    expect(await copyOrder(c.ctx, { ...(await c.rowOf(c.b.id)), ...weak, copyState: null })).toMatchObject({ weak: 'slow' });
+    /* A copy that is whole keeps its path; a path nothing was measured on, or a good one, is none. */
+    expect(await copyOrder(c.ctx, { ...(await c.rowOf(c.b.id)), ...weak, copyState: 'ready' })).not.toHaveProperty('weak');
+    expect(await copyOrder(c.ctx, { ...(await c.rowOf(c.b.id)), linkMbps: null, linkRttMs: null, copyState: 'making' })).not.toHaveProperty('weak');
+    expect(await copyOrder(c.ctx, { ...(await c.rowOf(c.b.id)), linkMbps: 50, linkRttMs: 30, copyState: 'making' })).not.toHaveProperty('weak');
+  });
+
+  it('gives no data to a machine whose path is measured too weak for a copy, and keeps its place', async () => {
+    const c = await company();
+    const roles = async () => [(await c.rowOf(c.a.id)).role, (await c.rowOf(c.b.id)).role, (await c.rowOf(c.c.id)).role];
+    expect(await roles()).toEqual(['data', 'data', 'worker']);
+    /* A gave its data up and is measured at 1 Mbps: its seat goes to the next machine, and it keeps a place in the order. */
+    await c.db.update(machines).set({ role: 'worker', linkMbps: 1 }).where(eq(machines.id, c.a.id));
+    await c.app.ctx.ranking.now({ rescore: true });
+    expect(await roles()).toEqual(['worker', 'data', 'data']);
+    expect((await c.rowOf(c.a.id)).serverOrder).not.toBeNull();
+    /* With nothing measured on its path it is tried: a machine without that measure is given the data as before. */
+    await c.db.update(machines).set({ role: 'worker', linkMbps: null, linkRttMs: null }).where(eq(machines.id, c.c.id));
+    await c.app.ctx.ranking.now({ rescore: true });
+    expect((await c.rowOf(c.c.id)).role).toBe('data');
   });
 });

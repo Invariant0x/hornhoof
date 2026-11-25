@@ -1,6 +1,6 @@
-import { DISK_CLEANED_MAX, DISK_KEPT_MAX, NODE_DISK_PARTS, type DiskReport } from '@hornhoof/protocol';
+import { DISK_CLEANED_MAX, DISK_COPIES_MAX, DISK_KEPT_MAX, NODE_DISK_PARTS, type DiskReport } from '@hornhoof/protocol';
 import { latestReport } from './host-load.js';
-import { nodeIdentity, type NodeHub } from './hub.js';
+import { nodeIdentity, type NodeHub, type NodeIdentity } from './hub.js';
 
 const OWN = new Set<string>(NODE_DISK_PARTS);
 
@@ -14,7 +14,10 @@ export function machineDisk(said: { at: number; disk?: DiskReport | undefined }[
   if (!newest) return undefined;
   const disks = reports.map(r => r.disk);
   const machine = Object.fromEntries(Object.entries(newest.parts).filter(([part]) => !OWN.has(part)));
-  return { ...newest, parts: { ...machine, ...ownSums(disks) }, low: lowSince(disks), cleaned: cleanedOf(disks, newest), ...keptOf(disks) };
+  const { copies: _newestCopies, kept: _newestKept, ...base } = newest;
+  void _newestCopies;
+  void _newestKept;
+  return { ...base, parts: { ...machine, ...ownSums(disks) }, low: lowSince(disks), cleaned: cleanedOf(disks, newest), ...keptOf(disks), ...copiesOf(disks) };
 }
 
 /* What the nodes measure in their own folders, added up; a part none of them measured is left out. */
@@ -44,10 +47,28 @@ const cleanedOf = (disks: DiskReport[], newest: DiskReport): DiskReport['cleaned
 const keptOf = (disks: DiskReport[]): Pick<DiskReport, 'kept'> =>
   disks.some(disk => disk.kept) ? { kept: disks.flatMap(disk => disk.kept ?? []).toSorted((a, b) => b.bytes - a.bytes).slice(0, DISK_KEPT_MAX) } : {};
 
+/* The largest active working copies across every node on the machine, deduplicated by employee and path; omitted when none. */
+function copiesOf(disks: DiskReport[]): Pick<DiskReport, 'copies'> {
+  if (!disks.some(disk => disk.copies?.length)) return {};
+  const merged = new Map<string, NonNullable<DiskReport['copies']>[number]>();
+  for (const disk of disks) {
+    for (const copy of disk.copies ?? []) {
+      const key = `${copy.agent}\0${copy.path}`;
+      const previous = merged.get(key);
+      if (!previous || copy.bytes > previous.bytes) merged.set(key, copy);
+    }
+  }
+  const copies = [...merged.values()].toSorted((a, b) => b.bytes - a.bytes).slice(0, DISK_COPIES_MAX);
+  return copies.length ? { copies } : {};
+}
+
 /* The employees' working folders of each node of a machine that says how big they are, by the plan the node serves (none
    for the machine's own node), the biggest first. */
-export const machineFolders = (hub: NodeHub, nodes: { id: string; subscriptionId: string | null }[]) =>
-  workingFolders(nodes.map(n => ({ plan: n.subscriptionId, disk: hub.loadOf(nodeIdentity(n.id))?.disk })));
+export const machineFolders = (hub: NodeHub, nodes: { id: string; subscriptionId: string | null }[], builtin: NodeIdentity | null = null) =>
+  workingFolders([
+    ...nodes.map(n => ({ plan: n.subscriptionId, disk: hub.loadOf(nodeIdentity(n.id))?.disk })),
+    ...(builtin ? [{ plan: null, disk: hub.loadOf(builtin)?.disk }] : []),
+  ]);
 
 /* The same from what each node said: a node that did not measure its working copies, or says nothing of its disk, has none. */
 export function workingFolders(nodes: { plan: string | null; disk: DiskReport | undefined }[]): { plan: string | null; bytes: number }[] {

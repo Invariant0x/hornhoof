@@ -1,37 +1,25 @@
-import { EnvironmentSnapshot, validateEnvironmentDescription } from '@hornhoof/protocol';
 import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
-import { agents, autonomousReleases, departments, taskEvents, tasks, testParts, testRuns } from '../../db/schema.js';
+import { agents, autonomousReleases, departments, taskEvents, tasks } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
-import { repoAt } from '../departments/repository.js';
-import { evidenceOf } from '../testruns/evidence.js';
-import { coversEveryPart } from '../testruns/github-status.js';
-import { scopeKey } from '../testruns/load.js';
-import { runScope, scopeSource } from '../testruns/purpose.js';
-import { keptEverything, ofItsRelease } from '../testruns/reuse.js';
-import { passedProductPart } from '../testruns/receipts.js';
+import { ciAddress, repoAt } from '../departments/repository.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { routeOf, type Route } from './route-records.js';
 import { comment } from './comments.js';
 import { loadTask, mayAsk, type Moved, type Task, type Tx } from './state.js';
 import { refusePaused } from './pause.js';
+import { ciResult, ciWords, readCiOf, type CiResult } from './release-ci.js';
 import { heldLineage } from '../testruns/compare.js';
+import type { RepoAddress } from '../testruns/refs.js';
 
 const RELEASE_BRANCH_RE = /^release-\d+\.\d+\.\d+$/;
 
 type QueryDb = Db | Tx;
-type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare'>>;
-type FreshnessReader = Partial<Pick<Ctx, 'db' | 'config' | 'readCommit'>> | null;
+type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readCi'>>;
 type Dept = typeof departments.$inferSelect;
 type Repo = NonNullable<Awaited<ReturnType<typeof repoAt>>>['repo'];
-type Run = typeof testRuns.$inferSelect;
-type Part = typeof testParts.$inferSelect;
-type Snapshot = EnvironmentSnapshot;
-type ScopeAddress = Snapshot['description']['repositoryScope'];
-
-type VerifiedRun = { id: string; number: number };
 type VerifiedVerdict = {
   eventId: number;
   reviewerAgentId: string;
@@ -39,7 +27,7 @@ type VerifiedVerdict = {
   stage: string;
   baseCommitSha: string;
 };
-type VerifiedProof = { department: Dept; repo: Repo; run: VerifiedRun; verdict: VerifiedVerdict; baseCommitSha: string };
+type VerifiedProof = { department: Dept; repo: Repo; ci: CiResult; verdict: VerifiedVerdict; baseCommitSha: string };
 type VerdictRow = { id: number; agentId: string | null; pass: boolean; wrongGoal: boolean; stage: string; reviewedCommit: string };
 
 export type RecordedMainApproval = { entryId: string; baseCommitSha: string; candidateBaseCommitSha: string; department: Dept };
@@ -54,7 +42,9 @@ export type AutonomousReleaseEntry = {
   commitSha: string;
   baseCommitSha: string;
   testRunId: string | null;
-  testRunNumber: number;
+  testRunNumber: number | null;
+  ciState: string | null;
+  ciChecks: number | null;
   reviewerAgentId: string | null;
   reviewerName: string;
   verdictStage: string;
@@ -89,6 +79,8 @@ export async function listAutonomousReleases(db: Pick<QueryDb, 'select'>, compan
     baseCommitSha: row.baseCommitSha,
     testRunId: row.testRunId,
     testRunNumber: row.testRunNumber,
+    ciState: row.ciState,
+    ciChecks: row.ciChecks,
     reviewerAgentId: row.reviewerAgentId,
     reviewerName: row.reviewerName,
     verdictStage: row.verdictStage,
@@ -96,122 +88,15 @@ export async function listAutonomousReleases(db: Pick<QueryDb, 'select'>, compan
   }));
 }
 
-function validPartAt(part: Part, index: number, companyId: string, commit: string): boolean {
-  return part.companyId === companyId && part.part === index + 1 && part.status === 'passed' && part.commit === commit && part.exitCode === 0 && part.error === null;
-}
-
-function completeRunParts(parts: Part[], run: Run, companyId: string, commit: string): boolean {
-  return (run.parts > 0 || keptEverything(run)) && parts.length === run.parts && parts.every((part, i) => validPartAt(part, i, companyId, commit));
-}
-
-function hasWholeEnvironmentRequest(run: Run): boolean {
-  const req = run.environmentRequest;
-  return Boolean(req && !req.problem && !req.suite);
-}
-
-function matchingRepoScope(repoScope: ScopeAddress, requestedScope: ScopeAddress, companyId: string, departmentId: string): boolean {
-  return repoScope.companyId === companyId && repoScope.repositoryOwnerId === departmentId && scopeKey(repoScope) === scopeKey(requestedScope);
-}
-
-function matchingSnapshot(run: Run, companyId: string, departmentId: string, commit: string): Snapshot | null {
-  if (!hasWholeEnvironmentRequest(run) || !run.environmentRequest) return null;
-  const parsed = EnvironmentSnapshot.safeParse(run.environmentSnapshot);
-  if (!parsed.success) return null;
-  const { description } = parsed.data;
-  const commitMatches = description.commitSha === commit && run.environmentHash === description.manifestHash;
-  return commitMatches && matchingRepoScope(description.repositoryScope, run.environmentRequest.repositoryScope, companyId, departmentId) ? parsed.data : null;
-}
-
-/* Every suite of the release's profile ran, in full or taking only what its release proved. */
-function checksWholeRelease(run: Run, snapshot: Snapshot): boolean {
-  const scope = runScope(scopeSource(snapshot), undefined, 0), fullRun = snapshot.description.manifest.execution?.fullRun;
-  if (scope.leftOut.length || !snapshot.description.manifest.suites.length) return false;
-  return !fullRun || (scope.profile === fullRun.profile && ofItsRelease(run.fileCache));
-}
-
-/* A run of the product's tests that checks its release whole on commit: the snapshot of the product described there, its full
-   profile, and every part passed with its receipt on that commit. A run of a command of its own is none, however it ended. */
-export async function wholeProductRun(db: QueryDb, run: Run, companyId: string, departmentId: string, commit: string): Promise<boolean> {
-  if (run.command !== '') return false;
-  const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
-  return completeRunParts(parts, run, companyId, commit) && validFullProductRun(run, parts, companyId, departmentId, commit);
-}
-
-async function validFullProductRun(run: Run, parts: Part[], companyId: string, departmentId: string, commit: string): Promise<boolean> {
-  const snapshot = matchingSnapshot(run, companyId, departmentId, commit);
-  if (!snapshot || !checksWholeRelease(run, snapshot)) return false;
-  try {
-    await validateEnvironmentDescription(snapshot.description);
-  } catch {
-    return false;
-  }
-  return parts.every(part => passedProductPart(snapshot, part));
-}
-
 function isMainRepository(department: Dept, repo?: Repo): boolean {
   return (department.repoBranch ?? 'main') === 'main' && (!repo || repo.branch === 'main');
 }
 
-/* A shared run checks a release: of main, or of a release-X.Y.Z branch before main moves. */
-function isReleaseRunBranch(branch: string | null): boolean {
-  return branch === 'main' || Boolean(branch && RELEASE_BRANCH_RE.test(branch));
-}
-
-function isPassedCommitRun(run: Run, commit: string): boolean {
-  return run.status === 'passed' && Boolean(run.finishedAt) && run.commitSha === commit && isReleaseRunBranch(run.branch);
-}
-
-function matchesLegacyFullCommand(department: Dept, command: string): boolean {
-  return command === department.repoFullTestCommand && coversEveryPart(command);
-}
-
-async function isWholeSuiteGreenRun(db: QueryDb, companyId: string, department: Dept, commit: string, run: Run): Promise<boolean> {
-  if (!isPassedCommitRun(run, commit)) return false;
-  if (run.command === '') return wholeProductRun(db, run, companyId, department.id, commit);
-  const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
-  return completeRunParts(parts, run, companyId, commit) && matchesLegacyFullCommand(department, run.command);
-}
-
-async function newestFailedNumber(db: QueryDb, companyId: string, departmentId: string, commit: string): Promise<number> {
-  const [failed] = await db
-    .select(only(testRuns, 'number'))
-    .from(testRuns)
-    .where(and(eq(testRuns.companyId, companyId), eq(testRuns.departmentId, departmentId), eq(testRuns.kind, 'tests'), eq(testRuns.commitSha, commit), eq(testRuns.status, 'failed')))
-    .orderBy(desc(testRuns.number))
-    .limit(1);
-  return failed?.number ?? 0;
-}
-
-async function isCurrentRunEvidence(ctx: FreshnessReader, run: Run, checkFreshness: boolean): Promise<boolean> {
-  if (!checkFreshness) return true;
-  if (!ctx?.db || !ctx.config || !ctx.readCommit) return false;
-  const evidence = await evidenceOf({ db: ctx.db, config: ctx.config, readCommit: ctx.readCommit }, run);
-  return evidence.freshness === 'current';
-}
-
-/* Condition (a): a completed green whole run of a release, on main or a release-X.Y.Z branch, at that exact 40-char SHA with proves: true. */
-async function verifiedFullRun(
-  ctx: FreshnessReader,
-  db: QueryDb,
-  companyId: string,
-  department: Dept,
-  commit: string,
-  checkFreshness: boolean,
-): Promise<VerifiedRun | null> {
-  const failedAfter = await newestFailedNumber(db, companyId, department.id, commit);
-  const runs = await db
-    .select()
-    .from(testRuns)
-    .where(and(eq(testRuns.companyId, companyId), eq(testRuns.departmentId, department.id), eq(testRuns.kind, 'tests'), eq(testRuns.commitSha, commit), eq(testRuns.status, 'passed')))
-    .orderBy(desc(testRuns.number))
-    .limit(25);
-  for (const run of runs) {
-    if (run.number <= failedAfter) break;
-    if ((await isWholeSuiteGreenRun(db, companyId, department, commit, run)) && (await isCurrentRunEvidence(ctx, run, checkFreshness))) {
-      return { id: run.id, number: run.number };
-    }
-  }
-  return null;
+/* Condition (a): the repository's CI is green on that exact commit, or the repository has none. The host says it as the approval
+   is asked: no word of the caller counts, and a host that cannot be read now, or CI that is red, under way or ran nothing that
+   succeeded, lets nothing go. */
+async function verifiedCi(ctx: Reader, repo: RepoAddress, commit: string): Promise<CiResult | null> {
+  return ciResult(await readCiOf(ctx, repo, commit));
 }
 
 async function repoDepartmentIds(db: QueryDb, companyId: string, repositoryOwnerId: string): Promise<string[]> {
@@ -463,8 +348,8 @@ async function verifyAllConditions(ctx: Reader, task: Task, commit: string): Pro
   if (!verdict) return null;
   const baseCommitSha = await verifiedMainLine(ctx, found.repo, verdict.baseCommitSha, commit);
   if (!baseCommitSha) return null;
-  const run = await verifiedFullRun(ctx, ctx.db, task.companyId, found.department, commit, true);
-  return run ? { department: found.department, repo: found.repo, run, verdict, baseCommitSha } : null;
+  const ci = await verifiedCi(ctx, ciAddress(found), commit);
+  return ci ? { department: found.department, repo: found.repo, ci, verdict, baseCommitSha } : null;
 }
 
 /* Held so a switch of the department that holds the repository waits for the record. */
@@ -475,12 +360,13 @@ async function enabledMainInTransaction(tx: Tx, companyId: string, departmentId:
   return Boolean(top?.on) && (deptRow.repoBranch ?? 'main') === 'main';
 }
 
-async function reverifyInTransaction(tx: Tx, task: Task, commit: string, department: Dept): Promise<{ run: VerifiedRun; verdict: VerifiedVerdict } | null> {
+/* What the transaction holds still stands: the department's switch and the verdict. The host's CI answer was read before it and is
+   not asked again inside it. */
+async function reverifyInTransaction(tx: Tx, task: Task, commit: string, department: Dept): Promise<{ verdict: VerifiedVerdict } | null> {
   if (!(await enabledMainInTransaction(tx, task.companyId, department.id))) return null;
   const verdict = await verifiedIndependentVerdict(tx, task, department.id, commit);
   if (!verdict) return null;
-  const run = await verifiedFullRun(null, tx, task.companyId, department, commit, false);
-  return run ? { run, verdict } : null;
+  return { verdict };
 }
 
 function journalValues(
@@ -490,7 +376,8 @@ function journalValues(
   commit: string,
   baseCommitSha: string,
   department: Dept,
-  fresh: { run: VerifiedRun; verdict: VerifiedVerdict },
+  ci: CiResult,
+  fresh: { verdict: VerifiedVerdict },
 ) {
   return {
     companyId: task.companyId,
@@ -501,8 +388,8 @@ function journalValues(
     agentName,
     commitSha: commit,
     baseCommitSha,
-    testRunId: fresh.run.id,
-    testRunNumber: fresh.run.number,
+    ciState: ci.state,
+    ciChecks: ci.state === 'green' ? ci.checks : null,
     reviewerAgentId: fresh.verdict.reviewerAgentId,
     reviewerName: fresh.verdict.reviewerName,
     verdictEventId: fresh.verdict.eventId,
@@ -523,7 +410,7 @@ async function insertJournalRow(
   if (!requester) return null;
   const [inserted] = await tx
     .insert(autonomousReleases)
-    .values(journalValues(task, agentId, requester.name, commit, proof.baseCommitSha, proof.department, fresh))
+    .values(journalValues(task, agentId, requester.name, commit, proof.baseCommitSha, proof.department, proof.ci, fresh))
     .returning({ id: autonomousReleases.id });
   return { id: inserted.id, baseCommitSha: proof.baseCommitSha };
 }
@@ -545,14 +432,13 @@ export async function tryAutonomousCommitApproval(
   if (!recorded) return null;
   const noteText =
     `Autonomous release approved exact commit ${commit} before push without a human card: ` +
-    `test run ${proof.run.number} passed full suite on ${commit}, ` +
-    `independent ${proof.verdict.stage} PASS by ${proof.verdict.reviewerName}, fast-forward from ${proof.repo.branch} (${recorded.baseCommitSha}). ${reasonText}`;
+    `${ciWords(proof.ci)}, independent ${proof.verdict.stage} PASS by ${proof.verdict.reviewerName}, fast-forward from ${proof.repo.branch} (${recorded.baseCommitSha}). ${reasonText}`;
   const moved = await comment(ctx, { agentId }, fresh.id, noteText);
   return {
     moved,
     text:
       `No human card needed: autonomous release approved exact commit ${commit} ` +
-      `(full test run ${proof.run.number}, independent ${proof.verdict.stage} PASS by ${proof.verdict.reviewerName}, fast-forward from ${proof.repo.branch} at ${recorded.baseCommitSha}).`,
+      `(${ciWords(proof.ci)}, independent ${proof.verdict.stage} PASS by ${proof.verdict.reviewerName}, fast-forward from ${proof.repo.branch} at ${recorded.baseCommitSha}).`,
   };
 }
 
@@ -581,14 +467,14 @@ async function verifiedRecordedLine(ctx: Reader, repo: Repo, candidateBaseSha: s
   return baseOnMain && ffFromRecorded;
 }
 
-/* Verifies pre-push autonomous release journal row + live run, verdict and recorded base ancestry for main acceptance. */
+/* Verifies pre-push autonomous release journal row + the repository's CI now, verdict and recorded base ancestry for main acceptance. */
 export async function verifyAutonomousMainAcceptance(ctx: Reader, task: Task, commit: string): Promise<RecordedMainApproval | null> {
   const target = await loadAcceptanceTarget(ctx, task, commit);
   if (!target) return null;
   const verdict = await verifiedIndependentVerdict(ctx.db, task, target.department.id, commit);
   if (!verdict || !(await verifiedRecordedLine(ctx, target.repo, verdict.baseCommitSha, target.recorded.baseCommitSha, commit))) return null;
-  const run = await verifiedFullRun(ctx, ctx.db, task.companyId, target.department, commit, true);
-  return run
+  const ci = await verifiedCi(ctx, ciAddress(target), commit);
+  return ci
     ? {
         entryId: target.recorded.id,
         baseCommitSha: target.recorded.baseCommitSha,

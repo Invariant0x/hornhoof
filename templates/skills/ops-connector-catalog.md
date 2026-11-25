@@ -1,7 +1,5 @@
 ---
 id: ops-connector-catalog
-title: { en: "Connector catalog", ru: "Каталог подключений" }
-description: { en: "Keeps one list of the outside services the company is connected to, what each can do and who may use it.", ru: "Ведет единый список внешних сервисов, к которым подключена компания: что каждый умеет и кто может им пользоваться." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins customer-support/CONNECTORS.md]
 ---

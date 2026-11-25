@@ -136,4 +136,61 @@ describe("the working copies of an agent's finished tasks, in a node's disk care
     expect(existsSync(join(moved, 'shop-7', 'task-7.txt'))).toBe(true);
     expect(done).toContain('agent-a');
   });
+
+  it('removes release-check worktrees, detached task worktrees, and standalone task clones of finished and cancelled tasks, while keeping open, paused, blocked, and unpushed ones and listing the largest remaining copies', async () => {
+    const { dir, clone, copy } = node();
+    const a = clone('agent-a', 'shop');
+    const b = clone('agent-b', 'shop');
+    /* Closed tasks: finished #7 on release-check-7, cancelled #8 on detached HEAD at shop-8, and standalone clone shop-9 on task-9. */
+    const releaseDone = copy(a, 'release-7', 'release-check-7');
+    const detachedCancelled = join(a, '..', 'shop-8');
+    git(a, 'worktree', 'add', '-q', '--detach', detachedCancelled, 'origin/main');
+    fill(join(detachedCancelled, 'node_modules', 'pkg', 'index.js'), 256 * 1024);
+    const standaloneDone = clone('agent-b', 'shop-9');
+    git(standaloneDone, 'checkout', '-q', '-b', 'task-9');
+    writeFileSync(join(standaloneDone, 'nine.txt'), 'done\n');
+    git(standaloneDone, 'add', '.');
+    git(standaloneDone, 'commit', '-q', '-m', 'task-9');
+    git(standaloneDone, 'push', '-q', 'origin', 'task-9');
+    fill(join(standaloneDone, 'node_modules', 'pkg', 'index.js'), 256 * 1024);
+
+    /* Protected copies: #10 open (biggest), #11 paused, #12 blocked, closed #13 with an unpushed commit, and a primary clone of a repo literally named app-6 checked out on task-6. */
+    const openBig = copy(a, 'shop-10', 'task-10');
+    fill(join(openBig, 'node_modules', 'big', 'bundle.js'), 768 * 1024);
+    const pausedCopy = copy(b, 'shop-11', 'task-11');
+    fill(join(pausedCopy, 'node_modules', 'med', 'bundle.js'), 384 * 1024);
+    const blockedCopy = copy(b, 'shop-12', 'release-check-12');
+    const unpushedClosed = copy(a, 'shop-13', 'task-13', { push: false });
+    const app6Origin = join(dir, 'app-6.git');
+    git(dir, 'init', '-q', '--bare', '-b', 'main', app6Origin);
+    const app6Primary = join(dir, 'work', 'agents', 'agent-c', 'app-6');
+    mkdirSync(join(dir, 'work', 'agents', 'agent-c'), { recursive: true });
+    git(dir, 'clone', '-q', app6Origin, app6Primary);
+    writeFileSync(join(app6Primary, 'README.md'), 'app-6\n');
+    git(app6Primary, 'add', '.');
+    git(app6Primary, 'commit', '-q', '-m', 'init');
+    git(app6Primary, 'push', '-q', 'origin', 'HEAD:main');
+    git(app6Primary, 'checkout', '-q', '-b', 'task-6');
+    git(app6Primary, 'push', '-q', 'origin', 'task-6');
+
+    const copies = workingCopies({ dir, git: agentGit(dir, OWNER), tasks: () => closedUpTo(15, [10, 11, 12]) }) as ReturnType<typeof workingCopies> & {
+      copies?: () => { agent: string; path: string; task: number | null; bytes: number }[];
+    };
+    const freed = await copies.clean();
+    expect(freed).toBeGreaterThanOrEqual(3 * 256 * 1024);
+    expect(existsSync(releaseDone)).toBe(false);
+    expect(existsSync(detachedCancelled)).toBe(false);
+    expect(existsSync(standaloneDone)).toBe(false);
+    expect(existsSync(join(openBig, 'node_modules', 'big', 'bundle.js'))).toBe(true);
+    expect(existsSync(join(pausedCopy, 'node_modules', 'med', 'bundle.js'))).toBe(true);
+    expect(existsSync(join(blockedCopy, 'node_modules', 'left-pad', 'index.js'))).toBe(true);
+    expect(existsSync(unpushedClosed)).toBe(true);
+    expect(existsSync(join(app6Primary, '.git'))).toBe(true);
+
+    const listed = copies.copies?.() ?? [];
+    expect(listed.length).toBeGreaterThanOrEqual(4);
+    expect(listed[0]).toMatchObject({ agent: 'agent-a', path: 'shop-10', task: 10 });
+    expect(listed[1]).toMatchObject({ agent: 'agent-b', path: 'shop-11', task: 11 });
+    expect(listed.map(c => c.bytes)).toEqual([...listed.map(c => c.bytes)].sort((x, y) => y - x));
+  });
 });

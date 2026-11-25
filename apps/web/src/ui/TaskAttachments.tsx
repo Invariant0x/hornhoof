@@ -140,7 +140,7 @@ export function TaskFiles({ files }: { files?: TaskFile[] }) {
     const name = displayFileName(f.name);
     return (
       <Material key={f.id} kind={t.tracker.card.materialKinds.file} href={attachmentPath(f.id)} name={name} download={autoText ? undefined : name}>
-        <span dir="auto">{f.big ? `${name} · ${t.tasks.bigFile}` : name}</span> <small>{formatFileSize(t, f.size)}</small>
+        <span dir="auto">{name}</span> <small>{formatFileSize(t, f.size)}</small>
       </Material>
     );
   });

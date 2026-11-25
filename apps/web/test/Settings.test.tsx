@@ -239,12 +239,27 @@ describe('Backups in Settings', () => {
     expect(headings.indexOf('Link on the internet')).toBeLessThan(headings.indexOf('Backups'));
   });
 
+  it('shows the CEO how many machines keep each file, above the backups', async () => {
+    const store = { copies: 2, effectiveCopies: 2, machines: 2, filesBytes: 0, usedBytes: 0, capacityBytes: 20 * 1024 ** 3, underCopied: 0, stuckBytes: 0 };
+    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'GET /api/backups': [200, BACKUPS], 'GET /api/company/file-store': [200, store] });
+    render(<Settings me={ME} group="company" onClose={() => {}} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+    expect(await within(dialog).findByRole('heading', { name: 'Backups' })).toBeInTheDocument();
+    /* The part is there as the window opens, above the backups; what it says comes with the server's answer. Asked at once,
+       so a window without it fails here rather than waiting for it. */
+    const headings = within(dialog).getAllByRole('heading').map(heading => heading.textContent);
+    expect(headings).toContain('File copies across machines');
+    expect(headings.indexOf('File copies across machines')).toBeLessThan(headings.indexOf('Backups'));
+    expect(await within(dialog).findByRole('combobox', { name: 'File copies across machines' })).toHaveValue('2');
+  });
+
   it('shows no backups to anyone else, and asks the server for none', async () => {
     const calls = mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'GET /api/backups': [200, BACKUPS] });
     render(<Settings me={{ ...ME, person: { ...ME.person, isOwner: false } }} group="company" onClose={() => {}} />);
     expect(await screen.findByRole('link', { name: 'https://acme.hornhoof.org' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Backups' })).not.toBeInTheDocument();
-    /* The groups the window may show, the link and the key of the git host are asked for, the backups never. */
+    expect(screen.queryByRole('heading', { name: 'File copies across machines' })).not.toBeInTheDocument();
+    /* The groups the window may show, the link and the key of the git host are asked for, the backups and the file store never. */
     await waitFor(() => expect(calls.map(call => call.path).sort()).toEqual(['/api/google-sheets', '/api/link', '/api/repo-host', '/api/vault']));
   });
 
@@ -424,5 +439,9 @@ describe('the language under Appearance & language', () => {
     expect(decl('.lang-select:focus-visible', 'outline-offset')).toBe('2px');
     expect(decl('.select-wrap::after', 'inset-inline-end')).toBe('14px');
     expect(decl('.select-wrap::after', 'border-bottom')).toBe('2px solid var(--muted)');
+    /* The arrow is the right and bottom strokes turned 45 degrees, so it points down in both directions: a logical
+       side would turn it sideways on a right-to-left page. */
+    expect(decl('.select-wrap::after', 'border-right')).toBe('2px solid var(--muted)');
+    expect(decl('.select-wrap::after', 'border-inline-end')).toBeUndefined();
   });
 });

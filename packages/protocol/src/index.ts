@@ -1,6 +1,7 @@
 import { AuthorCheckDone, AuthorCheckRun } from './author-check.js';
 export { AuthorCheckDone, AuthorCheckRun, AuthorCheckPin, docsOnly } from './author-check.js';
 export * from './department-mode.js';
+export * from './locales.js';
 export * from './tool-privacy.js';
 export * from './external-operations.js';
 export * from './request-materials.js';
@@ -9,7 +10,7 @@ export { OUTSIDE_MATERIAL } from './model-instructions.js';
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, approvalNeeded, defaultRule, kindKey, GOING_OUT_CHANNELS, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
 export { MachineDrain, NodeWait } from './machine-drain.js';
-export { DISK_CLEANED_MAX, DISK_IGNORED_MAX, DISK_KEPT_MAX, DISK_PARTS, DiskPart, DiskReport, MachineReplicas, NODE_DISK_PARTS } from './disk-report.js';
+export { DISK_CLEANED_MAX, DISK_COPIES_MAX, DISK_IGNORED_MAX, DISK_KEPT_MAX, DISK_PARTS, DiskPart, DiskReport, MachineReplicas, NODE_DISK_PARTS } from './disk-report.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
 export * from './test-terminals.js';
@@ -68,8 +69,9 @@ export const UNHEARD_MS = 15_000;
 export const isProgramOwnPrompt = (text: string): boolean => /^\s*<(?:task-notification|system-reminder)\b/.test(text);
 
 /* Why a part of a run ended other than with its command passing: it failed, ran out of time, was stopped, the branch
-   could not be cloned, or the task's files could not be fetched. */
-export const TEST_ERRORS = ['failed', 'timeout', 'silent', 'upper_limit', 'cancelled', 'clone_failed', 'files_failed'] as const;
+   could not be cloned, the task's files could not be fetched, or Hornhoof refused its command before it started, which is
+   a hint to the one who asked and no result. */
+export const TEST_ERRORS = ['failed', 'timeout', 'silent', 'upper_limit', 'cancelled', 'clone_failed', 'files_failed', 'refused'] as const;
 export type TestError = (typeof TEST_ERRORS)[number];
 /* The most parts a run splits into, and the most of each part's log a node sends: its start and its end. */
 export const MAX_TEST_PARTS = 10;
@@ -629,6 +631,8 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('agent.input_left'), agentKey: Id, jobId: Id.nullable(), text: z.string().max(100_000), typed: z.boolean(), ref: z.string().min(1).max(64) }),
   /* How a restart Hornhoof asked for went: done, or why the node did not do it. */
   z.object({ type: z.literal('agent.restarted'), agentKey: Id, jobId: Id, ok: z.boolean(), reason: z.string().max(300).nullable() }),
+  /* Asks Hornhoof for the company's open, paused, and blocked task numbers before a disk-care pass cleans finished copies. */
+  z.object({ type: z.literal('tasks.read') }),
 ]);
 export type NodeMessage = z.infer<typeof NodeMessage>;
 
@@ -807,6 +811,8 @@ const ServerMessage = z.discriminatedUnion('type', [
   /* The step a check command of a tools.check runs in, open until the node says it ended or Hornhoof stops it with
      job.cancel; or, with none, the words its program gets for why it may not run now. */
   z.object({ type: z.literal('tools.checking'), agentKey: Id, ref: z.string().min(1).max(64), jobId: Id.nullable(), refused: z.string().max(500).optional() }),
+  /* The company's open, paused, and blocked task numbers and the highest task number issued so far, for node disk care. */
+  z.object({ type: z.literal('tasks.open'), tasks: TaskStates.nullable() }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 

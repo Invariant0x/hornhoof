@@ -8,7 +8,16 @@ const leased = new AsyncLocalStorage<{ lease: CheckLease; active: boolean }>();
 const leases = new Map<string, { lease: CheckLease; agentId: string | undefined; active: boolean; children: Set<Promise<unknown>> }>();
 
 const blocked = new Map<number, string>();
-export function setCheckClient(next: CheckClient | null): void { client = next; if (!next) blocked.clear(); }
+let recheckDisk: (() => Promise<void>) | null = null;
+export function setCheckClient(next: CheckClient | null): void {
+  client = next;
+  if (next) next.recheckRefusal = recheckDisk ?? undefined;
+  else { blocked.clear(); recheckDisk = null; }
+}
+export function setDiskRecheck(next: (() => Promise<void>) | null): void {
+  recheckDisk = next;
+  if (client) client.recheckRefusal = next ?? undefined;
+}
 export function suspendCheckSlots(group: number, reason: string | null): void {
   if (reason) blocked.set(group, reason); else blocked.delete(group);
   client?.refuse(blocked.values().next().value ?? null);

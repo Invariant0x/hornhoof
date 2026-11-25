@@ -7,6 +7,7 @@ import { agents, attachments, companies, departments, jobs, nodeCodes, nodes, pe
 import { as, invitePerson, SETUP, setUpCompany, TEST_API_KEY, testApp } from './helpers.js';
 import { createRoute } from '../src/modules/tasks/echelons-store.js';
 import { developmentStages } from './templates-once.js';
+import { stored } from './files-fixture.js';
 
 const COMMAND = /^curl -fsSL http:\/\/localhost:8080\/install\.sh \| bash -s -- --join ([A-Za-z0-9_-]{43})$/;
 const WHOLE = { kind: 'company', id: null, name: 'Whole company' };
@@ -42,7 +43,7 @@ async function programHistory(db: Db, node: typeof nodes.$inferSelect) {
   const [incident] = await db.insert(programOperatorCases).values({ companyId, agentId: agent!.id, jobId: job!.id, nodeId: node.id, instance: instance!.id, deliveryId: delivery!.id, reason: 'assignment_unrecorded', evidenceKey: delivery!.id, capability: randomUUID(), status: 'resolved', deadlineAt: new Date() }).returning();
   const [signal] = await db.insert(programOperatorSignals).values({ companyId, agentId: agent!.id, instance: instance!.id, reason: 'assignment_unrecorded', evidenceKey: delivery!.id, caseId: incident!.id }).returning();
   const screenshot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7ioAAAAASUVORK5CYII=', 'base64');
-  const [picture] = await db.insert(attachments).values({ companyId, agentId: agent!.id, jobId: job!.id, operatorCaseId: incident!.id, mediaType: 'image/png', bytes: screenshot, size: screenshot.length }).returning();
+  const [picture] = await db.insert(attachments).values({ companyId, agentId: agent!.id, jobId: job!.id, operatorCaseId: incident!.id, mediaType: 'image/png', sha256: await stored(db, screenshot), size: screenshot.length }).returning();
   const [shownCase] = await db.update(programOperatorCases).set({ pictureId: picture!.id }).where(eq(programOperatorCases.id, incident!.id)).returning();
   return { agent: agent!, job: job!, instance: instance!, delivery: delivery!, incident: shownCase!, signal: signal!, picture: picture! };
 }
@@ -423,10 +424,10 @@ describe('GET /api/subscriptions', () => {
     const { app, db, ceo, maria, marketing, development } = await companyWithMaria();
     const sub = (await connect(app, maria, ['claude'])).json().subscriptions[0];
     await db.update(departments).set({ position: 1 }).where(eq(departments.id, marketing.id));
-    const hire = async (name: string, departmentId: string) =>
-      (await db.insert(agents).values({ companyId: development.companyId, kind: 'worker', name, departmentId, roleKey: 'DEV-BE', model: '', subscriptionId: sub.id }).returning())[0]!;
+    const hire = async (name: string, departmentId: string, model = '') =>
+      (await db.insert(agents).values({ companyId: development.companyId, kind: 'worker', name, departmentId, roleKey: 'DEV-BE', model, subscriptionId: sub.id }).returning())[0]!;
     const vera = await hire('Vera', marketing.id);
-    const bruno = await hire('Bruno', development.id);
+    const bruno = await hire('Bruno', development.id, 'claude-sonnet-5-5');
     const [task] = await db.insert(tasks).values({ companyId: development.companyId, departmentId: development.id, number: 12, title: 'Checkout API' }).returning();
     await db.transaction(tx => createRoute(tx, task!, {}, developmentStages()));
     const since = new Date('2026-11-01T10:00:00Z');
@@ -435,8 +436,8 @@ describe('GET /api/subscriptions', () => {
     await db.insert(jobs).values({ companyId: development.companyId, subscriptionId: sub.id, agentId: vera.id, taskId: task!.id, prompt: 'review', status: 'done', timeoutMs: 1000, startedAt: since, finishedAt: new Date('2026-11-01T10:05:00Z'), answersCeo: true });
     const shown = (await list(app, ceo)).find((s: { id: string }) => s.id === sub.id);
     expect(shown.agents).toEqual([
-      { id: bruno.id, canOpen: true, name: 'Bruno', busy: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: development.id, name: 'Development' }, provider: 'claude', since: since.toISOString(), task: { number: 12, title: 'Checkout API' }, withCeo: true },
-      { id: vera.id, canOpen: true, name: 'Vera', busy: false, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: marketing.id, name: 'Marketing' }, provider: 'claude', since: null, task: null, withCeo: false },
+      { id: bruno.id, canOpen: true, name: 'Bruno', busy: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: development.id, name: 'Development' }, provider: 'claude', model: 'claude-sonnet-5-5', since: since.toISOString(), task: { number: 12, title: 'Checkout API' }, withCeo: true },
+      { id: vera.id, canOpen: true, name: 'Vera', busy: false, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: marketing.id, name: 'Marketing' }, provider: 'claude', model: '', since: null, task: null, withCeo: false },
     ]);
     expect((await list(app, maria))[0].agents[0].task).toBeNull();
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();

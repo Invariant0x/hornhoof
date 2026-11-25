@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { LANGUAGES, type Language } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage } from '../src/i18n';
 import { BUILTIN_SKINS, builtinSkin, type BuiltinSkinId } from '../src/skins/registry';
 import { serveApi } from './api';
 
@@ -38,7 +38,7 @@ type ZoomCheck = {
   buttons: { width: number; height: number; flexShrink: string }[];
 };
 
-async function openMap(page: Page, language: Language, skin: BuiltinSkinId, dir: 'ltr' | 'rtl', width: number) {
+async function openMap(page: Page, language: ShippedLanguage, skin: BuiltinSkinId, dir: 'ltr' | 'rtl', width: number) {
   await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
   await page.evaluate(({ language, skin }) => {
     localStorage.clear();

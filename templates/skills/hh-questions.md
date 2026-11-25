@@ -1,7 +1,5 @@
 ---
 id: hh-questions
-title: { en: "Questions stay inside first", ru: "Вопросы сначала внутри компании" }
-description: { en: "Routes routine questions and stalls internally first, classifies only ready results and human-only actions for people, and keeps human summaries plain.", ru: "Направляет рабочие вопросы и остановки сначала внутри компании, относит к людям только готовые результаты и действия человека и объясняет их простыми словами." }
 kind: core
 ---
 You can resolve ordinary questions and identify decisions that need a person.
