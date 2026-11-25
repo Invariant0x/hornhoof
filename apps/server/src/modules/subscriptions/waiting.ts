@@ -6,6 +6,7 @@ import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { modelForTier, tierIn } from '../agents/role-model.js';
 import { pump, pumpWaiting } from '../conversation/queue.js';
+import { repinMoved } from '../tasks/echelons-repin.js';
 import type { Tx } from '../tasks/state.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { placeableForOrchestrator, placeableSubscriptions, runsTier, type Serving } from '../tools/staff.js';
@@ -82,6 +83,7 @@ export async function placeWaiting(ctx: Ctx, companyId: string, planIds: readonl
   ctx.bus.publish(companyId, { type: 'org' });
   /* Who sees an agent changes with the plan it runs on. */
   ctx.bus.accessChanged(companyId);
+  await repinMoved(ctx, placed.map(agent => agent.id));
   /* Turns that waited for a plan can go now, with the tasks missed while there was none. */
   for (const agent of placed) {
     await resumeAgent(ctx, agent.id);

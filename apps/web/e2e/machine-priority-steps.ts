@@ -16,6 +16,7 @@ export const WORDS = {
     ask: (host: string) => `Move the company server to ${host}? Hornhoof stops for a short while as it moves; your work is kept.`,
     waiting: (host: string) => `${host} takes the server once its copy is up to date (40%)`,
     led: (host: string) => new RegExp(`^${host} ran the server until .+ and is up to date again\\.$`), saving: 'Copy: saving what it did while it led',
+    savingRetry: /^Copy: saving what it did while it led \(retrying after an error, since .+\)$/,
     updating: 'Hornhoof is updating. Move the server once the update ended.',
   },
   ru: {
@@ -28,6 +29,7 @@ export const WORDS = {
     ask: (host: string) => `Перенести сервер компании на ${host}? Пока он переезжает, Hornhoof ненадолго остановится; ваша работа сохранится.`,
     waiting: (host: string) => `${host} возьмет сервер, как только ее копия станет актуальной (40%)`,
     led: (host: string) => new RegExp(`^Машина ${host} держала сервер до .+, ее копия снова актуальна\\.$`), saving: 'Копия: сохраняет то, что сделано, пока она держала сервер',
+    savingRetry: /^Копия: сохраняет то, что сделано, пока она держала сервер \(повторяет попытку после сбоя, с .+\)$/,
     updating: 'Hornhoof обновляется. Перенесите сервер, когда обновление закончится.',
   },
 };

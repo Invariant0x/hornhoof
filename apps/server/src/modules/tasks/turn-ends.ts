@@ -17,7 +17,7 @@ import { branchHolds, BranchProofUnavailable, type BranchProofReader } from './t
    result already, moved by hand, and only a release recorded before main moved releases it. Nothing opens a turn in its
    place: the next result accepted into the department opens one, and a department without a repository never gets one. */
 
-type Reader = BranchProofReader & Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readBranches' | 'log'>>;
+type Reader = BranchProofReader & Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readBranches' | 'log' | 'files'>>;
 type Turn = typeof turns.$inferSelect;
 type Department = typeof departments.$inferSelect;
 
@@ -49,7 +49,7 @@ async function closeIfIdle(ctx: Reader, turn: Turn, department: Department): Pro
     const [open] = await tx.select(idOnly(turns)).from(turns).where(and(eq(turns.id, turn.id), eq(turns.status, 'open')));
     if (!open || (await holdsWork(tx, turn, places))) return null;
     const [done] = await tx.update(turns).set({ status: 'closed', closedAt: new Date(), closedBecause: because }).where(eq(turns.id, turn.id)).returning();
-    await keepSnapshot(tx, done!, ctx.log);
+    await keepSnapshot(tx, done!, ctx.log, ctx.files);
     return done!;
   });
   if (!closed) return;

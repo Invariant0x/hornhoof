@@ -9,12 +9,11 @@ import type { NamedTurn, UpdateCalledOff, UpdateRequest } from '../modules/updat
 import type { UncheckedItem } from '../modules/tasks/unchecked.js';
 import type { TaskPriority, UnitFingerprint } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
-import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigint, bigserial, boolean, check, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const companyId = () => uuid('company_id').notNull().references(() => companies.id);
-const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({ dataType: () => 'bytea' });
 
 /* Legacy rows keep null metadata. A versioned public stamp is always complete. */
 const materialStamp = (revision: AnyPgColumn, digest: AnyPgColumn) => sql`
@@ -502,6 +501,13 @@ export const machines = pgTable(
     ageKey: text('age_key'),
     keepsBackups: boolean('keeps_backups').notNull().default(true),
     heldBackups: uuid('held_backups').array().notNull().default(sql`'{}'::uuid[]`),
+    /* The company's files (#2021): the area of its disk its owner gives them, none for the default of 10 GiB (files/area)
+       and 0 for none; the sealed bytes of the files its keeper last said it keeps; and the free and whole room of the
+       disk FILES_DIR lies on, which the floor is a tenth of, none before its keeper said. */
+    fileStoreLimitBytes: bigint('file_store_limit_bytes', { mode: 'number' }),
+    fileStoreUsedBytes: bigint('file_store_used_bytes', { mode: 'number' }).notNull().default(0),
+    filesDiskFree: bigint('files_disk_free', { mode: 'number' }),
+    filesDiskTotal: bigint('files_disk_total', { mode: 'number' }),
     /* Its place in taking the company server: 1 leads, none for a machine that may not hold the company's data.
        serverPin: the place the CEO pinned, from 2, or 'none' for a machine that never takes the server. serverWhy: a
        key the card turns into words. */
@@ -540,6 +546,9 @@ export const machines = pgTable(
     unique('machines_person_key').on(t.personId, t.machineKey),
     check('machines_role', sql`role IS NULL OR role IN ('data', 'worker')`),
     check('machines_path', sql`path IS NULL OR path IN ('direct', 'relay')`),
+    check('machines_file_store_limit', sql`file_store_limit_bytes IS NULL OR (file_store_limit_bytes >= 0 AND file_store_limit_bytes <= 9007199254740991)`),
+    check('machines_file_store_used', sql`file_store_used_bytes >= 0 AND file_store_used_bytes <= 9007199254740991`),
+    check('machines_files_disk', sql`(files_disk_free IS NULL OR files_disk_free BETWEEN 0 AND 9007199254740991) AND (files_disk_total IS NULL OR files_disk_total BETWEEN 0 AND 9007199254740991)`),
     check('machines_update_state', sql`update_state IS NULL OR update_state IN ('ready', 'installing', 'failed')`),
     uniqueIndex('machines_server_order').on(t.serverOrder),
     uniqueIndex('machines_server_pin').on(t.serverPin).where(sql`server_pin <> 'none'`),
@@ -1656,11 +1665,19 @@ export const attachments = pgTable(
     taskId: uuid('task_id').references(() => tasks.id),
     name: text('name'),
     mediaType: text('media_type').notNull(),
-    bytes: bytea('bytes').notNull(),
+    /* The sha256 of its bytes, which the company's file store keeps on its machines (modules/files). None on a row moved
+       from before whose big file was lost with its machine, or on one still waiting to be moved. */
+    sha256: text('sha256'),
     size: integer('size').notNull(),
+    /* The test or work run whose log this is, or whose part made it; none on any other file, named as it may be. */
+    testRunId: uuid('test_run_id').references((): AnyPgColumn => testRuns.id),
     createdAt: createdAt(),
   },
-  t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_person_id').on(t.personId), index('attachments_operator_case_id').on(t.operatorCaseId)],
+  t => [
+    index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_person_id').on(t.personId), index('attachments_operator_case_id').on(t.operatorCaseId),
+    index('attachments_test_run_id').on(t.testRunId),
+    check('attachments_sha256', sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
+  ],
 );
 
 /* A phone is lent independently of its host computer's root access and compute pool. */
@@ -1775,7 +1792,9 @@ export const programOperatorSignals = pgTable('program_operator_signals', {
   caseId: uuid('case_id').notNull().references(() => programOperatorCases.id),
 }, t => [primaryKey({ columns: [t.agentId, t.instance, t.reason, t.evidenceKey] })]);
 
-export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as const;
+/* refused: Hornhoof refused what it was asked to run before any of it started, as a command a part may not run or a product
+   with no tests set up. It is a hint to the one who asked: no result, and no failure. */
+export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped', 'refused'] as const;
 
 /* A command an agent runs for a task on whichever machines of the company are free, in parts when it splits: the full
    test suite of a task's branch, or any other work, on a branch or in an empty folder with the task's files. The agent
@@ -1918,7 +1937,7 @@ export const updateWaits = pgTable('update_waits', {
   error: text('error'),
 }, t => [index('update_waits_open').on(t.endedAt), index('update_waits_company_since').on(t.companyId, t.since)]);
 
-export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
+export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped', 'refused'] as const;
 /* A machine that lost a part of a run as it ran: the place (a machine's id, or builtin), its name then, and why. */
 export type LostRun = { key: string; machine: string; why: string; computer?: string };
 

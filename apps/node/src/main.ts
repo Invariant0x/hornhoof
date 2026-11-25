@@ -277,7 +277,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let confirmed = false;
   let send: ((m: ProgramNodeMessage) => boolean) | null = null;
   let online = false;
-  const checks = startCheckClient(dir, terminal, () => send);
+  const checks = startCheckClient(dir, terminal, () => send, writeLog);
   /* The kind of sign-in Hornhoof hands this plan, and what that sign-in was when the plan's program refused it, empty when
      Hornhoof gave it none: until it changes, the node stays signed out, so turns do not go round on a sign-in that no
      longer works, each in a terminal, while the program itself still says it is signed in. */

@@ -26,6 +26,7 @@ import { leaveWork } from '../tasks/engine.js';
 import { agentProgramState } from '../tasks/program-state.js';
 import { type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
 import { backOn, leaveForTeam, leaveIfOff, resumeAgent, wakeAll } from '../tasks/wake.js';
+import { repinMoved } from '../tasks/echelons-repin.js';
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import { modelOnPlan, tierIn } from './role-model.js';
 import type { Lang, Role, RoleSkill, Skill } from '../templates/load.js';
@@ -336,6 +337,13 @@ export async function afterPlanMove(ctx: Ctx, agent: AgentRow, next: AgentRow): 
   await tryPlaceOperator(ctx, agent.companyId);
 }
 
+/* A checking stage is pinned to the plan, program and model its owner had when it was assigned. When the card changes
+   one of them the pin follows the owner, or the stage is let go with its reason and the head told (echelons-repin). */
+async function afterIdentityMove(ctx: Ctx, me: Person, agent: AgentRow, next: AgentRow): Promise<void> {
+  if (agent.subscriptionId === next.subscriptionId && agent.model === next.model) return;
+  await repinMoved(ctx, [next.id], actorOf(me));
+}
+
 /* Back on: a checker that can take the waiting stage of a route takes it again and the task turns it missed go out. Off: its work goes back
    once no turn of it runs. */
 async function afterSwitch(ctx: Ctx, me: Person, agent: AgentRow, next: AgentRow): Promise<void> {
@@ -518,6 +526,7 @@ async function patchAgent(ctx: Ctx, req: FastifyRequest, { me, agent: found }: A
     ctx.bus.publish(agent.companyId, { type: 'org' });
     /* Who sees it goes by its plan and its place, and those who watch its terminal hear at once. */
     if (next.subscriptionId !== agent.subscriptionId || next.teamId !== agent.teamId) ctx.bus.accessChanged(agent.companyId);
+    await afterIdentityMove(ctx, me, agent, next);
     if (next.subscriptionId !== agent.subscriptionId) await afterPlanMove(ctx, agent, next);
     await afterSwitch(ctx, me, agent, next);
     await afterTeamMove(ctx, me, agent, next);

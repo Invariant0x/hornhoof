@@ -1,5 +1,5 @@
 {
-  "id": "bcb7fb0d-31b3-4794-8eac-b1215c3ed4bd",
+  "id": "02ee6e81-0869-450a-aceb-807baa52b344",
   "prevId": "782fb9c5-ad0e-44ec-8fa9-9ecadad17f2e",
   "version": "7",
   "dialect": "postgresql",
@@ -5190,56 +5190,6 @@
           ],
           "isUnique": false,
           "where": "\"jobs\".\"kind\" = 'conversation'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "jobs_node_agent_conversation": {
-          "name": "jobs_node_agent_conversation",
-          "columns": [
-            {
-              "expression": "node_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "agent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "first"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"jobs\".\"kind\" = 'conversation' and (\"jobs\".\"started_at\" is not null or \"jobs\".\"status\" in ('queued', 'running'))",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "jobs_not_logged_in": {
-          "name": "jobs_not_logged_in",
-          "columns": [
-            {
-              "expression": "node_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "finished_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "first"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"jobs\".\"error\" = 'not_logged_in'",
           "concurrently": false,
           "method": "btree",
           "with": {}

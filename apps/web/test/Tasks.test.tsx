@@ -478,12 +478,13 @@ describe('turns as releases', () => {
       const user = userEvent.setup();
       const waiting = (id: string, number: number, ahead: number, position: number) =>
         ({ ...PLANNED, id, number, title: `Queued ${number}`, assignee: null, queue: { ahead, position, openTurn: 3 } });
-      shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, waiting('q1', 41, 1, 1), waiting('q2', 42, 2, 2), waiting('q3', 43, 3, 3), waiting('q4', 44, 1, 1)].map(t => t) }] });
+      /* #44 is first in the queue, before #41: a batch keeps the queue's order, not the task numbers'. */
+      shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, waiting('q1', 41, 1, 2), waiting('q2', 42, 2, 3), waiting('q3', 43, 3, 4), waiting('q4', 44, 1, 1)].map(t => t) }] });
       await user.click(await screen.findByRole('button', { name: new RegExp(`^${tasks}`) }));
       await goTo(user, releases);
       expect(await screen.findByText(why)).toBeInTheDocument();
       const regions = headings.map(name => screen.getByRole('region', { name }));
-      expect(within(regions[0]!).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#41 Queued 41', '#44 Queued 44']);
+      expect(within(regions[0]!).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#44 Queued 44', '#41 Queued 41']);
       expect(within(regions[1]!).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#42 Queued 42']);
       expect(within(regions[2]!).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#43 Queued 43']);
       /* The turn getting ready does not count them among its goals. */

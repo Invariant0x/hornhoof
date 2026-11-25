@@ -16,6 +16,7 @@ import { decryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, people, requests, tasks, taskWaits, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { copyGaveUpCards } from '../copies/gave-up.js';
 import { copySchemaFailures } from '../copies/schema-failures.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
 import { deptName } from '../departments/templates.js';
@@ -553,6 +554,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       merges: decisions.merges.filter(merge => picked(merge.ownerPersonId)).map(({ id, label, after, open, ownerPersonId }) => ({ id, label, after, open, ownerPersonId })),
       machinesAway: machineCards(me, person, decisions.machines),
       copySchemaFailures: await copySchemaFailures(ctx, me, person),
+      copyGaveUp: await copyGaveUpCards(ctx, me, person),
       machinesLow: decisions.low.filter(card => !person || person === me.id || person === card.owner?.id),
       githubLimits: await githubLimitCards(me, person, ctx),
       counts: decisions.counts,
@@ -617,6 +619,6 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { turn } = PipelineQuery.parse(req.query);
     const dept = await departmentOf(db, me.companyId, id);
     if (!dept || dept.parentId) throw refuse(404, 'department_unknown', 'This department does not exist.');
-    return { report: await departmentPipeline(db, me.companyId, dept.id, turn) };
+    return { report: await departmentPipeline(db, me.companyId, dept.id, turn, ctx.files) };
   });
 }

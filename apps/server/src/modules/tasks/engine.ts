@@ -764,6 +764,8 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   if (!tracker && c.workKind !== undefined && Object.keys(c).every(key => key === 'workKind')) return relabelWorkKind(ctx, agentId, task, c.workKind);
   const revised = await prepareRouteChange(ctx, task, route, agentId, c);
   const set = revised.set;
+  /* A queued task its head gives to an owner leaves the queue: the next turn gives out only what still waits, never this. */
+  if (set.assigneeAgentId && task.queuedAt) set.queuedAt = null;
   copyChangedFields(c, set);
   reopenRewrittenTask(task, revised.state, c, set);
   await changePrerequisites(ctx, task, route, c, set);

@@ -228,7 +228,7 @@ describe('Stage 5 residents, role behaviors, 7 live states, wake cooldown and 15
     expect(walker.walkPhase).toBeCloseTo(phaseStationary, 6);
   });
 
-  /* #1983, Ivan: masons carry blocks to the site and lay them there; on the way home they carry nothing. */
+  /* #1983: masons carry blocks to the site and lay them there; on the way home they carry nothing. */
   it('lays the stone at the work site, not at home, and leaves home with the next one', () => {
     const live = createHornhoofLiveFixture();
     const map = generateWorldTerrain(EGYPT_WORLD_PACK, { seed: live.company.seed, mapSize: 150 });

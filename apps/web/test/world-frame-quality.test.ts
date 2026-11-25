@@ -66,10 +66,12 @@ describe('World quality steps by measured frame time (#1947 item 6)', () => {
   it('starts over when the map is shown again after being hidden', () => {
     const clock = { now: 0 };
     const q = new FrameQuality();
-    run(q, 100, 4_000, clock);
+    /* Slow since 3.1 s: without the restart the frames before would step down again at 5.1 s, inside the second below. */
+    run(q, 100, 4_900, clock);
     const level = q.level;
+    expect(level).toBe(1);
     q.restart(clock.now);
-    run(q, 100, 400, clock);
+    run(q, 100, 1_000, clock);
     expect(q.level, 'keeps the level it found, and does not step on the frames before').toBe(level);
   });
 

@@ -8,6 +8,7 @@ import { REFUSAL_LANGUAGES, refusalWords } from '../src/modules/assistants/words
 import { signedToken } from '../src/crypto/tokens.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
 import { as } from './helpers.js';
+import { stored } from './files-fixture.js';
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -28,7 +29,7 @@ async function assistant(c: AclCompany, owner: keyof AclCompany['tokens'] = 'ann
 
 const BYTES = Buffer.from([0x50, 0x4b, 0, 0xff, 0x80, 0x0a, 0x0d]);
 async function file(c: AclCompany, values: Partial<typeof attachments.$inferInsert> = {}) {
-  return (await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.mine.id, name: 'report.xlsx', mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', bytes: BYTES, size: BYTES.length, ...values }).returning())[0]!;
+  return (await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.mine.id, name: 'report.xlsx', mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', sha256: await stored(c.db, BYTES, c.app.ctx.config), size: BYTES.length, ...values }).returning())[0]!;
 }
 
 describe('files an assistant downloads for its owner', () => {
@@ -163,7 +164,7 @@ describe('a link to one file, for its owner to open on a phone', () => {
 
 it('words every refusal as one neutral reason that reads after "<file name> did not come: ", in every language', () => {
   const said = REFUSAL_LANGUAGES.flatMap(language => Object.values(refusalWords(language)));
-  expect(said).toHaveLength(16 * REFUSAL_LANGUAGES.length);
+  expect(said).toHaveLength(19 * REFUSAL_LANGUAGES.length);
   for (const words of said) {
     expect(words).toMatch(/^(?:\p{Ll}|Hornhoof )/u);
     expect(words).not.toMatch(/[\u2013\u2014\u0401\u0451]|did not come|did not go|не дошел|не ушло|(?<!\p{L})(?:I|me|my|я|мне|меня|мой)(?!\p{L})/u);
