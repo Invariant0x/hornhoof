@@ -1,4 +1,5 @@
 import type { NodeMessage } from '@hornhoof/protocol';
+import type { ProgramView } from '@hornhoof/protocol/program-operator';
 import { RESTART_AFTER_MS } from '@hornhoof/protocol/map';
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -6,6 +7,7 @@ import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { conversationOf } from '../conversation/placement.js';
 import { onAgent } from '../conversation/line.js';
 import { identityOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { requestProgramView } from '../program-operator/rpc.js';
 import { agentProgramState, signInTurn } from './program-state.js';
 import { logTurnFact } from './turn-log.js';
 import { stopStaleProgram } from './stale-program.js';
@@ -19,6 +21,32 @@ type Waiting = { node: NodeIdentity; agentId: string; done: (reply: Reply) => vo
 const waiting = new WeakMap<Ctx, Map<string, Waiting>>();
 const WAIT_MS = 15_000;
 
+function orphanToolView(view: ProgramView | null): boolean {
+  if (view?.result !== 'ok' || view.jobId !== null) return false;
+  return !view.question && view.input !== 'words';
+}
+
+async function orphanToolOnNode(ctx: Ctx, agentId: string, node: NodeIdentity | null, state: string, tool: string | null): Promise<boolean> {
+  if (!node || (state !== 'tool' && !tool)) return false;
+  return orphanToolView(await requestProgramView(ctx, { agentId, node }));
+}
+
+function stateRefusal(state: string, tool: string | null): string | null {
+  if (!['thinking', 'retrying'].includes(state)) return `The program is ${state}. Only thinking or retrying without a tool or question may be restarted.`;
+  return tool ? `The program has a tool running (${tool}). Wait for it to finish.` : null;
+}
+
+function quietRefusal(provider: string, quiet: number): string | null {
+  const after = restartAfter(provider);
+  if (after === null) return `Hornhoof never restarts ${provider}; its program must end its own wait. Tell the head if it stays silent.`;
+  return quiet < after ? `The last sign was ${Math.max(0, Math.floor(quiet / 60_000))} minutes ago. ${provider} needs at least ${after / 60_000} minutes without a sign before a restart.` : null;
+}
+
+function nodeRefusal(ctx: Ctx, node: NodeIdentity | null): string | null {
+  if (!node || !ctx.hub.isOnline(node)) return 'The turn\'s node is offline. Bring that machine online first.';
+  return ctx.hub.hasTerminals(node) ? null : 'The turn\'s node has no live terminals. It cannot restart this program.';
+}
+
 async function checkRestart(ctx: Ctx, companyId: string, agentId: string, now: number): Promise<Check> {
   const [found] = await ctx.db.select({ job: jobs, sub: subscriptions }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
     .where(and(conversationOf(agentId), eq(jobs.companyId, companyId), eq(jobs.status, 'running'))).limit(1);
@@ -28,17 +56,17 @@ async function checkRestart(ctx: Ctx, companyId: string, agentId: string, now: n
   if (job.restartedAt) return refuse('This turn already had its one program restart. Tell its head if it is still silent.');
   const program = agentProgramState(ctx, job).program;
   if (!program) return refuse('The node has not reported the program state. A safe restart cannot be checked.');
-  if (!['thinking', 'retrying'].includes(program.state)) return refuse(`The program is ${program.state}. Only thinking or retrying without a tool or question may be restarted.`);
-  if (program.tool) return refuse(`The program has a tool running (${program.tool}). Wait for it to finish.`);
-  if (program.signAt === null) return refuse('The node gave no time for the last sign of life. A safe restart cannot be checked.');
-  const after = restartAfter(sub.provider);
-  if (after === null) return refuse(`Hornhoof never restarts ${sub.provider}; its program must end its own wait. Tell the head if it stays silent.`);
-  const quiet = now - signInTurn(program, job)!;
-  if (quiet < after) return refuse(`The last sign was ${Math.max(0, Math.floor(quiet / 60_000))} minutes ago. ${sub.provider} needs at least ${after / 60_000} minutes without a sign before a restart.`);
   const node = identityOf(sub, job.nodeId, job.builtinMachine, ownBuiltin(ctx.config));
-  if (!node || !ctx.hub.isOnline(node)) return refuse('The turn\'s node is offline. Bring that machine online first.');
-  if (!ctx.hub.hasTerminals(node)) return refuse('The turn\'s node has no live terminals. It cannot restart this program.');
-  return { ready: { job, node, minutes: Math.floor(quiet / 60_000) } };
+  const orphanTool = await orphanToolOnNode(ctx, agentId, node, program.state, program.tool);
+  const stateWhy = orphanTool ? null : stateRefusal(program.state, program.tool);
+  if (stateWhy) return refuse(stateWhy);
+  if (program.signAt === null) return refuse('The node gave no time for the last sign of life. A safe restart cannot be checked.');
+  const quiet = now - signInTurn(program, job)!;
+  const quietWhy = orphanTool ? null : quietRefusal(sub.provider, quiet);
+  if (quietWhy) return refuse(quietWhy);
+  const nodeWhy = nodeRefusal(ctx, node);
+  if (nodeWhy) return refuse(nodeWhy);
+  return { ready: { job, node: node!, minutes: Math.max(0, Math.floor(quiet / 60_000)) } };
 }
 
 function restartAfter(provider: string): number | null {

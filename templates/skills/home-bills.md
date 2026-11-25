@@ -1,7 +1,5 @@
 ---
 id: home-bills
-title: { en: "Bills and subscriptions", ru: "Счета и подписки" }
-description: { en: "Tracks the home's bills and subscriptions and reminds a person in time, without paying anything itself.", ru: "Ведет счета и подписки дома и вовремя напоминает человеку, ничего не оплачивая само." }
 kind: procedure
 ---
 1. **Keep the list**: every regular bill and subscription, with what it is for, how much, how often, and the next date. Building and updating the list needs no approval.

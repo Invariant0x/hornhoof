@@ -6,7 +6,7 @@ import { Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import * as age from 'age-encryption';
 import { describe, expect, it } from 'vitest';
-import { answerChallenge, answerProof, headLine, sealBundle, type Manifest } from '../src/modules/backups/bundle.js';
+import { answerChallenge, answerProof, checkHead, headLine, sealBundle, type Manifest } from '../src/modules/backups/bundle.js';
 import type { HolderView } from '../src/modules/backups/types.js';
 import type { HeldCertificate } from '../src/modules/keeper/certificate.js';
 import { HolderKeeper, HOLD_EVERY_MS, ROOM, SENT_FOR_MS, SURVIVOR_MS, type HolderLink } from '../src/modules/keeper/holder.js';
@@ -124,7 +124,7 @@ async function stand() {
     viewOf({ hold: bundles.map(bundle => bundle.entry) });
   };
   const files = () => readdirSync(join(dir, 'bundles')).sort();
-  return { authority, data, other, me, seal, keeper, said, asked, put, lines, view: viewOf, names, files, dir, server, servers, fetched, survivorView: view, advance: (ms: number) => void (clock += ms) };
+  return { authority, data, other, me, seal, keeper, link, said, asked, put, lines, view: viewOf, names, files, dir, server, servers, fetched, survivorView: view, advance: (ms: number) => void (clock += ms) };
 }
 
 describe('a machine that keeps the company\'s backups', () => {
@@ -247,15 +247,35 @@ describe('a machine that keeps the company\'s backups', () => {
     const a = await s.seal(0);
     s.names(a);
     await s.keeper.round();
-    /* A keeper killed in the middle of a fetch leaves its part, and one killed between the two files a sealed part with
-       no head. */
+    /* A keeper killed in the middle of a fetch leaves its part, and one killed between the two files leaves a sealed
+       part with no head or an orphan head with no sealed part. */
     const bundles = join(s.dir, 'bundles');
-    const [part, headless] = [`${randomUUID()}.0a1b2c3d4e5f.part`, `${randomUUID()}.age`];
-    for (const name of [part, headless]) writeFileSync(join(bundles, name), 'left');
+    const [part, headless, ageless] = [`${randomUUID()}.0a1b2c3d4e5f.part`, `${randomUUID()}.age`, `${randomUUID()}.head`];
+    for (const name of [part, headless, ageless]) writeFileSync(join(bundles, name), 'left');
     s.said.leader = false;
     await s.keeper.round();
     expect(s.files()).toEqual([`${a.id}.age`, `${a.id}.head`]);
     expect(s.keeper.held()).toEqual([a.id]);
+  });
+
+  it("leaves a data machine's own bundles unpruned while still sending what the leader wants", async () => {
+    const s = await stand();
+    const [a, b, c] = [await s.seal(0), await s.seal(6), await s.seal(12)];
+    const check = (head: string): Manifest => checkHead(head, { authorityPem: s.authority.certPem, company: COMPANY });
+    const dataKeeper = new HolderKeeper({ dir: s.dir, link: s.link, held: () => s.data.held, log: line => s.lines.push(line), diskFree: () => s.said.free });
+    await dataKeeper.store().take(Readable.from([a.whole]), check);
+    await dataKeeper.store().take(Readable.from([b.whole]), check);
+    /* Even when keeps is false, a data machine never wipes its bundles, and still sends any bundle the leader wants. */
+    s.view({ keeps: false, hold: [], want: [a.id] });
+    await dataKeeper.round();
+    expect(dataKeeper.held()).toEqual([b.id, a.id]);
+    expect(s.put.map(sent => sent.path)).toEqual([`/peer/backups/${a.id}`]);
+    expect(s.put[0]!.body.equals(a.whole)).toBe(true);
+    /* Nor does a data machine fetch worker holder slots or prune older local bundles when newer ones are named. */
+    s.names(c);
+    await dataKeeper.round();
+    expect(dataKeeper.held()).toEqual([b.id, a.id]);
+    expect(s.asked.filter(call => call.startsWith('GET /peer/backups/'))).toEqual([]);
   });
 
   it('sends what its leader wants', async () => {

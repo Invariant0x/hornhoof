@@ -17,7 +17,7 @@ async function settingsClosed(sql: AgentSql, mode: SqlMode): Promise<void> {
 
 /* The deleted gateway's tables, its checks made by a model and its support desk are dropped with the function that
    guarded them. Only Operations' role is checked here: the orchestrator runs as Hornhoof itself (Ivan's word of 17 November 2026). */
-it("leaves no table of the deleted gateway, and Operations' production SQL role, signed in as itself, changes no approval rule or owner", { timeout: 180000 }, async () => {
+it("leaves no table of the deleted gateway, and Operations' production SQL role, signed in as itself, changes no approval rule or owner", async () => {
   const fixture = await privatePostgres();
   const sql = await openAgentSql(fixture.url);
   expect(sql, 'Production openAgentSql must create both LOGIN pools').not.toBeNull();

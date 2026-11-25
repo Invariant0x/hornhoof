@@ -4,33 +4,41 @@ import { describe, expect, it } from 'vitest';
 import { disconnectedAnswer, noLeaderAnswer } from '../src/modules/keeper/worker-pages.js';
 import { workerConfig } from '../src/modules/keeper/worker-config.js';
 
-const asked = (url: string) => ({ url, headers: {} }) as http.IncomingMessage;
+const asked = (url: string, language?: string) => ({ url, headers: language ? { 'accept-language': language } : {} }) as http.IncomingMessage;
 const SERVER = { machine: 'a', networkId: 'b', hostname: 'debian', addresses: ['192.168.1.7'], peerPort: 8180, webPort: 8080, number: 1, copyName: null };
 const MACHINE_ID = 'ab12cd34'.repeat(8);
 
 describe('the pages a worker serves by itself', () => {
   it('says where the company can be opened while it reaches no server', () => {
-    const page = noLeaderAnswer(asked('/tasks'), { data: [SERVER, { ...SERVER, hostname: null, webPort: 9090 }, { ...SERVER, webPort: null }], linkUrl: 'https://acme.hornhoof.test' });
+    const view = { data: [SERVER, { ...SERVER, hostname: null, webPort: 9090 }, { ...SERVER, webPort: null }], linkUrl: 'https://acme.hornhoof.test' };
+    const page = noLeaderAnswer(asked('/tasks'), view);
     expect(page.status).toBe(503);
     expect(page.headers).toMatchObject({ 'Content-Type': 'text/html; charset=utf-8', 'Retry-After': '15' });
     expect(page.body).toContain('<meta http-equiv="refresh" content="15">');
     expect(page.body).not.toContain('<script');
     expect(page.body).toContain('This machine cannot reach the company server. Open the company on a machine that keeps its data:');
-    expect(page.body).toContain('Эта машина не может связаться с сервером компании. Откройте компанию на машине, где хранятся ее данные:');
-    expect(page.body.match(/<li>.*<\/li>/g)).toEqual([
+    expect(page.body).not.toMatch(/[А-Яа-я]/);
+    expect(page.body.match(/<li>.*<\/li>/g)).toEqual(['<li>debian: localhost:8080</li>', '<li>the company server: localhost:9090</li>']);
+    expect(page.body).toContain('or at <a href="https://acme.hornhoof.test">https://acme.hornhoof.test</a>.');
+    expect(page.body).not.toMatch(/[—ё]/);
+    /* A visitor who asks for another language the product ships reads it under the English. */
+    const russian = noLeaderAnswer(asked('/tasks', 'ru-RU,ru;q=0.9'), view).body;
+    expect(russian).toContain('This machine cannot reach the company server.');
+    expect(russian).toContain('<div lang="ru" dir="ltr">');
+    expect(russian).toContain('Эта машина не может связаться с сервером компании. Откройте компанию на машине, где хранятся ее данные:');
+    expect(russian.match(/<li>.*<\/li>/g)).toEqual([
       '<li>debian: localhost:8080</li>', '<li>the company server: localhost:9090</li>',
       '<li>debian: localhost:8080</li>', '<li>сервер компании: localhost:9090</li>',
     ]);
-    expect(page.body).toContain('or at <a href="https://acme.hornhoof.test">https://acme.hornhoof.test</a>.');
-    expect(page.body).toContain('или по адресу <a href="https://acme.hornhoof.test">https://acme.hornhoof.test</a>.');
-    expect(page.body).not.toMatch(/[—ё]/);
+    expect(russian).toContain('или по адресу <a href="https://acme.hornhoof.test">https://acme.hornhoof.test</a>.');
+    expect(russian).not.toMatch(/ё/);
   });
 
   it('names no link when the company has none, and escapes what a server said', () => {
     const page = noLeaderAnswer(asked('/'), { data: [{ ...SERVER, hostname: '<b>"x"&' }], linkUrl: null });
     expect(page.body).toContain('<li>&lt;b&gt;&quot;x&quot;&amp;: localhost:8080</li>');
     expect(page.body).not.toContain('or at');
-    expect(page.body).not.toContain('или по адресу');
+    expect(noLeaderAnswer(asked('/', 'ru'), { data: [], linkUrl: null }).body).not.toContain('или по адресу');
     expect(noLeaderAnswer(asked('/'), { data: [], linkUrl: 'https://x.test/"><script>' }).body).not.toContain('"><script>');
   });
 
@@ -50,7 +58,8 @@ describe('the pages a worker serves by itself', () => {
     expect(page.status).toBe(410);
     expect(page.headers['Content-Type']).toBe('text/html; charset=utf-8');
     expect(page.body).toContain('This machine was disconnected from the company. To connect it again, get a new command in Hornhoof under Machines and run it here.');
-    expect(page.body).toContain('Эту машину отключили от компании. Чтобы подключить ее снова, возьмите новую команду в Hornhoof в разделе «Машины» и выполните ее здесь.');
+    expect(page.body).not.toMatch(/[А-Яа-я]/);
+    expect(disconnectedAnswer(asked('/', 'ru')).body).toContain('Эту машину отключили от компании. Чтобы подключить ее снова, возьмите новую команду в Hornhoof в разделе «Машины» и выполните ее здесь.');
   });
 });
 

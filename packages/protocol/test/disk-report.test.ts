@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DISK_PARTS, DiskReport, MachineReplicas, NODE_DISK_PARTS, parseNodeMessage } from '../src/index.js';
+import { DISK_PARTS, DiskReport, MachineReplicas, NODE_DISK_PARTS, parseNodeMessage, parseServerMessage } from '../src/index.js';
 
 const GB = 1e9;
 const LOAD = { cpus: 8, load: 1.5, memFree: 4 * GB, memTotal: 16 * GB, tests: 0, jobs: 2 };
@@ -36,6 +36,20 @@ describe("a node's disk report", () => {
     ];
     expect(load({ disk: { ...DISK, kept } })).toEqual({ type: 'load', ...LOAD, disk: { ...DISK, kept } });
     expect(DiskReport.parse(DISK).kept).toBeUndefined();
+  });
+
+  it('lists the largest working copies with their agent and task, and leaves the list out when none are reported', () => {
+    const copies = [
+      { agent: '11111111-1111-4111-8111-111111111111', path: 'shop-42', task: 42, bytes: 9 * GB },
+      { agent: '22222222-2222-4222-8222-222222222222', path: 'shop', task: null, bytes: 3 * GB },
+    ];
+    expect(load({ disk: { ...DISK, copies } })).toEqual({ type: 'load', ...LOAD, disk: { ...DISK, copies } });
+    expect((DiskReport.parse(DISK) as { copies?: unknown }).copies).toBeUndefined();
+    expect(parseNodeMessage(JSON.stringify({ type: 'tasks.read' }))).toEqual({ type: 'tasks.read' });
+    expect(parseServerMessage(JSON.stringify({ type: 'tasks.open', tasks: { open: [4, 9], upTo: 12 } }))).toEqual({
+      type: 'tasks.open',
+      tasks: { open: [4, 9], upTo: 12 },
+    });
   });
 
   it('is left out by an older node, and the load stands without it', () => {

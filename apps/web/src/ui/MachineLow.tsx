@@ -2,7 +2,7 @@ import { DISK_PARTS, type DiskPart, type DiskReport } from '@hornhoof/protocol';
 import { Fragment, useId } from 'react';
 import { useLanguage, useT } from '../i18n';
 import type { MachineLowCard } from '../types';
-import { gigabytes, measuredParts } from './MachineDisk';
+import { diskGigabytes, measuredParts } from './MachineDisk';
 
 /* Stand-ins the title's words hold where the machine's and its owner's names go, each then read in its own direction. */
 const HOST = '\u{F0001}';
@@ -38,7 +38,7 @@ function Kept({ card }: { card: MachineLowCard }) {
       <ul className="ml-kept" aria-labelledby={id}>
         {kept.map((k, i) => (
           <li key={i}>
-            <bdi>{card.names?.[k.agent] ?? k.agent}</bdi>, <bdi>{k.path}</bdi>: {t.tasks.machineLowKeptRow(k.task, gigabytes(language, k.bytes), t.tasks.machineLowKeptWhy[k.why])}<KeptPaths paths={k.ignored} />
+            <bdi>{card.names?.[k.agent] ?? k.agent}</bdi>, <bdi>{k.path}</bdi>: {t.tasks.machineLowKeptRow(k.task, diskGigabytes(language, k.bytes), t.tasks.machineLowKeptWhy[k.why])}<KeptPaths paths={k.ignored} />
           </li>
         ))}
       </ul>
@@ -46,22 +46,24 @@ function Kept({ card }: { card: MachineLowCard }) {
   );
 }
 
-/* A machine short of disk space, in words for the person who can make room on it. Nothing here waits for an answer: the
-   card goes by itself once the machine has room again. */
+/* A machine short of disk space, in words for the people who see it. Operations handles freeing space; nothing here waits
+   for a person to type a command, and the card goes by itself once the machine has room again. */
 function Low({ card }: { card: MachineLowCard }) {
   const t = useT();
   const { language } = useLanguage();
-  const gb = (bytes: number) => gigabytes(language, bytes);
+  const gb = (bytes: number) => diskGigabytes(language, bytes);
   const list = (parts: [DiskPart, number][]) => parts.map(([part, bytes]) => `${t.machines.diskParts.words[part]} ${t.machines.diskParts.size(gb(bytes))}`).join(', ');
   const { disk } = card;
+  const needBytes = disk.low && disk.free >= disk.threshold ? Math.ceil(disk.threshold * 1.1) : disk.threshold;
+  const dockerNeedBytes = disk.docker ? (disk.low && disk.docker.free >= disk.docker.threshold && disk.free >= disk.threshold ? Math.ceil(disk.docker.threshold * 1.1) : disk.docker.threshold) : 0;
   const title = t.tasks.machineLow(card.hostname, card.owner?.name ?? null);
   const takes = measuredParts(disk);
   const cleaned = cleanedByPart(card);
   return (
     <section className="machine-away" aria-label={title}>
       <h3>{isolated(t.tasks.machineLow(HOST, card.owner ? OWNER : null), { [HOST]: card.hostname, [OWNER]: card.owner?.name ?? '' })}</h3>
-      <p>{t.tasks.machineLowFree(gb(disk.free), gb(disk.total), gb(disk.threshold))}</p>
-      {disk.docker && <p>{t.tasks.machineLowDocker(gb(disk.docker.free), gb(disk.docker.total), gb(disk.docker.threshold))}</p>}
+      <p>{t.tasks.machineLowFree(gb(disk.free), gb(disk.total), gb(needBytes))}</p>
+      {disk.docker && <p>{t.tasks.machineLowDocker(gb(disk.docker.free), gb(disk.docker.total), gb(dockerNeedBytes))}</p>}
       {takes.length > 0 && <p>{t.tasks.machineLowTakes(list(takes))}</p>}
       {cleaned.length > 0 && <p>{t.tasks.machineLowCleaned(list(cleaned))}</p>}
       <Kept card={card} />

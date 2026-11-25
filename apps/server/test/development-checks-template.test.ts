@@ -77,17 +77,19 @@ describe('who repairs a finding', () => {
     expect(acceptance).toMatch(/blocking finding[^.]*"blocked"/);
   });
 
-  it('returns a source defect to Development and leaves test-only fixes with Tests', () => {
+  it('keeps every finding with the stage that found it, on the turn branch, and sends none back to a developer', () => {
     for (const id of ['dev-task-flow', 'dev-gates']) {
-      expect(body(id), id).toMatch(/source defect to Development[\s\S]*failing evidence/);
-      expect(body(id), id).toMatch(/test-only repairs in Tests/i);
+      expect(body(id), id).toMatch(/Tests fixes[^.]*(?:source|tests)[^.]*on the turn branch/);
+      expect(body(id), id).not.toMatch(/source defect to Development|return a source defect/i);
     }
+    expect(body('dev-gates')).toMatch(/nothing returns to the developer who wrote the code/);
+    expect(body('dev-task-flow')).toMatch(/fix what they find on the turn branch themselves, with no return to you/);
   });
 
   it('lets Tests take the main line or the turn of its own department into a candidate whose own change passed and check it again there', () => {
     for (const id of ['dev-task-flow', 'dev-gates']) {
-      expect(body(id), id).toMatch(/own change passed[^.]*main line or the open turn branch of its own department[^.]*stays at Tests/);
-      expect(body(id), id).toMatch(/"submit"[^.]*review\.baseCommit naming the commit (you took|taken) in/);
+      expect(body(id), id).toMatch(/own change passed[^.]*main line or the open turn branch of its own department[^.]*merges the current head of that line/);
+      expect(body(id), id).not.toMatch(/"submit"/);
     }
   });
 });
@@ -112,11 +114,16 @@ describe('turnkey work', () => {
     }
   });
 
+  /* A stage's "pieces" and "whole batch each" are modes of a stage, not of a turn. */
   it('names no mode of a turn and no tool to plan one', () => {
-    for (const id of ['orch-plan-turn', 'orch-company', 'hh-head', 'hh-lead-tasks', 'dev-lead']) expect(body(id), id).not.toMatch(/plan_turn|\bmode\b/);
+    for (const id of ['orch-plan-turn', 'orch-company', 'hh-head', 'hh-lead-tasks', 'dev-lead']) expect(body(id), id).not.toMatch(/plan_turn|\bturn mode\b|\bmode of (?:a|the) turn\b/i);
   });
 
-  it('tells the member of a turnkey team to carry its task end to end alone and close it with report', () => {
-    expect(body('dev-task-flow')).toMatch(/turnkey[^.]*end to end alone[^.]*nobody else called onto it[^.]*report done true/);
+  it("tells a developer that a coding task's own route is Development only, and to hand the branch on and go to the next task", () => {
+    const flow = body('dev-task-flow');
+    expect(flow).toMatch(/own route is Development only[\s\S]*Review, Security and Tests[\s\S]*once, on the whole turn branch/);
+    expect(flow).toMatch(/with no return to you/);
+    expect(flow).toMatch(/Go straight on to your next task/);
+    expect(flow).not.toMatch(/turnkey|report done true|\bsubmit\b/i);
   });
 });

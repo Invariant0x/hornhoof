@@ -7,6 +7,7 @@ import { workStarts } from '../../src/modules/org/map-state.js';
 import { reserveDelivery } from '../../src/modules/program-operator/deliveries.js';
 import { createTask, report } from '../../src/modules/tasks/engine.js';
 import { until } from '../helpers-basic.js';
+import { RECORDED } from '../recorded-fixture.js';
 import { backendPid, privatePostgres, runFixture } from './helpers.js';
 
 async function installReportAndEventBarriers(pg: Awaited<ReturnType<typeof privatePostgres>>): Promise<void> {
@@ -69,7 +70,7 @@ it('commits the first subtask report in a running turn alongside its live tool e
   try {
     await barrier.query('SELECT pg_advisory_lock(885, 1), pg_advisory_lock(885, 2)');
     pending = Promise.all([
-      report(actorA.ctx, actorA.job.agentId, child.id, { done: true, summary: 'Verified on first report.' }),
+      report(actorA.ctx, actorA.job.agentId, child.id, { done: true, summary: 'Verified on first report.', recorded: RECORDED }),
       appendTurnEvent(actorB.ctx, actorA.job.id, { kind: 'tool', name: 'report', input: '{"task":4}' }, sql`true`),
     ]);
     void pending.catch(() => {});

@@ -1,7 +1,5 @@
 ---
 id: dsn-ui-rules
-title: { en: "Interface rules", ru: "Правила интерфейса" }
-description: { en: "Checks a screen against the basic rules of layout, type, colour and interaction before it leaves the designer.", ru: "Сверяет экран с базовыми правилами компоновки, типографики, цвета и взаимодействия перед передачей дальше." }
 kind: checklist
 sources: [nextlevelbuilder/ui-ux-pro-max-skill .claude/skills/ui-ux-pro-max/SKILL.md, wshobson/agents plugins/ui-design/skills/visual-design-foundations/SKILL.md]
 ---

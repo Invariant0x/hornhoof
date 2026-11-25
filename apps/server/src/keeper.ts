@@ -44,7 +44,7 @@ async function dataKeeper(): Promise<Running> {
   const db = config.databaseUrl ? openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 }) : null;
   /* What the keeper measures of this machine, its disk's fsync p99 among it: what it reports, and what the keeper's
      own statements on the lease and the copies may take. */
-  const measures = new Measures({ dir: KEEPER_DIR, internet: new InternetMeasures({ dir: KEEPER_DIR, log }) });
+  const measures = new Measures({ dir: KEEPER_DIR, filesDir: config.filesDir, internet: new InternetMeasures({ dir: KEEPER_DIR, log }) });
   const paced = (url: string) => keeperSql(url, { timeoutMs: () => queryTimeoutMs(measures.fsyncP99()) });
   /* Where this machine's database listens, for the peers that keep data too. */
   const dbTarget = (): { host: string; port: number } | null => {

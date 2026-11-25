@@ -11,10 +11,10 @@ export type LastFailure = { kind: Failure['kind']; text: string; at: number; tai
 export type LastObsolete = { at: number };
 export type FailureState = { retry: TurnRetry | null; failure: LastFailure | null; obsolete: LastObsolete | null };
 
-type EndedRow = { agentId: string; status: Job['status']; failure: Failure | string | null; finishedAt: Date | string | null; createdAt: Date | string; tail: string };
+type EndedRow = { id: string; agentId: string; status: Job['status']; error: string | null; failure: Failure | string | null; finishedAt: Date | string | null; createdAt: Date | string; tail: string };
 type WaitingRow = { agentId: string; continueOf: string | null; notBefore: Date | string | null };
 type ObsoleteRow = { agentId: string; finishedAt: Date | string | null; createdAt: Date | string };
-type EndedJob = Pick<Job, 'status' | 'failure' | 'finishedAt' | 'createdAt' | 'tail'>;
+type EndedJob = Pick<Job, 'id' | 'status' | 'error' | 'failure' | 'finishedAt' | 'createdAt' | 'tail'>;
 
 const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 const uuidList = (ids: readonly string[]): string => `{${ids.join(',')}}`;
@@ -42,12 +42,12 @@ export async function agentFailureState(ctx: Ctx, agentId: string): Promise<Fail
 }
 
 async function latestEndedJobs(ctx: Ctx, companyId: string, ids: readonly string[]): Promise<Map<string, EndedJob>> {
-  const excluded = sql.join(STOPPED_ON_PURPOSE.map(code => sql`${code}`), sql`, `);
+  const excluded = sql.join(NO_FAILURE.map(code => sql`${code}`), sql`, `);
   const rows = rowsOf<EndedRow>(await ctx.db.execute(sql`
-    SELECT j.agent_id AS "agentId", j.status, j.failure, j.finished_at AS "finishedAt", j.created_at AS "createdAt", j.tail
+    SELECT j.id, j.agent_id AS "agentId", j.status, j.error, j.failure, j.finished_at AS "finishedAt", j.created_at AS "createdAt", j.tail
     FROM unnest(${uuidList(ids)}::uuid[]) AS a(agent_id)
     CROSS JOIN LATERAL (
-      SELECT agent_id, status, failure, finished_at, created_at, tail
+      SELECT id, agent_id, status, error, failure, finished_at, created_at, tail
       FROM jobs
       WHERE company_id = ${companyId}
         AND agent_id = a.agent_id
@@ -58,7 +58,7 @@ async function latestEndedJobs(ctx: Ctx, companyId: string, ids: readonly string
       LIMIT 1
     ) j
   `));
-  return new Map(rows.map(r => [r.agentId, { status: r.status, failure: asFailure(r.failure), finishedAt: asDate(r.finishedAt), createdAt: asDate(r.createdAt)!, tail: r.tail }]));
+  return new Map(rows.map(r => [r.agentId, { id: r.id, status: r.status, error: r.error, failure: asFailure(r.failure), finishedAt: asDate(r.finishedAt), createdAt: asDate(r.createdAt)!, tail: r.tail }]));
 }
 
 async function waitingRetryJobs(ctx: Ctx, companyId: string, ids: readonly string[]): Promise<WaitingRow[]> {
@@ -106,6 +106,7 @@ export async function agentFailureStates(ctx: Ctx, companyId: string, agentIds: 
   const waiting = await waitingRetryJobs(ctx, companyId, uniqueIds);
   const obsoletes = await latestObsoleteJobs(ctx, companyId, uniqueIds);
   const history = await retryHistory(ctx, companyId, waiting);
+  const goesOn = await continuedTurns(ctx.db, companyId, [...failures.values()]);
   const retries = new Map(waiting.map(j => [j.agentId, j]));
   return new Map(await Promise.all(uniqueIds.map(async id => {
     const next = retries.get(id);
@@ -113,9 +114,32 @@ export async function agentFailureStates(ctx: Ctx, companyId: string, agentIds: 
     const retry = before?.failure && passing(before.failure)
       ? { attempt: await passingAttempts(ctx, before, history), max: RETRY_MINUTES.length, at: Number(asDate(next!.notBefore)), kind: before.failure.kind } : null;
     const obsoleteAt = obsoletes.get(id);
-    return [id, { retry, failure: lastFailureOf(failures.get(id)), obsolete: obsoleteAt === undefined ? null : { at: obsoleteAt } }] as const;
+    return [id, { retry, failure: failureShown(failures.get(id), goesOn), obsolete: obsoleteAt === undefined ? null : { at: obsoleteAt } }] as const;
   })));
 }
+
+/* A turn stopped on purpose, or one whose task moved on while it ran, so that a newer turn took its place: no failure. */
+export const NO_FAILURE = [...STOPPED_ON_PURPOSE, 'stale'];
+/* A failed turn that waits for the plan's owner to sign in or pass the first setup needs that person; any other failed turn
+   with its continuation queued goes on by itself, as after an overloaded provider or a usage limit, and is no failure. */
+const NEEDS_OWNER = new Set<Failure['kind']>(['auth', 'setup']);
+
+/* The failed turns of those that ended whose continuation waits to go on, or runs. */
+async function continuedTurns(db: Ctx['db'], companyId: string, ended: Pick<Job, 'id' | 'status'>[]): Promise<Set<string>> {
+  const failed = ended.filter(j => j.status === 'failed').map(j => j.id);
+  if (!failed.length) return new Set();
+  const next = await db.select({ of: jobs.continueOf }).from(jobs)
+    .where(and(eq(jobs.companyId, companyId), inArray(jobs.continueOf, failed), inArray(jobs.status, ['queued', 'running'])));
+  return new Set(next.flatMap(j => (j.of ? [j.of] : [])));
+}
+
+/* A turn that ended failed in a way that needs a person or a head: not stopped on purpose, not replaced, and not one that goes
+   on by itself. */
+export const turnFailed = (job: Pick<Job, 'id' | 'status' | 'error' | 'failure'>, continued: ReadonlySet<string>): boolean =>
+  job.status === 'failed' && !!job.failure && !NO_FAILURE.includes(job.error ?? '') && (!continued.has(job.id) || NEEDS_OWNER.has(job.failure.kind));
+
+/* The failure an agent's card shows: its last ended turn's, when that turn failed in a way that needs someone. */
+const failureShown = (ended: EndedJob | undefined, continued: ReadonlySet<string>): LastFailure | null => (ended && turnFailed(ended, continued) ? lastFailureOf(ended) : null);
 
 export function lastFailureOf(ended: EndedJob | undefined): LastFailure | null {
   if (ended?.status !== 'failed' || !ended.failure) return null;
@@ -123,12 +147,14 @@ export function lastFailureOf(ended: EndedJob | undefined): LastFailure | null {
 }
 
 export async function retryHistory(ctx: Ctx, companyId: string, waiting: Pick<Job, 'continueOf'>[]): Promise<Map<string, Job>> {
-  const history = new Map<string, Job>();
-  let pending = [...new Set(waiting.flatMap(j => (j.continueOf ? [j.continueOf] : [])))];
-  while (pending.length) {
-    const rows = await ctx.db.select().from(jobs).where(and(eq(jobs.companyId, companyId), inArray(jobs.id, pending)));
-    for (const row of rows) history.set(row.id, row);
-    pending = [...new Set(rows.flatMap(row => (row.continueOf && !history.has(row.continueOf) ? [row.continueOf] : [])))];
-  }
-  return history;
+  const ids = waiting.flatMap(j => j.continueOf ? [j.continueOf] : []);
+  if (!ids.length) return new Map();
+  const history = await ctx.db.select().from(jobs).where(inArray(jobs.id, sql`(
+    with recursive history as (
+      select id, continue_of from jobs where company_id = ${companyId} and ${inArray(jobs.id, ids)}
+      union
+      select parent.id, parent.continue_of from jobs parent join history child on parent.id = child.continue_of where parent.company_id = ${companyId}
+    ) select id from history
+  )`));
+  return new Map(history.map(j => [j.id, j]));
 }

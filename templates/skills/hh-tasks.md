@@ -1,7 +1,5 @@
 ---
 id: hh-tasks
-title: { en: "Tasks in Hornhoof", ru: "Задачи в Hornhoof" }
-description: { en: "How work reaches you as tasks, what to read first, and what to read again after a compaction.", ru: "Как работа приходит задачами, что читать сначала и что перечитать после сжатия разговора." }
 kind: core
 ---
 You can find the current assignment and restore its context after a compaction.

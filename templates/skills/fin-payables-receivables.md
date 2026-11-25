@@ -1,7 +1,5 @@
 ---
 id: fin-payables-receivables
-title: { en: "Payables and receivables", ru: "Расчеты с поставщиками и клиентами" }
-description: { en: "Keeps the lists of bills to pay and invoices to collect, and drafts the reminders.", ru: "Ведет списки счетов к оплате и к получению и готовит напоминания." }
 kind: procedure
 sources: [msitarzewski/agency-agents specialized/accounts-payable-agent.md, anthropics/knowledge-work-plugins small-business/skills/invoice-chase/SKILL.md]
 ---

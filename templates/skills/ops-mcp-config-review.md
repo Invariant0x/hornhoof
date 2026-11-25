@@ -1,7 +1,5 @@
 ---
 id: ops-mcp-config-review
-title: { en: "MCP configuration review", ru: "Проверка настроек MCP" }
-description: { en: "Checks an MCP server's source, permissions and settings before agents may use it.", ru: "Проверяет источник, права и настройки MCP-сервера до того, как агентам разрешат им пользоваться." }
 kind: checklist
 sources: [affaan-m/ECC skills/mcp-dependency-review/SKILL.md]
 ---

@@ -25,6 +25,8 @@ export type WorkerConfig = {
   hostOs: HostOs | null;
   /* For how long this machine is without a leader before it looks for a server restored from the recovery file. */
   survivorMs: number;
+  /* The folder of the file store's volume; left out, this machine holds none of the company's files. */
+  filesDir?: string;
 };
 
 /* HORNHOOF_SURVIVOR_S, which a stand sets to wait less: a whole number of seconds from 10 to an hour. */
@@ -64,5 +66,6 @@ export function workerConfig(env: NodeJS.ProcessEnv, log: (line: string) => void
     ownerKey: ownerKey && isP256(ownerKey) ? ownerKey : null,
     hostOs: hostOsOf(env.HORNHOOF_HOST_OS),
     survivorMs: survivorMsOf(env.HORNHOOF_SURVIVOR_S),
+    ...(env.FILES_DIR ? { filesDir: env.FILES_DIR } : {}),
   };
 }

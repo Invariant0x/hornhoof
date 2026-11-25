@@ -316,7 +316,7 @@ export class Merger {
     if (!company) throw new MergeRefused('This Hornhoof has no company to bring anything back into.');
     const source = await this.open(row, port);
     try {
-      await runMerge(this.ctx.db, { id: row.id, label: row.label, kept: row.source.startsWith(KEPT), companyId: company.id }, source, { log: line => this.ctx.log.info(line) });
+      await runMerge(this.ctx.db, { id: row.id, label: row.label, kept: row.source.startsWith(KEPT), companyId: company.id }, source, { log: line => this.ctx.log.info(line), files: this.ctx.files });
     } finally {
       await source.close();
     }

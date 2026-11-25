@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -10,6 +10,7 @@ import { agents, attachments, companies, departments, people, requests, taskEven
 import { FILE_BYTES } from '../src/modules/tasks/attachments.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, nextOf, setUpCompany, testApp, until } from './helpers.js';
+import { filesUnder, sha256Of } from './files-fixture.js';
 
 const NODE_KEY = 'k'.repeat(40);
 
@@ -172,10 +173,7 @@ describe('files an assistant sends', () => {
     };
     await refused(await upload(c, ava.key, { name: 'empty.heic', type: 'image/heic', bytes: Buffer.alloc(0) }, c.head.id, 'ru-RU,ru;q=0.9'), 400, 'file_empty',
       'файл пустой.');
-    await refused(await upload(c, ava.key, { name: 'film.mov', type: 'video/quicktime', bytes: Buffer.alloc(FILE_BYTES + 1) }, c.head.id, 'ru'), 413, 'file_too_big',
-      'файл больше 50 МБ.');
-    await refused(await upload(c, ava.key, { name: 'film.mov', type: 'video/quicktime', bytes: Buffer.alloc(FILE_BYTES + 1) }, c.head.id), 413, 'file_too_big',
-      'the file is bigger than 50 MB.');
+    /* A file over 50 MB is no refusal: the store keeps it as any other (below). */
     c.app.ctx.config.taskFilesBytes = 4;
     await refused(await upload(c, ava.key, FILES[1]!, c.head.id, 'ru'), 413, 'attachment_invalid',
       'в Hornhoof закончилось место для файлов компании.');
@@ -204,7 +202,7 @@ describe('files an assistant sends', () => {
     expect(sent.statusCode).toBe(413);
     expect(sent.json().error).toMatchObject({ reason: 'attachment_invalid', message: "Hornhoof has no room left for the company's files." });
     expect(issued).toBe(limit + 4);
-    expect(readdirSync(dir)).toEqual([]);
+    expect(filesUnder(dir)).toEqual([]);
     expect(await c.db.select().from(attachments)).toEqual([]);
   });
 
@@ -216,10 +214,10 @@ describe('files an assistant sends', () => {
     expect(sent.statusCode).toBe(201);
     const [kept] = await c.db.select().from(attachments);
     expect(kept!.size).toBe(8);
-    expect(Buffer.from(kept!.bytes).toString()).toBe('12345678');
+    expect((await c.app.ctx.files.bytes(c.db, kept!.sha256!)).toString()).toBe('12345678');
   });
 
-  it('keeps a file over 50 MB on the disk of the machine that took it and out of the database, for the agent and the owner alike, and says plainly when it is not there', async () => {
+  it("keeps a file over 50 MB in the company's store and out of the database, for the agent and the owner alike, and says plainly when the server lost it", async () => {
     const c = await company();
     const dir = mkdtempSync(join(tmpdir(), 'hh-files-'));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
@@ -231,25 +229,28 @@ describe('files an assistant sends', () => {
     c.app.ctx.config.taskFilesBytes = FILE_BYTES;
     const full = await upload(c, ava.key, { name: 'Site.zip', type: 'application/zip', bytes }, c.head.id, 'ru');
     expect(full.json().error).toMatchObject({ reason: 'attachment_invalid', message: 'в Hornhoof закончилось место для файлов компании.' });
-    expect(readdirSync(dir)).toEqual([]);
+    expect(filesUnder(dir)).toEqual([]);
     c.app.ctx.config.taskFilesBytes = 2 * FILE_BYTES;
     const got = await upload(c, ava.key, { name: 'Site.zip', type: 'application/zip', bytes }, c.head.id);
     expect(got.statusCode).toBe(201);
     const file = got.json().file as { id: string; name: string };
-    expect(readFileSync(join(dir, file.id)).equals(bytes)).toBe(true);
-    expect(await c.db.select({ size: attachments.size, held: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) }).from(attachments)).toEqual([{ size: FILE_BYTES + 1, held: 0 }]);
+    const sha256 = sha256Of(bytes);
+    expect(filesUnder(dir)).toEqual([sha256]);
+    expect(await c.db.select({ size: attachments.size, sha256: attachments.sha256 }).from(attachments)).toEqual([{ size: FILE_BYTES + 1, sha256 }]);
+    expect((await c.db.execute(sql`SELECT count(*)::int AS n FROM information_schema.columns WHERE table_name = 'attachments' AND data_type = 'bytea'`) as unknown as { rows: { n: number }[] }).rows).toEqual([{ n: 0 }]);
     expect((await writeWith(c, ava.key, { agentId: c.head.id, files: [file.id] })).statusCode).toBe(202);
     const run = await nextOf(c.builtin, 'job.run');
     const events = (await c.app.inject({ url: `/api/agents/${c.head.id}/events`, ...as(c.ceo) })).json().events;
-    expect(events.find((e: { kind: string }) => e.kind === 'message').data.pictures).toEqual([{ ...file, file: true, big: true }]);
+    expect(events.find((e: { kind: string }) => e.kind === 'message').data.pictures).toEqual([{ ...file, file: true }]);
     const fetched = await c.app.inject({ url: `/api/attachments/file?task=message&file=${file.id}`, headers: { authorization: `Bearer ${run.toolToken}` } });
     expect(fetched.headers['content-length']).toBe(String(FILE_BYTES + 1));
     expect(fetched.rawPayload.equals(bytes)).toBe(true);
     expect((await c.app.inject({ url: `/api/attachments/${file.id}`, ...as(c.ceo) })).rawPayload.equals(bytes)).toBe(true);
-    rmSync(join(dir, file.id));
+    /* The server's disk lost its copy, and no other is left. */
+    rmSync(join(dir, 'store', sha256.slice(0, 2), sha256));
     const lost = await c.app.inject({ url: `/api/assistant/attachments/${file.id}`, headers: { authorization: `Bearer ${ava.key}`, 'accept-language': 'ru' } });
     expect(lost.statusCode).toBe(410);
-    expect(lost.json().error).toEqual({ code: 'gone', reason: 'file_lost', message: 'большой файл хранится только на машине, которая его приняла, и сейчас Hornhoof не может его оттуда взять.' });
+    expect(lost.json().error).toEqual({ code: 'gone', reason: 'file_lost', message: 'этого файла больше нет в хранилище файлов компании, и его копии не осталось.' });
     expect((await c.app.inject({ url: `/api/attachments/${file.id}`, ...as(c.ceo) })).json().error.reason).toBe('file_lost');
   });
 });

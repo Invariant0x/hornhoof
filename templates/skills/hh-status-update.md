@@ -1,7 +1,5 @@
 ---
 id: hh-status-update
-title: { en: "Status update", ru: "Отчет о положении дел" }
-description: { en: "Says where the department stands in one line, and only when it matters.", ru: "Сообщает, где находится отдел, одной строкой и только когда это важно." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins product-management/skills/stakeholder-update/SKILL.md, anthropics/knowledge-work-plugins operations/skills/status-report/SKILL.md]
 ---

@@ -28,7 +28,8 @@ export type AgentSql = { run: (text: string, mode: SqlMode, call?: SqlCall) => P
    account. */
 export const HIDDEN = ['secret_redactions', 'sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'revoked_certificate_serials', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', 'vault_entries', 'vault_log', 'company_phones', 'phone_sessions', 'phone_frames'];
 /* Columns that hold a password, a token or a key, or private words: Operations reads none of them. A machine's key goes with
-   every join from it, so it is one too. The account a node is signed in to names a person's email. */
+   every join from it, so it is one too. The account a node is signed in to names a person's email. A file's hash names
+   its content, so with it a guess at a person's file could be confirmed. */
 export const SECRET: Record<string, string[]> = {
   people: ['password_hash'],
   jobs: ['tool_token_hash'],
@@ -37,7 +38,7 @@ export const SECRET: Record<string, string[]> = {
   machines: ['machine_key'],
   departments: ['repo_token_enc', 'repo_token_revision'],
   program_operator_cases: ['capability'],
-  attachments: ['bytes'],
+  attachments: ['bytes', 'sha256'],
   assistants: ['key_hash', 'wake_secret_enc'],
   telegram_bots: ['token_enc'],
   requests: ['text', 'options', 'explained', 'answer', 'link', 'source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification'],

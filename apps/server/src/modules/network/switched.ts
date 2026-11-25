@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
+import { saying, wordsFor } from '../../locales/index.js';
 import { enqueueTurn } from '../conversation/queue.js';
 import { NoSubscription, orchestratorOf } from '../conversation/turn-records.js';
 import { queryOf } from '../merge/leader.js';
@@ -24,7 +25,7 @@ const NEWEST = `SELECT h.id::text AS id, h.kind, h.reason, f.hostname AS from_ho
 
 const iso = (at: Date | string | null): string | null => (at === null ? null : new Date(at).toISOString());
 /* A machine that never said its name is one all the same. */
-const named = (host: string | null): string => host || 'a machine with no name';
+const named = (host: string | null): string => host || wordsFor('en').notices.machineNoName;
 
 export function switchedRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* Where the company moves is the keeper's to say, at its own doors. Where no keeper stands before the app, nothing
@@ -72,7 +73,7 @@ export async function noteSwitch(ctx: Ctx): Promise<void> {
   const orchestrator = await orchestratorOf(ctx, row.company);
   if (!orchestrator) return;
   const text = promptOf(row);
-  const message = { personId: null, text, notification: { source: 'machine' as const, tasks: [], detail: { en: named(row.to_host), ru: row.to_host || 'машина без имени' } } };
+  const message = { personId: null, text, notification: { source: 'machine' as const, tasks: [], detail: row.to_host ? { en: row.to_host } : saying(words => words.notices.machineNoName) } };
   await enqueueTurn(ctx, { companyId: row.company, agentId: orchestrator.id, prompt: text, createdBy: null, answersCeo: true, message }).catch((err: unknown) => {
     if (!(err instanceof NoSubscription)) throw err;
   });

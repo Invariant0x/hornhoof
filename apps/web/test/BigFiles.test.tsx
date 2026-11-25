@@ -5,20 +5,22 @@ import { SentPictures } from '../src/ui/MessagePictures';
 import { TaskFiles } from '../src/ui/TaskAttachments';
 
 const AT = new Date().toISOString();
-const SAID = 'big file: lives 30 days on one machine and is lost if that machine goes';
 
 describe('a file over 50 MB', () => {
-  it('says by its name, on the task and in the chat, that it lives 30 days on one machine and is lost if that machine goes', () => {
-    render(
+  /* Every file is kept in the company's store on its machines, so a big one is shown as any other; a message from before
+     the store may still say big of one, and nothing of it shows. */
+  it('shows by its name alone, on the task and in the chat, as any other file', () => {
+    const { container } = render(
       <LanguageProvider>
-        <ul><TaskFiles files={[{ id: 'f1', name: 'dump.tar', size: 60 * 1024 * 1024, by: null, at: AT, big: true }, { id: 'f2', name: 'notes.txt', size: 10, by: null, at: AT }]} /></ul>
+        <ul><TaskFiles files={[{ id: 'f1', name: 'dump.tar', size: 60 * 1024 * 1024, by: null, at: AT }, { id: 'f2', name: 'notes.txt', size: 10, by: null, at: AT }]} /></ul>
         <SentPictures data={{ pictures: [{ id: 'c1', name: 'archive.zip', file: true, big: true }, { id: 'c2', name: 'plan.pdf', file: true }] }} />
       </LanguageProvider>,
     );
-    expect(screen.getByText(`dump.tar · ${SAID}`)).toBeInTheDocument();
+    expect(screen.getByText('dump.tar')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open dump.tar' })).toHaveAttribute('href', '/api/attachments/f1');
     expect(screen.getByRole('link', { name: 'Open notes.txt' })).toHaveAttribute('href', '/api/attachments/f2');
-    expect(screen.getByRole('link', { name: `Download archive.zip · ${SAID}` })).toHaveTextContent(`archive.zip · ${SAID}`);
+    expect(screen.getByRole('link', { name: 'Download archive.zip' })).toHaveTextContent(/^archive\.zip$/);
     expect(screen.getByRole('link', { name: 'Download plan.pdf' })).toHaveTextContent(/^plan\.pdf$/);
+    expect(container.textContent).not.toMatch(/one machine/);
   });
 });
