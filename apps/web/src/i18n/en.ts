@@ -3185,6 +3185,7 @@ export const en = {
     needs_recovery_file: 'This server cannot open this backup. Add the recovery file it was made for.',
     recovery_file_invalid: 'This is not a Hornhoof recovery file.',
     not_owner_session: 'Only the CEO does this, signed in as themselves.',
+    copy_not_given_up: 'This machine\'s copy was not given up, so there is nothing to make again.',
     question_changed: 'The question changed. Look again.',
     no_authority: 'The company is not ready for this yet. Wait a minute and try again.',
     not_recovering: 'This Hornhoof is not being restored from a recovery file.',
