@@ -2,7 +2,6 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { MACHINE_KINDS } from '@hornhoof/protocol';
 import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
-import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -19,9 +18,12 @@ import { buildSoon, type LeaderBuild } from '../network/follow.js';
 import { companyFolder, isServerComputer, issueTicket } from '../network/join.js';
 import { seenAccess } from '../computer/seen.js';
 import { replicasOf } from '../copies/measured.js';
+import { areaOf } from '../files/area.js';
 import { askMove, cancelMove, moveView } from '../copies/move.js';
 import { setPriority } from '../copies/priority.js';
+import { askCopyRetry } from '../copies/retry.js';
 import { holding } from '../copies/view.js';
+import { upsertJoinedMachine } from '../network/server-machine.js';
 import { findThisMachine } from '../network/store.js';
 import { machineNodes, machineState, together } from '../testruns/load.js';
 import { pumpTests } from '../testruns/runs.js';
@@ -29,7 +31,7 @@ import { createInstallCommand } from './command.js';
 import { nodeCommandRoutes } from './command-routes.js';
 import { connectionRoutes } from './connection-routes.js';
 import { disconnectMachines, refuseLeader } from './disconnect.js';
-import { nodeIdentity, ownBuiltin, ownMachine as machineOfServer, type NodeHub } from './hub.js';
+import { builtinOf, nodeIdentity, ownBuiltin, ownMachine as machineOfServer, type NodeHub, type NodeIdentity } from './hub.js';
 import { nodeImageOfBuild } from './image.js';
 import { machineFolders } from './machine-disk.js';
 import { builtinMachine, isServerInstall, liveNode, otherBuild, settlePlans, shownMachine } from './nodes.js';
@@ -56,11 +58,18 @@ const WEB_PORT = 8080;
 type CoreAnswer = { folder: string; ticket: string; port: number; company: string } | { here: true; port: number };
 const coreLine = (core: CoreAnswer): string => ('here' in core ? `core-here ${core.port}\n` : `core ${core.folder} ${core.ticket} ${core.port} ${core.company}\n`);
 
-/* A machine that comes back after a Disconnect is the same row, but has no place in the company's network until its
-   keeper redeems a new ticket: the key it had before is let in by nothing. A machine that was never disconnected keeps
-   its place when a command runs there again. */
-const keptWhileConnected = (column: AnyPgColumn) => sql`CASE WHEN ${machines.revokedAt} IS NULL THEN ${column} END`;
-const NO_PLACE_AFTER_DISCONNECT = { role: keptWhileConnected(machines.role), signKey: keptWhileConnected(machines.signKey), networkId: keptWhileConnected(machines.networkId) };
+/* The built-in node that belongs to a machine's card for someone who sees the whole company: the server's own on the
+   leader's computer, or the replica's own on another cored computer. */
+function cardBuiltin(
+  wholeCompany: boolean,
+  m: { id: string; networkId: string | null },
+  serverMachine: { id: string } | null,
+  own: NodeIdentity,
+): NodeIdentity | null {
+  if (!wholeCompany) return null;
+  if (serverMachine?.id === m.id) return own;
+  return m.networkId ? builtinOf(m.networkId) : null;
+}
 
 /* The three images of the server's build, each by its digest, as the installer pulls them. */
 const buildLine = (image: string, build: LeaderBuild): string => `build ${build.tag} ${image}@${build.digest} ${image}-node@${build.nodeDigest} ${image}-updater@${build.updaterDigest}\n`;
@@ -68,10 +77,20 @@ const buildLine = (image: string, build: LeaderBuild): string => `build ${build.
 const IdParams = z.object({ id: z.uuid() });
 export const LendBody = z.object({ lendsTests: z.boolean() }).strict();
 /* The ticks of a machine's card: whether it takes the company's test runs, and whether it keeps the company's backups. */
+/* The ticks of a machine's card, and the area of its disk the company's files may take: bytes, 0 for none, or null for
+   the default. */
 const TicksBody = z
-  .object({ lendsTests: z.boolean().optional(), keepsBackups: z.boolean().optional() })
+  .object({ lendsTests: z.boolean().optional(), keepsBackups: z.boolean().optional(), fileStoreLimitBytes: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional() })
   .strict()
-  .refine(ticks => ticks.lendsTests !== undefined || ticks.keepsBackups !== undefined, 'Say which tick to change.');
+  .refine(ticks => ticks.lendsTests !== undefined || ticks.keepsBackups !== undefined || ticks.fileStoreLimitBytes !== undefined, 'Say which setting to change.');
+
+/* The area a machine gives the company's files, what they take there and what the disk they lie on has free; none for a
+   machine without a keeper, which keeps none. */
+const STORE_COLUMNS = { id: machines.id, networkId: machines.networkId, fileStoreLimitBytes: machines.fileStoreLimitBytes, fileStoreUsedBytes: machines.fileStoreUsedBytes, filesDiskFree: machines.filesDiskFree, diskFree: machines.diskFree };
+type StoreRow = { id: string; networkId: string | null; fileStoreLimitBytes: number | null; fileStoreUsedBytes: number; filesDiskFree: number | null; diskFree: number | null };
+function storeCard(m: StoreRow) {
+  return m.networkId ? { id: m.id, limitBytes: m.fileStoreLimitBytes, areaBytes: areaOf(m.fileStoreLimitBytes), usedBytes: m.fileStoreUsedBytes, diskFree: m.filesDiskFree ?? m.diskFree } : null;
+}
 const PlanBody = z.object({ subscription: z.uuid() }).strict();
 /* A machine's place by hand: null for none, 'none' to keep it from the server, or the place, from 2. */
 const PriorityBody = z.object({ pin: z.union([z.null(), z.literal('none'), z.number().int().min(2).max(999)]) }).strict();
@@ -156,34 +175,35 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (!alone && subs.length === 0) throw codeUsed();
 
       const details = { hostname: body.hostname, os: body.os, arch: body.arch, kind: body.kind };
-      const [machine] = await tx
-        .insert(machines)
-        .values({ companyId: code.companyId, personId: code.personId, machineKey: body.machineId, ...details })
-        .onConflictDoUpdate({ target: [machines.personId, machines.machineKey], set: { ...details, revokedAt: null, ...NO_PLACE_AFTER_DISCONNECT } })
-        .returning({ id: machines.id });
+      const machine = await upsertJoinedMachine(tx, config, {
+        companyId: code.companyId,
+        personId: code.personId,
+        machineKey: body.machineId,
+        ...details,
+      });
 
-      const ticket = wantsCore && !here ? await issueTicket(tx, machine!.id) : null;
+      const ticket = wantsCore && !here ? await issueTicket(tx, machine.id) : null;
       /* A command for the core brings no node: the machine has its nodes, and they move to the core by themselves. */
-      if (code.core) return { machine: { id: machine!.id }, nodes: [], ticket };
+      if (code.core) return { machine: { id: machine.id }, nodes: [], ticket };
 
       /* The machine's own node has no plan: it takes test runs, and the machine its owner's plans later. */
       if (alone) {
         const key = newToken();
-        const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine!.id, subscriptionId: null }, hashToken(key));
+        const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine.id, subscriptionId: null }, hashToken(key));
         if (!nodeId) throw alreadyThere();
-        return { machine: { id: machine!.id }, nodes: [{ nodeId, subscriptionId: null, provider: 'machine' as const, key }], ticket };
+        return { machine: { id: machine.id }, nodes: [{ nodeId, subscriptionId: null, provider: 'machine' as const, key }], ticket };
       }
 
       /* Each plan signs in on this machine by itself, with a key of its own; one that runs here already is left as it is. */
       const made: { nodeId: string; subscriptionId: string | null; provider: Provider | 'machine'; key: string }[] = [];
       for (const sub of subs) {
         const key = newToken();
-        const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine!.id, subscriptionId: sub.id }, hashToken(key));
+        const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine.id, subscriptionId: sub.id }, hashToken(key));
         if (nodeId) made.push({ nodeId, subscriptionId: sub.id, provider: sub.provider, key });
       }
       if (!made.length) throw code.machineId ? alreadyThere() : codeUsed();
       await settlePlans(tx, made.map(n => n.subscriptionId));
-      return { machine: { id: machine!.id }, nodes: made, ticket };
+      return { machine: { id: machine.id }, nodes: made, ticket };
     });
     closeJoined(hub, joined.nodes);
     const core = wantsCore ? await coreFor(joined.ticket, code.companyId) : null;
@@ -251,7 +271,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const live = and(eq(machines.companyId, me.companyId), isNull(machines.revokedAt), shownMachine(config));
     const rows = await db
-      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, networkId: machines.networkId, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups, role: machines.role, uploadState: machines.uploadState })
+      .select({ ...STORE_COLUMNS, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups, role: machines.role, uploadState: machines.uploadState })
       .from(machines)
       .innerJoin(people, eq(people.id, machines.personId))
       .where(me.scopeKind === 'company' ? live : and(live, eq(machines.personId, me.id)))
@@ -281,6 +301,10 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const seenLately = (machineId: string) => on(machineId).some(n => n.lastSeenAt !== null && Date.now() - n.lastSeenAt.getTime() < CORE_OFFER_MS);
     const needsCore = (m: (typeof rows)[number]) => m.ownerId === me.id && m.kind === 'computer' && !m.networkId && !isServerComputer(config, m.machineKey) && seenLately(m.id);
     const serverMachine = me.scopeKind === 'company' ? programHost : null;
+    /* The server's own row, which no card shows, keeps the files it holds: its area is on the card of the computer it runs
+       on, or on the built-in card where it runs on none. */
+    const [ownStoreRow] = ownRow ? await db.select(STORE_COLUMNS).from(machines).where(and(eq(machines.id, ownRow.id), eq(machines.companyId, me.companyId))) : [];
+    const ownStore = ownStoreRow ? storeCard(ownStoreRow) : null;
     /* Who holds the company's data, and each machine's part in it: for those who see the whole company. The card of
        the computer the server itself runs on says what the server's own row says. */
     const held = me.scopeKind === 'company' ? await holding(ctx) : null;
@@ -310,7 +334,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       parts: parts.filter(runs).map(({ machineId: _, builtin: __, builtinMachine: ____, runBy: ___, ...p }) => p),
     });
     const builtinLoad = me.scopeKind === 'company' ? together([hub.loadOf(own)]) : null;
-    const statesByMachine = new Map(rows.map(m => [m.id, machineState(hub, on(m.id).map(n => n.id))] as const));
+    const statesByMachine = new Map(rows.map(m => [m.id, machineState(hub, on(m.id).map(n => n.id), cardBuiltin(held !== null, m, serverMachine, own))] as const));
     const copyAgentIds = [
       ...new Set(
         [builtinLoad?.disk, ...[...statesByMachine.values()].map(s => s.load?.disk)]
@@ -345,6 +369,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
               webPort: ownRow?.webPort ?? null,
               refusedBy,
               access: accessOf(ownRow?.id),
+              fileStore: serverMachine ? null : ownStore,
             }
           : null,
       machines: rows.map(m => {
@@ -360,28 +385,29 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
           serverInstall: isServerInstall(m.machineKey),
           ...state,
           ...copyNamesOf(state.load?.disk?.copies),
-          ...machineProgramState(hub, on(m.id).map(n => n.id), m.id, programHost, own),
-        otherBuild: otherBuild(hub, on(m.id).map(n => n.id), config.nodeBuild),
-        lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
-        plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
-        folders: machineFolders(hub, on(m.id)),
-        lendsTests: m.lendsTests,
-        /* Where the company opens on that machine, and how the machine reaches the server; none without the core. */
-        core: m.networkId ? { webPort: m.webPort, path: m.path } : null,
-        needsCore: needsCore(m),
-        access: accessOf(m.id),
-        ...(held ? { data: dataOf(m.id), replicas: machineReplicas(m) } : {}),
-        /* Whether it keeps the company's backups, and how many it holds; none of either without the core. */
-        keepsBackups: m.networkId ? m.keepsBackups : null,
-        heldBackups: m.networkId ? m.heldBackups.length : null,
-        drain: machineDrain(ctx, machineProgramNodes(on(m.id).map(n => n.id), m.id, programHost, own)),
-        /* Its plans' nodes, its own built-in node when it keeps a copy of the data, and the server's when the server runs
-           on it. */
-        running: running(
-          a => (a.builtin && (onOwn(a.builtinMachine) ? serverMachine?.id === m.id : a.builtinMachine === m.networkId)) || on(m.id).some(n => n.id === a.nodeId),
-          p => (p.builtin ? (onOwn(p.builtinMachine) ? serverMachine?.id === m.id : p.builtinMachine === m.networkId) : p.machineId === m.id),
-        ),
-      };
+          ...machineProgramState(hub, on(m.id).map(n => n.id), m.id, programHost, own, m.networkId),
+          otherBuild: otherBuild(hub, on(m.id).map(n => n.id), config.nodeBuild),
+          lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
+          plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
+          folders: machineFolders(hub, on(m.id), cardBuiltin(held !== null, m, serverMachine, own)),
+          lendsTests: m.lendsTests,
+          /* Where the company opens on that machine, and how the machine reaches the server; none without the core. */
+          core: m.networkId ? { webPort: m.webPort, path: m.path } : null,
+          needsCore: needsCore(m),
+          access: accessOf(m.id),
+          ...(held ? { data: dataOf(m.id), replicas: machineReplicas(m) } : {}),
+          /* Whether it keeps the company's backups, and how many it holds; none of either without the core. */
+          keepsBackups: m.networkId ? m.keepsBackups : null,
+          heldBackups: m.networkId ? m.heldBackups.length : null,
+          fileStore: serverMachine?.id === m.id && ownStore ? ownStore : storeCard(m),
+          drain: machineDrain(ctx, machineProgramNodes(on(m.id).map(n => n.id), m.id, programHost, own, m.networkId)),
+          /* Its plans' nodes, its own built-in node when it keeps a copy of the data, and the server's when the server runs
+             on it. */
+          running: running(
+            a => (a.builtin && (onOwn(a.builtinMachine) ? serverMachine?.id === m.id : a.builtinMachine === m.networkId)) || on(m.id).some(n => n.id === a.nodeId),
+            p => (p.builtin ? (onOwn(p.builtinMachine) ? serverMachine?.id === m.id : p.builtinMachine === m.networkId) : p.machineId === m.id),
+          ),
+        };
       }),
       ...(held ? { copies: held.copies } : {}),
       /* Whether this person sees the order the server passes on in. */
@@ -428,6 +454,17 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.code(204).send();
   });
 
+  /* The CEO's request for a new copy on a machine whose keeper gave its copy up. His alone, by himself or through the
+     orchestrator. */
+  app.post('/api/machines/:id/copy/retry', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    if (!me.isOwner || me.viaHead) throw notCeo();
+    const { id } = IdParams.parse(req.params);
+    await ownMachine(me, id);
+    askCopyRetry(ctx, id);
+    return reply.code(204).send();
+  });
+
   /* The CEO's request to move the server to this machine, and its taking off. His alone, by himself or through the
      orchestrator. */
   app.post('/api/machines/:id/move', async (req, reply) => {
@@ -453,9 +490,27 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.patch('/api/machines/:id', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    const ticks = TicksBody.parse(req.body);
-    await ownMachine(me, id);
-    const [now] = await db.update(machines).set(ticks).where(eq(machines.id, id)).returning({ lendsTests: machines.lendsTests, keepsBackups: machines.keepsBackups });
+    const { fileStoreLimitBytes: limit, ...ticks } = TicksBody.parse(req.body);
+    const area = limit === undefined ? {} : { fileStoreLimitBytes: limit };
+    /* What a machine gives the company's files is its owner's decision or the CEO's, never one a head carries out. */
+    if (limit !== undefined && me.viaHead) throw notCeo();
+    const said = { lendsTests: machines.lendsTests, keepsBackups: machines.keepsBackups, fileStoreLimitBytes: machines.fileStoreLimitBytes };
+    /* The server's own row, which no card shows, takes only its area, and only from the CEO, by himself or through the
+       orchestrator. */
+    const own = await findThisMachine(db, config);
+    if (own?.id === id) {
+      const [row] = await db.select(idOnly(machines)).from(machines).where(and(eq(machines.id, id), eq(machines.companyId, me.companyId)));
+      if (!row || limit === undefined || Object.keys(ticks).length > 0) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
+      if (!me.isOwner) throw notCeo();
+      return (await db.update(machines).set(area).where(eq(machines.id, id)).returning(said))[0];
+    }
+    const machine = await ownMachine(me, id);
+    if (limit !== undefined) {
+      if (!machine.networkId) throw new ApiError(400, 'validation', "This machine has no keeper, so it keeps none of the company's files.");
+      /* More room on another person's machine is the CEO's to give; less, anyone who may change the machine gives. */
+      if (areaOf(limit) > areaOf(machine.fileStoreLimitBytes) && machine.personId !== me.id && !me.isOwner) throw notCeo();
+    }
+    const [now] = await db.update(machines).set({ ...ticks, ...area }).where(eq(machines.id, id)).returning(said);
     if (ticks.lendsTests) await pumpTests(ctx);
     return now;
   });

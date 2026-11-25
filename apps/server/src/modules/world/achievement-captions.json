@@ -1,0 +1,760 @@
+{
+  "world": "egypt",
+  "version": 1,
+  "locales": [
+    "ru",
+    "en"
+  ],
+  "achievements": [
+    {
+      "id": 1,
+      "key": "first_stake",
+      "scope": "shared",
+      "title": {
+        "ru": "Первый колышек",
+        "en": "First stake"
+      },
+      "captions": {
+        "ru": [
+          "Колышек вбит. Писцы завели чистый свиток.",
+          "Песок получил имя и печать из свежей глины.",
+          "На пустом берегу уже спорят землемеры с отвесом.",
+          "Тростниковое перо вывело первую строку летописи.",
+          "Веха в песке, а кот уже занял ее тень."
+        ],
+        "en": [
+          "Fresh papyrus unrolled. The sand has a name.",
+          "A lone wooden stake, and scribes want a desk.",
+          "Just sand so far, yet the cat claimed shade.",
+          "Nothing here yet but river wind and a ledger.",
+          "Surveyors claimed the dune before the ibis moved."
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "key": "caravan_arrived",
+      "scope": "shared",
+      "title": {
+        "ru": "Караван пришел",
+        "en": "Caravan arrived"
+      },
+      "captions": {
+        "ru": [
+          "Закрома полны, учетчики сбились со счета.",
+          "Ослы ревут у храма, пыль стоит до самого неба.",
+          "Бог прислал зерно, пекари разожгли печи.",
+          "Весы у амбара скрипят под мешками ячменя.",
+          "Гончары у ворот уже лепят горшки для нового зерна."
+        ],
+        "en": [
+          "Grain pours in faster than scribes can tally it.",
+          "Donkeys at the temple gate. The ovens wake up.",
+          "Full granaries make for very calm bureaucrats.",
+          "The feeder god sends wheat, right on schedule.",
+          "Flour dust on every sandal from gate to store."
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "key": "first_stone",
+      "scope": "shared",
+      "title": {
+        "ru": "Первый камень",
+        "en": "First stone"
+      },
+      "captions": {
+        "ru": [
+          "Отвес замер ровно. Глыба легла в основание.",
+          "Старший писец кивнул над выверенной гранью.",
+          "Шнур натянут чисто, запись ушла в летопись.",
+          "Известняк лег так плотно, что тростник не влезет.",
+          "На свежем блоке высохла красная метка двора."
+        ],
+        "en": [
+          "The plumb line hangs stone still. Block approved.",
+          "Red ochre mark on dressed limestone. Good start.",
+          "No gap under the straightedge. Scribes nod once.",
+          "Foundation block seated. The ground means it now.",
+          "Clean cut block in place, and the map feels real."
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "key": "housewarming",
+      "scope": "shared",
+      "title": {
+        "ru": "Новоселье",
+        "en": "Housewarming"
+      },
+      "captions": {
+        "ru": [
+          "Каменотес сложил себе крышу у самой воды.",
+          "В новом доме уже расстелили свежую циновку.",
+          "Писцы сменили табличку у входа в хижину.",
+          "Свой очаг дымит ровно после честных трудов.",
+          "Глиняный порог высох, кувшин с водой у двери."
+        ],
+        "en": [
+          "A tireless stonecutter sleeps under a new roof tonight.",
+          "Fresh mud plaster dries on a private house wall.",
+          "The census scroll moves a builder up a line.",
+          "Smoke rises from a new hearth near the canal.",
+          "Water jar by the door. Somebody lives well here."
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "key": "answer_from_above",
+      "scope": "personal",
+      "title": {
+        "ru": "Ответ с небес",
+        "en": "Answer from above"
+      },
+      "captions": {
+        "ru": [
+          "Свиток у алтаря дождался знака свыше.",
+          "Жрецы развернули папирус и сразу закивали.",
+          "Воля небес сошла на землю четким почерком.",
+          "Ладан еще дымит, а решение уже в мастерской.",
+          "На алтарном камне белеет ответ с печатью."
+        ],
+        "en": [
+          "The altar scroll came back with royal ink on it.",
+          "Word fell from above. The priests stopped pacing.",
+          "Incense barely curled before the sign arrived.",
+          "Heaven spoke clearly, so the scribes got moving.",
+          "A sealed decree turned confusion into cut stone."
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "key": "swift_grace",
+      "scope": "personal",
+      "title": {
+        "ru": "Быстрая милость",
+        "en": "Swift grace"
+      },
+      "captions": {
+        "ru": [
+          "Чернила на прошении еще блестят, а указ готов.",
+          "Милость с небес обгоняет тень обелиска.",
+          "Печать легла на папирус быстрее речного ветра.",
+          "Храмовый кот не успел моргнуть до ответа.",
+          "В канцелярии шепчутся о небывалой прыти небес."
+        ],
+        "en": [
+          "Wet ink on the question, wet wax on the reply.",
+          "The temple runner did not even catch a breath.",
+          "Answers land on the altar faster than sand blows.",
+          "Scribes keep extra reeds trimmed just to keep up.",
+          "Before the smoke rose, the decree was already out."
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "key": "clear_altar",
+      "scope": "shared",
+      "title": {
+        "ru": "Чистый алтарь",
+        "en": "Clear altar"
+      },
+      "captions": {
+        "ru": [
+          "На алтаре к закату ни единого забытого свитка.",
+          "Вечерний ветер гуляет по пустому камню прошений.",
+          "В ларце дежурного писца пусто и спокойно.",
+          "Звезды выходят над храмом, где все свитки прочтены.",
+          "Ни один вопрос не ночует сегодня у жаровни."
+        ],
+        "en": [
+          "Sunset hits bare stone where petitions used to sit.",
+          "Not a stray papyrus left waiting for the moon.",
+          "Even the moon finds no petition left to read.",
+          "Every question answered before the oil lamps dim.",
+          "Night falls on quiet steps and closed inkpots."
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "key": "welcome_back",
+      "scope": "personal",
+      "title": {
+        "ru": "С возвращением",
+        "en": "Welcome back"
+      },
+      "captions": {
+        "ru": [
+          "Опахала снова качнулись на дворцовом крыльце.",
+          "Писцы сдули песок с главной царской печати.",
+          "На свежей глыбе у ворот сияет знак благословения.",
+          "Дворцовый кот слез с трона и уступил место.",
+          "В летописи прервалась долгая полоса тишины."
+        ],
+        "en": [
+          "Fan bearers snapped awake on the palace steps.",
+          "Sand brushed off the royal seal. Work resumes.",
+          "The palace cat vacated the throne with dignity.",
+          "A fresh block wears the mark of a royal hand.",
+          "The court chronicler dipped a dry reed in ink."
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "key": "steady_nile",
+      "scope": "personal",
+      "title": {
+        "ru": "Ровный Нил",
+        "en": "Steady Nile"
+      },
+      "captions": {
+        "ru": [
+          "Нил течет без рывков, и каменоломня дышит ровно.",
+          "В свитках учета тихая гладь без бурь и спешки.",
+          "День за камнем, ночь за сном, как велит река.",
+          "Ниломер спокоен, у писцов легкий почерк.",
+          "Лодки идут по течению без крика на веслах."
+        ],
+        "en": [
+          "Smooth water at the quay, calm ink in the books.",
+          "Work by sun and rest by stars. Steady as the Nile.",
+          "Neither flood nor drought shakes the quarry pace.",
+          "Even the palace clerks stopped frowning at noon.",
+          "Boats glide past the reeds on an unhurried tide."
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "key": "strict_judge",
+      "scope": "personal",
+      "title": {
+        "ru": "Строгий судья",
+        "en": "Strict judge"
+      },
+      "captions": {
+        "ru": [
+          "Кривой скол отправили назад с пометкой писца.",
+          "Тесаный блок лег под отвесом без единой щели.",
+          "Строгая проверка уберегла стену от трещины.",
+          "Грань выровняли заново, и печать легла ровно.",
+          "В царскую кладку идут только честные углы."
+        ],
+        "en": [
+          "Crooked limestone went back and came home true.",
+          "A sharp eye at inspection saved the whole wall.",
+          "Chalk marks explained the flaw. Chisels fixed it.",
+          "Recut stone passed the plumb line without a word.",
+          "The palace refuses sloppy corners on principle."
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "key": "commandment",
+      "scope": "personal",
+      "title": {
+        "ru": "Заповедь",
+        "en": "Commandment"
+      },
+      "captions": {
+        "ru": [
+          "Долото высекло устав на вечном граните.",
+          "Папирус истлеет, а буквы на стеле останутся.",
+          "У входа в мастерскую стоит плита с правилом.",
+          "Резцы закрепили порядок глубже любых чернил.",
+          "Мастера сверяют шаг с надписью во дворе."
+        ],
+        "en": [
+          "Chisels bit granite so nobody forgets the rule.",
+          "Ink fades in sun. Carved basalt makes its point.",
+          "A stone stele by the gate settled old debates.",
+          "Chiseled rules never get lost under sawdust.",
+          "Citizens tap the carved slab on their way to work."
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "key": "firefighter",
+      "scope": "shared",
+      "title": {
+        "ru": "Пожарный",
+        "en": "Firefighter"
+      },
+      "captions": {
+        "ru": [
+          "Цепь с ведрами сбила дым раньше тревоги.",
+          "Копоть смыли со стен, кладка готова в срок.",
+          "Над крышей чистое небо, каменотесы за делом.",
+          "Вода зашипела на углях, и мастерская уцелела.",
+          "Писцы вычеркнули беду и вписали готовый блок."
+        ],
+        "en": [
+          "Bucket brigade cleared the smoke before noon.",
+          "Soot washed off the lintel, stone delivered clean.",
+          "Wet sandals in the courtyard, finished work inside.",
+          "Smoke rose over the roof and lost the argument.",
+          "Scribes logged a brief scorch mark and a victory."
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "key": "gong_heard",
+      "scope": "shared",
+      "title": {
+        "ru": "Гонг услышан",
+        "en": "Gong heard"
+      },
+      "captions": {
+        "ru": [
+          "Гонг гудит над крышами, и затор у волокуш тает.",
+          "Сторожевая медь звякнула, волокуши сразу пошли.",
+          "Эхо с башни сдвинуло застрявшую у рамы глыбу.",
+          "Сторож опускает колотушку, а блок уже в пазу.",
+          "Дозорный ударил в бронзу. Дремоту сдуло мигом."
+        ],
+        "en": [
+          "A bronze ring from the tower unstuck the sled.",
+          "Even Ptah looked up when the watchman struck.",
+          "Echoes had barely faded when the block slid home.",
+          "Sharp ears in the workshop beat a stuck roller.",
+          "Heavy levers bit deep as brass hummed overhead."
+        ]
+      }
+    },
+    {
+      "id": 14,
+      "key": "night_shift",
+      "scope": "shared",
+      "title": {
+        "ru": "Ночная смена",
+        "en": "Night shift"
+      },
+      "captions": {
+        "ru": [
+          "Во дворце тишина, а под Сириусом идет кладка.",
+          "Утром писцы нашли стену выше вчерашней мерки.",
+          "При свете масляных плошек выросла целая гряда.",
+          "Ночная прохлада бережет руки и спорит с ленью.",
+          "Солнце встало над готовым рядом белого камня."
+        ],
+        "en": [
+          "Sirius watched the chisels while the palace slept.",
+          "Dawn arrived to find fresh stone already seated.",
+          "Oil lamps burned low so morning clerks could gasp.",
+          "Cool desert air made for remarkably square cuts.",
+          "Night owls and masons kept the same quiet hours."
+        ]
+      }
+    },
+    {
+      "id": 15,
+      "key": "backup_provider",
+      "scope": "shared",
+      "title": {
+        "ru": "Запасной кормилец",
+        "en": "Backup provider"
+      },
+      "captions": {
+        "ru": [
+          "Пустой закром закрыли, соседний храм подает муку.",
+          "Пекари даже не заметили, чья мука пришла в квашню.",
+          "На мешках чужая печать, зато каменотесы сыты.",
+          "Другая баржа подставила борт, камень дотесан.",
+          "Мудрый город не держит все зерно в одном храме."
+        ],
+        "en": [
+          "One granary ran dry. The next one opened its doors.",
+          "Different temple seal on the sacks, same bread.",
+          "Wise clerks never trust a lone silo with the wall.",
+          "Crew switched flour sacks without dropping a mallet.",
+          "The chisels never cared which shrine sent barley."
+        ]
+      }
+    },
+    {
+      "id": 16,
+      "key": "second_district",
+      "scope": "shared",
+      "title": {
+        "ru": "Второй район",
+        "en": "Second district"
+      },
+      "captions": {
+        "ru": [
+          "За каналом застучали киянки нового квартала.",
+          "Паромщик теперь возит глину и писцов на тот берег.",
+          "На дальнем берегу зажглись жаровни мастерской.",
+          "Через проток перекинули мостки к свежим печам.",
+          "В летопись подшили карту заречной стороны."
+        ],
+        "en": [
+          "Chisels echo back from across the canal now.",
+          "The ferryman suddenly carries royal ledger scrolls.",
+          "Fresh workshop fires glow on the opposite bank.",
+          "Narrow riverbanks could not hold this city back.",
+          "Mapmakers glued an extra sheet onto the city plan."
+        ]
+      }
+    },
+    {
+      "id": 17,
+      "key": "light_returned",
+      "scope": "shared",
+      "title": {
+        "ru": "Свет вернулся",
+        "en": "Light returned"
+      },
+      "captions": {
+        "ru": [
+          "Над притихшим кварталом снова встала заря.",
+          "В мастерских продули горны после темной паузы.",
+          "Тишина отступила, с пристани слышен скрип каната.",
+          "Переправа открыта, огни за каналом снова горят.",
+          "Писцы сняли пометку молчания с дальнего двора."
+        ],
+        "en": [
+          "Dawn found the dark quarter open and hammering.",
+          "Cold hearths across the water caught fire again.",
+          "Lamp oil flows back to the quiet workshops.",
+          "Watchmen spotted warm light on the far rooftops.",
+          "The silent district sent over a fresh tally sheet."
+        ]
+      }
+    },
+    {
+      "id": 18,
+      "key": "mudbrick_street",
+      "scope": "shared",
+      "title": {
+        "ru": "Глинобитная улица",
+        "en": "Mudbrick street"
+      },
+      "captions": {
+        "ru": [
+          "Глинобитные дома вытянулись ровно вдоль воды.",
+          "На улице бывалых мастеров двери стоят в струнку.",
+          "Из каждого двора утром выходят умелые руки.",
+          "Обжитые кровли держат густую тень у канала.",
+          "Писцам не хватает свитков на всех старожилов."
+        ],
+        "en": [
+          "Sunbaked brick lines a lane where veterans live.",
+          "Every doorway on this street hides steady hands.",
+          "Shade falls clean down a row of veteran homes.",
+          "Census clerks walk this lane and find the guild.",
+          "Potted palms mark a street of proven builders."
+        ]
+      }
+    },
+    {
+      "id": 19,
+      "key": "master_builder",
+      "scope": "shared",
+      "title": {
+        "ru": "Мастер",
+        "en": "Master"
+      },
+      "captions": {
+        "ru": [
+          "В усадьбе мастера шелестит сад под финиками.",
+          "У резных дверей виллы висит именная табличка.",
+          "Беленые колонны дома видны с дворцовой кровли.",
+          "Личный отвес в ларце и пруд с лотосами у крыльца.",
+          "На такой террасе и храмовый кот ходит важно."
+        ],
+        "en": [
+          "Whitewashed villa walls suit a steady plumb line.",
+          "From mud hut to lotus courtyard by clean stone.",
+          "Shade under fig trees belongs to a master hand.",
+          "Palace architects slow down past that front gate.",
+          "Even the alley cat walks taller on this porch."
+        ]
+      }
+    },
+    {
+      "id": 20,
+      "key": "legend",
+      "scope": "shared",
+      "title": {
+        "ru": "Легенда",
+        "en": "Legend"
+      },
+      "captions": {
+        "ru": [
+          "Слава зодчего перешла с папируса на вечный гранит.",
+          "Ученики гладят буквы на плите перед сменой.",
+          "Писцы отложили тростник и позвали камнереза.",
+          "В архиве кончились титулы для такого мастерства.",
+          "О таких руках поют лодочники у вечерней воды."
+        ],
+        "en": [
+          "Papyrus felt flimsy, so scribes used granite.",
+          "Apprentices touch the carved name for steady luck.",
+          "Boatmen down the Nile already know this builder.",
+          "The royal archive ran out of higher ranks to give.",
+          "Even Ptah leaned closer to inspect the seam."
+        ]
+      }
+    },
+    {
+      "id": 21,
+      "key": "new_department",
+      "scope": "shared",
+      "title": {
+        "ru": "Новый отдел",
+        "en": "New department"
+      },
+      "captions": {
+        "ru": [
+          "На месте колышков встали крепкие стены гильдии.",
+          "Над входом нового дома ремесел легла притолока.",
+          "Внутри еще пахнет известью, а столы уже заняты.",
+          "Веревочная разметка стала настоящим двором.",
+          "В городском свитке открыли лист новой артели."
+        ],
+        "en": [
+          "String lines came down because real walls went up.",
+          "Fresh mortar smell in a brand new guild hall.",
+          "Roof beams cast shade where stakes stood yesterday.",
+          "Another craft house claims its spot on the map.",
+          "Clerks issued a heavy bronze key for the new door."
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "key": "first_statue",
+      "scope": "shared",
+      "title": {
+        "ru": "Первая статуя",
+        "en": "First statue"
+      },
+      "captions": {
+        "ru": [
+          "Из глыбы у входа глядит профиль покровителя.",
+          "Голуби еще примериваются к новому плечу бога.",
+          "Каменная стопа твердо встала на новый постамент.",
+          "Леса еще стоят, но взгляд у статуи уже строгий.",
+          "У дверей гильдии стоит страж из светлого камня."
+        ],
+        "en": [
+          "Ptah stepped halfway out of limestone scaffolding.",
+          "Even unfinished stone eyes keep masons honest.",
+          "A patron statue claims its plinth by the gate.",
+          "Chisels freed shoulders from raw quarry block.",
+          "The guild works straighter under a carved gaze."
+        ]
+      }
+    },
+    {
+      "id": 23,
+      "key": "statue_alley",
+      "scope": "shared",
+      "title": {
+        "ru": "Аллея",
+        "en": "Statue alley"
+      },
+      "captions": {
+        "ru": [
+          "Каменные стражи с обеих сторон берегут крыльцо.",
+          "Между богами у входа даже ветер ходит смирно.",
+          "Пара изваяний встречает гостей строгим прищуром.",
+          "Две тени от статуй сошлись прямо на пороге.",
+          "Мимо таких стражей кривая плита не проскочит."
+        ],
+        "en": [
+          "Twin stone patrons judge every sandal at the door.",
+          "Walking into work now feels like court audience.",
+          "Flanked by gods, the guild hall commands quiet.",
+          "Crooked work dares not pass between those plinths.",
+          "Both statues finished, and the doorway looks royal."
+        ]
+      }
+    },
+    {
+      "id": 24,
+      "key": "from_tent_to_house",
+      "scope": "shared",
+      "title": {
+        "ru": "Из шатра в дом",
+        "en": "From tent to house"
+      },
+      "captions": {
+        "ru": [
+          "Ткань шатра уступила место каменным сводам.",
+          "Ветер больше не хлопает пологом над указами.",
+          "Во дворце прохладный пол и тишина толстых стен.",
+          "Походные колья сдали в кладовую за ненадобностью.",
+          "Печать ставят под потолком из ливанского кедра."
+        ],
+        "en": [
+          "Tent pegs retired in favor of dressed limestone.",
+          "Desert wind no longer flaps the royal roof.",
+          "Cedar beams overhead make decrees sound weightier.",
+          "Cool stone floors beat sand in the throne room.",
+          "Polished tile underfoot. Camping days are over."
+        ]
+      }
+    },
+    {
+      "id": 25,
+      "key": "first_tier",
+      "scope": "shared",
+      "title": {
+        "ru": "Первый ярус",
+        "en": "First tier"
+      },
+      "captions": {
+        "ru": [
+          "Нижняя ступень великой громады отбросила тень.",
+          "Пустыня отступила перед широким каменным поясом.",
+          "С площадки яруса уже виден далекий изгиб Нила.",
+          "Широкая кладка легла на желтый песок навечно.",
+          "Писцы задрали головы, сверяя кромку с небом."
+        ],
+        "en": [
+          "The horizon grew a flat limestone shoulder today.",
+          "Desert sand lost an argument with solid stone.",
+          "Climb the base tier and the whole river appears.",
+          "What was a sketch on papyrus now casts long shade.",
+          "Surveyors squint up where empty sky used to sit."
+        ]
+      }
+    },
+    {
+      "id": 26,
+      "key": "golden_capstone",
+      "scope": "shared",
+      "title": {
+        "ru": "Золотая вершина",
+        "en": "Golden capstone"
+      },
+      "captions": {
+        "ru": [
+          "Вершина горит золотом. Город пирует.",
+          "Золотое острие венчает кладку под самым небом.",
+          "Выше класть уже некуда. Мастера утирают лбы.",
+          "Навершие поймало солнце и слепит переписчиков.",
+          "Выше этой грани в небе только коршуны и лазурь."
+        ],
+        "en": [
+          "Gold on the peak blinds sailors down the river.",
+          "No stone goes higher. The scribes closed the roll.",
+          "Sunlight hits the capstone before dawn hits town.",
+          "Out of sky to build on. Break out the figs.",
+          "Even the desert squints at that finished point."
+        ]
+      }
+    },
+    {
+      "id": 27,
+      "key": "wonder_of_the_world",
+      "scope": "shared",
+      "title": {
+        "ru": "Чудо света",
+        "en": "Wonder of the world"
+      },
+      "captions": {
+        "ru": [
+          "Бури приходят и гаснут, а громада стоит ровно.",
+          "Чужеземные послы молчат у подножия с утра.",
+          "Корабли с реки держат курс по блеску вершины.",
+          "Ни одна плита не дрогнула под жаром пустыни.",
+          "Слава памятника стоит без подпорок и суеты."
+        ],
+        "en": [
+          "Sandstorms blow past and leave every joint tight.",
+          "Envoys arrive talking loud and leave whispering.",
+          "Glory is easy once. Keeping the shine takes stone.",
+          "Season after season, not a splinter out of plumb.",
+          "Travelers cross deserts just to stare from below."
+        ]
+      }
+    },
+    {
+      "id": 28,
+      "key": "by_your_own_hands",
+      "scope": "personal",
+      "title": {
+        "ru": "Своими руками",
+        "en": "By your own hands"
+      },
+      "captions": {
+        "ru": [
+          "Первое украшение в городе. Писцы спорят о вкусах.",
+          "Лотосы у ворот посажены не по указу, а по вкусу.",
+          "Каменотесы обходят новую вазу на цыпочках.",
+          "Первая роспись на стене, и почерк у нее свой.",
+          "Ибисы признали новую колонну лучшим местом в городе."
+        ],
+        "en": [
+          "First ornament in town. The scribes call it bold.",
+          "No decree ordered this lotus bed. Even better.",
+          "One small obelisk, and suddenly the square has style.",
+          "Placed by hand, picked by eye. The square agrees.",
+          "Ibises inspect the new column and approve the taste."
+        ]
+      }
+    },
+    {
+      "id": 29,
+      "key": "four_lamps",
+      "scope": "shared",
+      "title": {
+        "ru": "Четыре лампады",
+        "en": "Four lamps"
+      },
+      "captions": {
+        "ru": [
+          "Все огни ниломера горят ровным теплым светом.",
+          "Река и город живут в редком полном согласии.",
+          "Жрецы у ступеней воды не помнят такой поры.",
+          "Писцы занесли в летопись сезон без единой тусклой лампы.",
+          "В сезонном свитке сошлись и мера, и красота."
+        ],
+        "en": [
+          "Every lamp on the Nilometer burns steady tonight.",
+          "Even the crocodiles came up to see the gauge lit.",
+          "Height and grace finally share the same ledger.",
+          "Old priests by the gauge just nod at the flames.",
+          "Warm oil light dances down every river stair."
+        ]
+      }
+    },
+    {
+      "id": 30,
+      "key": "pantheon",
+      "scope": "personal",
+      "title": {
+        "ru": "Пантеон",
+        "en": "Pantheon"
+      },
+      "captions": {
+        "ru": [
+          "В храмовом зале поставили еще один резной трон.",
+          "Святилище открыло двери еще одному имени.",
+          "На печатях города сияет свежий царский картуш.",
+          "Хор жрецов теперь поет утренний гимн на голос больше.",
+          "Небо над Нилом слушает теперь совет равных."
+        ],
+        "en": [
+          "Priests carried a fresh throne into the sanctuary.",
+          "Royal seals gained a companion cartouche today.",
+          "Even gods appreciate sharing the morning scrolls.",
+          "Incense rises for a wider council above the city.",
+          "Another divine voice speaks from behind the veil."
+        ]
+      }
+    }
+  ]
+}

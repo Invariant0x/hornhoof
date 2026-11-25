@@ -33,13 +33,15 @@ describe('the database pool', () => {
     await pool.end();
   });
 
-  it("fences the app's pool and ends its transactions after 5 s", async () => {
+  it("fences the app's pool, ends its transactions after 5 s and sets the commit under which the fence lets one through", async () => {
     const url = 'postgres://hornhoof@127.0.0.1:1/hornhoof';
     const fenced = openPool(url, () => {}, APP_NAME, { fenced: true });
     const unfenced = openPool(url, () => {}, APP_NAME);
     const keeper = openPool(url, () => {}, KEEPER_NAME);
-    expect(fenced.options).toMatchObject({ options: '-c transaction_timeout=5s -c client_min_messages=warning -c hornhoof.fenced=on' });
-    expect(unfenced.options).toMatchObject({ options: '-c transaction_timeout=5s -c client_min_messages=warning' });
+    /* net.assert_lease lets a commit through only under synchronous_commit on, so the app asks for it itself and does not
+       take what the server gives: a postgresql.auto.conf with local in it made every write refuse. */
+    expect(fenced.options).toMatchObject({ options: '-c transaction_timeout=5s -c client_min_messages=warning -c synchronous_commit=on -c hornhoof.fenced=on' });
+    expect(unfenced.options).toMatchObject({ options: '-c transaction_timeout=5s -c client_min_messages=warning -c synchronous_commit=on' });
     expect(keeper.options).not.toHaveProperty('options');
     await Promise.all([fenced.end(), unfenced.end(), keeper.end()]);
   });

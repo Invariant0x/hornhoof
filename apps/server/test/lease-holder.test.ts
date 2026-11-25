@@ -481,3 +481,63 @@ describe('a lease that takes a proof', () => {
     expect([ended.length, h.mode(), h.full()]).toEqual([1, 'read', true]);
   });
 });
+
+describe('the setting a session commits under, which net.assert_lease needs to be on', () => {
+  const FILE = { setting: 'local', source: 'configuration file' };
+
+  it('puts it right when the server gives local, says what it found, and leads', async () => {
+    const k = holder(fakeLease({ commit: FILE }));
+    await k.h.tick();
+    await k.h.look();
+    expect(k.methods()).toEqual(['take', 'problems', 'commitSetting', 'commitOn', 'commitSetting']);
+    expect(k.h.mode()).toBe('lead');
+    expect(k.lines).toContain('A session that sets no commit setting got "local" here, from the configuration file, and the fence lets a commit through only under "on": the keeper set it on and reloaded.');
+    /* Right now, it asks no more than the one question. */
+    await k.h.look();
+    expect(k.methods().slice(5)).toEqual(['problems', 'commitSetting']);
+  });
+
+  it('does not lead on a setting it cannot change, and says where it stands, once', async () => {
+    const k = holder(fakeLease({ commit: { setting: 'off', source: 'command line' } }));
+    await k.h.tick();
+    await k.h.look();
+    await k.h.look();
+    expect(k.methods()).not.toContain('commitOn');
+    expect(k.h.mode()).toBe('read');
+    const said = k.lines.filter(line => line.startsWith('Hornhoof does not lead'));
+    expect(said).toEqual(['Hornhoof does not lead here until this is fixed: synchronous_commit is "off" for a session that sets none (the command line), and the fence lets a commit through only under "on".']);
+  });
+
+  it('does not lead while the setting stays local after the keeper set it on, and tries again once a minute has passed', async () => {
+    const k = holder(fakeLease({ commit: { ...FILE, stuck: true } }));
+    await k.h.tick();
+    await k.h.look();
+    expect(k.h.mode()).toBe('read');
+    const asked = () => k.methods().filter(method => method === 'commitOn').length;
+    expect(asked()).toBe(1);
+    k.after(10_000);
+    await k.h.look();
+    expect(asked()).toBe(1);
+    k.after(60_000);
+    await k.h.look();
+    expect(asked()).toBe(2);
+  });
+
+  it('leads again once the setting is on', async () => {
+    const k = holder(fakeLease({ commit: { setting: 'off', source: 'database' } }));
+    await k.h.tick();
+    await k.h.look();
+    expect(k.h.mode()).toBe('read');
+    k.lease!.commitIs('on');
+    await k.h.look();
+    expect(k.h.mode()).toBe('lead');
+  });
+
+  it('holds what it knew when the database does not tell now', async () => {
+    const k = holder(fakeLease({ commitFails: true }));
+    await k.h.tick();
+    await k.h.look();
+    expect(k.h.mode()).toBe('lead');
+    expect(k.methods()).not.toContain('commitOn');
+  });
+});

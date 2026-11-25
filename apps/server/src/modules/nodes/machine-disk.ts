@@ -1,6 +1,6 @@
 import { DISK_CLEANED_MAX, DISK_COPIES_MAX, DISK_KEPT_MAX, NODE_DISK_PARTS, type DiskReport } from '@hornhoof/protocol';
 import { latestReport } from './host-load.js';
-import { nodeIdentity, type NodeHub } from './hub.js';
+import { nodeIdentity, type NodeHub, type NodeIdentity } from './hub.js';
 
 const OWN = new Set<string>(NODE_DISK_PARTS);
 
@@ -64,8 +64,11 @@ function copiesOf(disks: DiskReport[]): Pick<DiskReport, 'copies'> {
 
 /* The employees' working folders of each node of a machine that says how big they are, by the plan the node serves (none
    for the machine's own node), the biggest first. */
-export const machineFolders = (hub: NodeHub, nodes: { id: string; subscriptionId: string | null }[]) =>
-  workingFolders(nodes.map(n => ({ plan: n.subscriptionId, disk: hub.loadOf(nodeIdentity(n.id))?.disk })));
+export const machineFolders = (hub: NodeHub, nodes: { id: string; subscriptionId: string | null }[], builtin: NodeIdentity | null = null) =>
+  workingFolders([
+    ...nodes.map(n => ({ plan: n.subscriptionId, disk: hub.loadOf(nodeIdentity(n.id))?.disk })),
+    ...(builtin ? [{ plan: null, disk: hub.loadOf(builtin)?.disk }] : []),
+  ]);
 
 /* The same from what each node said: a node that did not measure its working copies, or says nothing of its disk, has none. */
 export function workingFolders(nodes: { plan: string | null; disk: DiskReport | undefined }[]): { plan: string | null; bytes: number }[] {

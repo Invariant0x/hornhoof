@@ -1,7 +1,5 @@
 ---
 id: mkt-seo-audit
-title: { en: "Search audit", ru: "Поисковый аудит" }
-description: { en: "Checks the company's site for the technical, content and link problems that keep it out of search results.", ru: "Проверяет сайт компании на технические, содержательные и ссылочные проблемы, которые мешают ему в поиске." }
 kind: checklist
 sources: [coreyhaines31/marketingskills, anthropics/knowledge-work-plugins]
 ---

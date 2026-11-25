@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -17,12 +18,20 @@ const FETCH = fileURLToPath(new URL('../hh-fetch.cjs', import.meta.url));
 
 /* A Hornhoof that answers each picture with an id and remembers what it got. It hands out one file of task 12. */
 async function hub(status = 201) {
-  const got: { url: string | undefined; auth: string | undefined; type: string | undefined; length: string | undefined; bytes: Buffer }[] = [];
+  const got: { url: string | undefined; auth: string | undefined; type: string | undefined; length: string | undefined; bytes: Buffer; asked?: string }[] = [];
+  /* A file whose bytes the test changes, answered as the server answers: with its hash, and 304 to one who has it. */
+  const notes = { text: 'first notes' };
   const server = createServer((req, res) => {
     const parts: Buffer[] = [];
     req.on('data', c => parts.push(c));
     req.on('end', () => {
-      got.push({ url: req.url, auth: req.headers.authorization, type: req.headers['content-type'], length: req.headers['content-length'], bytes: Buffer.concat(parts) });
+      got.push({ url: req.url, auth: req.headers.authorization, type: req.headers['content-type'], length: req.headers['content-length'], bytes: Buffer.concat(parts), asked: req.headers['if-none-match'] });
+      if (req.method === 'GET' && req.url === '/api/attachments/file?task=12&file=notes.txt') {
+        const etag = `"${createHash('sha256').update(notes.text).digest('hex')}"`;
+        res.writeHead(req.headers['if-none-match'] === etag ? 304 : 200, { etag, 'x-file-name': 'notes.txt' });
+        res.end(req.headers['if-none-match'] === etag ? undefined : notes.text);
+        return;
+      }
       if (req.method === 'GET') {
         if (req.url === '/api/attachments/file?task=12&file=archive.zip') {
           res.writeHead(200, { 'content-type': 'application/octet-stream', 'x-file-name': 'archive.zip' });
@@ -45,7 +54,7 @@ async function hub(status = 201) {
   });
   await listenIn(server);
   onTestFinished(() => new Promise<void>(r => server.close(() => r())));
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/attachments`, got };
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/attachments`, got, notes };
 }
 
 const run = (script: string) => (args: string[], env: Record<string, string>, cwd?: string) =>
@@ -200,6 +209,21 @@ describe('hh-fetch', () => {
     expect((await fetchFile(['#12', 'build log.txt', join(dir, 'in')], env)).out.trim()).toBe(join(dir, 'in', 'build log.txt'));
     expect((await fetchFile(['12', 'build log.txt', join(dir, 'log.txt')], env)).out.trim()).toBe(join(dir, 'log.txt'));
     expect(readFileSync(join(dir, 'log.txt'), 'utf8')).toBe('all green');
+  });
+
+  it('downloads a file again only when it changed: one already there with the same bytes stays as it is', async () => {
+    const { url, got, notes } = await hub();
+    const dir = mkdtempSync(join(tmpdir(), 'hh-fetch-'));
+    const env = { HH_ATTACH_URL: url, HH_ATTACH_PASS: 't' };
+    expect((await fetchFile(['12', 'notes.txt'], env, dir)).out.trim()).toBe('notes.txt');
+    expect(got.at(-1)!.asked).toBeUndefined();
+    const again = await fetchFile(['12', 'notes.txt'], env, dir);
+    expect([again.code, again.out.trim()]).toEqual([0, 'notes.txt']);
+    expect(got.at(-1)!.asked).toBe(`"${createHash('sha256').update('first notes').digest('hex')}"`);
+    expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe('first notes');
+    notes.text = 'second notes';
+    expect((await fetchFile(['12', 'notes.txt'], env, dir)).out.trim()).toBe('notes.txt');
+    expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe('second notes');
   });
 
   it("says what went wrong: no turn, no task and file, or Hornhoof's refusal", async () => {

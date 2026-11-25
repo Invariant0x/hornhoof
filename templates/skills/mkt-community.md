@@ -1,7 +1,5 @@
 ---
 id: mkt-community
-title: { en: "Community watch", ru: "Работа с сообществом" }
-description: { en: "Tracks what people say about the company and drafts helpful public replies.", ru: "Отслеживает, что люди говорят о компании, и готовит полезные публичные ответы." }
 kind: procedure
 sources: [coreyhaines31/marketingskills, msitarzewski/agency-agents marketing/marketing-developer-community-builder.md]
 ---

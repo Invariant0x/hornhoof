@@ -2,8 +2,6 @@
 id: DEV-ARCH
 department: development
 kind: member
-title: { en: "Architect", ru: "Архитектор" }
-description: { en: "Designs the target structure of new features and changes that reshape the architecture: data models, boundaries and interfaces.", ru: "Проектирует целевую структуру новых функций и изменений, меняющих архитектуру: модели данных, границы и интерфейсы." }
 tier: top
 effort: xhigh
 perProduct: false

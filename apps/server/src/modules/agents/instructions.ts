@@ -9,6 +9,7 @@ import { type Book, companyBook, departmentBook, listNotes } from '../notebook/b
 import { deptName } from '../departments/templates.js';
 import { CORE_SKILLS, HEAD_SKILLS, MEMBER_SKILLS, textHash, type Lang, type Role, type Skill, type Templates } from '../templates/load.js';
 import { worldSkillsForTheme } from '../world/packs/index.js';
+import { saying } from '../../locales/index.js';
 
 /* One piece of an employee's instructions, as the card shows it. */
 export type Part = { kind: 'header' | 'base' | 'assignment' | 'skill' | 'notebook'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
@@ -79,7 +80,7 @@ function basePart(role: Role | undefined, agent: AgentRow): Part | null {
 /* Existing personal base text is an assignment, never a replacement for role identity. */
 function assignmentPart(body: string | undefined): Part {
   return {
-    kind: 'assignment', id: null, title: { en: 'Assignment', ru: 'Назначение' },
+    kind: 'assignment', id: null, title: saying(words => words.assignment),
     text: `<!-- hh:assignment -->\n## Assignment\n\n${body ?? ''}\n<!-- /hh:assignment -->`,
     overridden: body !== undefined, templateChanged: false,
   };

@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
-import { LANGUAGES, type Language, type Messages } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../src/i18n';
 import { collectionText } from '../src/skins/collection';
 import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
 import type { Skin } from '../src/skins/roles';
@@ -68,7 +68,7 @@ export async function prepare(page: Page, inbox: { value: boolean }) {
   await page.route('**/api/improvements', route => route.fulfill({ json: { improvements: [FINDING, SENT, FIXED] } }));
 }
 
-export async function setLook(page: Page, choice: Choice, language: Language) {
+export async function setLook(page: Page, choice: Choice, language: ShippedLanguage) {
   await page.evaluate(({ choice, collection, language }) => {
     localStorage.setItem('hh-skins', collection);
     localStorage.setItem('hh-theme', choice);

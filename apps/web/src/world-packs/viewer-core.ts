@@ -5,12 +5,14 @@
 import { clamp, clampCameraPosition, type CameraState, type ViewportSize } from '../world/camera';
 import { screenToWorld, type MapWorldBounds, type Point2D } from '../world/coords';
 import type { WorldPackManifest } from '../world/manifest';
+import { isLocaleId, matchLocale, type LocaleId } from '@hornhoof/protocol';
 
 /* own: the pack's own art address (the dev server serves public/); relative: world-art/<pack>/ beside the page, as a
    build ships it; none: the build ships no art and nothing is asked for. */
 export type ViewerArtMode = 'own' | 'relative' | 'none';
 
-export type ViewerLang = 'ru' | 'en';
+/* A language of the registry: the viewer has a COPY for each, so a new language is a type error until it has one. */
+export type ViewerLang = LocaleId;
 
 /* The map Ivan accepted. */
 export const DEFAULT_VIEWER_SEED = 'hornhoof';
@@ -135,6 +137,6 @@ export function readViewerQuery(search: string, language: string): { seed: strin
   const params = new URLSearchParams(search);
   const seed = (params.get('seed') ?? '').trim();
   const asked = params.get('lang');
-  const lang: ViewerLang = asked === 'ru' || asked === 'en' ? asked : language.toLowerCase().startsWith('ru') ? 'ru' : 'en';
+  const lang: ViewerLang = isLocaleId(asked) ? asked : matchLocale([language]);
   return { seed: seed && seed.length <= MAX_SEED_LENGTH ? seed : DEFAULT_VIEWER_SEED, lang };
 }

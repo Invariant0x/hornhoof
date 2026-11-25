@@ -4,6 +4,7 @@ import { tasks, testParts, testRuns } from '../../db/schema.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { partsOfNode } from '../nodes/check-slots.js';
 import { alreadyAlerted, busyAgentIds, enqueueProgramAlarm, screenReader } from '../tasks/silent.js';
+import { saying } from '../../locales/index.js';
 
 const sending = new WeakMap<Ctx, Set<string>>();
 
@@ -29,6 +30,6 @@ export async function alertSilentPart(ctx: Ctx, node: NodeIdentity, partId: stri
     const text = `Hornhoof: ${name} on ${row.machine ?? 'a machine'} has given no output or progress within its expected time. ` +
       `Task #${row.task}. Read ${work ? 'work_run' : 'test_run'} ${run.number} for the part's state.`;
     await enqueueProgramAlarm(ctx, to, { caseId, text, task: { id: run.taskId, number: row.task },
-      detail: { en: `${name} is silent`, ru: `Прогон ${run.number}, часть ${part} молчит` } });
+      detail: saying(words => words.notices.runSilent(work, run.number, part)) });
   } finally { pending.delete(caseId); }
 }

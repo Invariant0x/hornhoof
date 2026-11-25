@@ -2,8 +2,6 @@
 id: VID-WRITE
 department: video_production
 kind: member
-title: { en: "Story and script writer", ru: "Сценарист" }
-description: { en: "Develops the story and writes and revises the script with the director.", ru: "Разрабатывает историю, пишет и дорабатывает сценарий с режиссером." }
 tier: standard
 effort: high
 perProduct: false

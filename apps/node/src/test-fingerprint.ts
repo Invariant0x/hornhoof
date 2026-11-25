@@ -38,8 +38,12 @@ const SOURCE_OF_BUILT: Record<string, string[]> = { '.js': ['.ts', '.tsx'], '.js
 /* Statements start a line, so text that reads like one elsewhere, as SQL's from "tasks", is not taken for an import. */
 const STATEMENT = /^[ \t]*(?:import|export)\b[^;'"`]*?\bfrom\s*(['"])([^'"\n]+)\1/gm;
 const BARE_IMPORT = /^[ \t]*import\s*(['"])([^'"\n]+)\1/gm;
-const CALLED = /\b(?:import|require|import\.meta\.resolve|(?:vi|jest)\.(?:mock|doMock|unmock|doUnmock|importActual|importMock|requireActual|requireMock))\s*\(\s*(['"`])([^'"`\n]+)\1/g;
+const CALLED = /\b(?:import|require|import\.meta\.resolve|(?:vi|jest)\.(?:mock|doMock|unmock|doUnmock|importActual|importMock|requireActual|requireMock))\s*\(\s*(['"`])((?:[^'"`\n$]|\$(?!\{))+)\1/g;
 const COMPUTED = /\b(?:import|require|import\.meta\.resolve)\s*\(\s*(?:[^'"`\s)]|`[^`]*\$\{)/;
+/* A template with a hole is no literal to follow: it is a computed import, read by its own pattern below. */
+const COMPUTED_CALLS = new RegExp(COMPUTED.source, 'g');
+/* A computed import whose text starts with a fixed relative folder, as import(`./${id}.js`): it can only load what that folder holds. */
+const FOLDER_TEMPLATE = /^(?:import|require|import\.meta\.resolve)\s*\(\s*`(\.{1,2}\/(?:[^`$]*\/)?)\$\{/;
 const STRING = /(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g;
 const GLOB_IMPORT = /\bimport\.meta\.glob\s*\(\s*\[?\s*(['"`])([^'"`\n]+)\1/g;
 /* A type alone is gone before anything runs, as Vitest's graph knows too. */
@@ -217,9 +221,21 @@ function namedBy(tree: Tree, from: string, literal: string): Named {
 function globImports(tree: Tree, from: string, text: string): string[] {
   return [...text.matchAll(GLOB_IMPORT)].flatMap(([, , literal]) => namedPattern(tree, literal!, posix.join(tree.rootOf(from), literal!)));
 }
+/* What computed imports load: the files of a fixed folder their text starts with. True where one names no folder that holds a file,
+   as that tells nothing about what it loads, so it stays unreadable. */
+function computedImports(tree: Tree, from: string, text: string, many: Set<string>): boolean {
+  let unreadable = false;
+  for (const call of text.matchAll(COMPUTED_CALLS)) {
+    const prefix = FOLDER_TEMPLATE.exec(text.slice(call.index!))?.[1];
+    const held = prefix ? tree.under(posix.join(posix.dirname(from), prefix).replace(/\/$/, '')) : [];
+    for (const path of held) many.add(path);
+    if (!held.length) unreadable = true;
+  }
+  return unreadable;
+}
 function scanCode(tree: Tree, from: string, source: string): Scan {
   const runs = new Set<string>(), many = new Set<string>(), text = source.replace(TYPE_ONLY, '');
-  let opaque = COMPUTED.test(text);
+  let opaque = computedImports(tree, from, text, many);
   for (const pattern of [STATEMENT, BARE_IMPORT, CALLED]) for (const [, , literal] of text.matchAll(pattern)) {
     const found = importedBy(tree, from, literal!);
     if (found) for (const path of found) runs.add(path);

@@ -23,7 +23,9 @@ export function run(name) {
     process.stdout.write(`2.0.0 (fake ${name})\n`);
     process.exit(0);
   }
-  const message = name === 'agy' ? (argv.find(a => a.startsWith('--print=')) ?? '').slice('--print='.length) : '';
+  /* agy's print mode reads its prompt on standard input when no --print flag names one, as the real one does (#2069). */
+  const flag = argv.find(a => a.startsWith('--print='));
+  const message = name !== 'agy' ? '' : flag ? flag.slice('--print='.length) : argv.includes('--output-format') ? readFileSync(0, 'utf8') : '';
   const mode = process.env.FAKE_MODE ?? AGY_ASKS[message.split(' ')[0]] ?? '';
   const log = entry => process.env.FAKE_LOG && appendFileSync(process.env.FAKE_LOG, JSON.stringify(entry) + '\n');
   const env = Object.fromEntries(LOGGED_ENV.filter(k => k in process.env).map(k => [k, process.env[k]]));
@@ -39,6 +41,7 @@ export function run(name) {
   if (kimiMcp && existsSync(kimiMcp)) seen.kimiMcp = JSON.parse(readFileSync(kimiMcp, 'utf8'));
   const agyMcp = join('.agents', 'mcp_config.json');
   if (name === 'agy' && existsSync(agyMcp)) seen.agyMcp = { mode: statSync(agyMcp).mode, json: JSON.parse(readFileSync(agyMcp, 'utf8')) };
+  if (name === 'agy') seen.prompt = message;
   log({ name, argv, cwd: process.cwd(), pid: process.pid, env, ...seen });
   const print = file => process.stdout.write(readFileSync(new URL(`../fixtures/${file}.jsonl`, import.meta.url)));
   const words = argv.join(' ');
@@ -193,6 +196,13 @@ function failedRun(name, print) {
 
 /* agy's print runs that the live terminal tests ask for by their message's first word. */
 const AGY_RUNS = {
+  /* Its --print-timeout cut the turn short: a partial answer, finished_reason print_timeout and exit code 3, as agy's
+     changelog tells. */
+  print_timeout: () => {
+    process.stdout.write(JSON.stringify({ event: 'result', result: { status: 'ERROR', response: 'Half an ans', finished_reason: 'print_timeout' } }) + '\n');
+    process.stderr.write('[agy] print timeout after 1800s\n');
+    process.exitCode = 3;
+  },
   apifail: () => {
     agyToolStep('ACTIVE');
     agyToolStep('ERROR');

@@ -1,7 +1,5 @@
 ---
 id: dev-review-fix
-title: { en: "Repair review findings", ru: "Исправлять замечания ревью" }
-description: { en: "Use when the current Review owner must repair a confirmed defect in its assigned candidate.", ru: "Для текущего владельца Review, которому надо исправить подтвержденный дефект назначенного кандидата." }
 kind: procedure
 sources: []
 ---

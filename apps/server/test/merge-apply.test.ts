@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import type { Ctx } from '../src/app.js';
 import type { Db } from '../src/db/client.js';
 import {
   agentChanges, agentEvents, agents, attachments, companies, computerRuns, departments, jobs, machineAccess, machines, mapReturns, nodes, notebookNotes, people, personAccess, programInstances,
@@ -8,10 +9,12 @@ import {
 } from '../src/db/schema.js';
 import { idOnly, only } from '../src/db/selections.js';
 import { nodeSource, withSource } from '../src/db/sources.js';
-import { MergeRefused, runMerge, type MergeResult } from '../src/modules/merge/apply.js';
+import { MergeRefused, runMerge, type MergeFiles, type MergeResult } from '../src/modules/merge/apply.js';
 import { complete } from '../src/modules/merge/check.js';
+import { pick } from '../src/modules/merge/picks.js';
 import { ownDatabases } from './helpers.js';
 import { asPlan7, twoSides, type Side } from './merge-fixture.js';
+import { looseFiles, sha256Of, stored } from './files-fixture.js';
 
 /* Each test forks its database, which a shared one would not survive. */
 ownDatabases();
@@ -43,14 +46,14 @@ async function stand() {
   const [one, two] = [await task(db, 1, 'One'), await task(db, 2, 'Two')];
   let made = 0;
   /* A merge of this fork into the leader, as the merger would run it. */
-  const merge = async (fork: Fork, over: { kept?: boolean; label?: string; onUnit?: (n: number) => void | Promise<void>; log?: (line: string) => void; clock?: () => number } = {}): Promise<{ id: string; result: MergeResult }> => {
+  const merge = async (fork: Fork, over: { kept?: boolean; label?: string; onUnit?: (n: number) => void | Promise<void>; log?: (line: string) => void; clock?: () => number; files?: MergeFiles } = {}): Promise<{ id: string; result: MergeResult }> => {
     made += 1;
     const kept = over.kept ?? false;
     const label = over.label ?? 'the fork';
     const [row] = await rowsOf<{ id: string }>(db, sql`INSERT INTO net.merges (source, label) VALUES (${kept ? `kept:hornhoof_before_t${made}` : `machine:${made}`}, ${label}) RETURNING id`);
     const source = await fork.source();
     try {
-      return { id: row!.id, result: await runMerge(db, { id: row!.id, label, kept, companyId: acme!.id }, source, { onUnit: over.onUnit, log: over.log ?? (() => undefined), clock: over.clock }) };
+      return { id: row!.id, result: await runMerge(db, { id: row!.id, label, kept, companyId: acme!.id }, source, { onUnit: over.onUnit, log: over.log ?? (() => undefined), clock: over.clock, files: over.files }) };
     } finally {
       await source.close();
     }
@@ -172,14 +175,13 @@ describe('a merge applied', () => {
 
   it("keeps each company's city its own through a merge, and a conflict over one city names that city alone", async () => {
     const s = await stand();
-    /* Another company in the same database, as only a test makes one: a deployment serves one company. */
+    await s.db.insert(worldLayouts).values({ companyId: s.acme.id, packId: 'space', seed: 'acme', layout: { buildings: 1 } });
+    const fork = await s.sides.fork();
+    /* Another company on the leader, as only a test makes one: a deployment serves one company, and a source holds the
+       one it merges alone (#1967). */
     const [other] = await s.db.insert(companies).values({ name: 'Other', singleton: false }).returning();
     const theirs = { buildings: 9, marker: 'the-other-city' };
-    await s.db.insert(worldLayouts).values([
-      { companyId: s.acme.id, packId: 'space', seed: 'acme', layout: { buildings: 1 } },
-      { companyId: other!.id, packId: 'space', seed: 'other', layout: theirs },
-    ]);
-    const fork = await s.sides.fork();
+    await s.db.insert(worldLayouts).values({ companyId: other!.id, packId: 'space', seed: 'other', layout: theirs });
     /* Both sides build on Acme's city, each its own way; only the leader moves the other company's city on. */
     await fork.db.update(worldLayouts).set({ layout: { buildings: 2 } }).where(eq(worldLayouts.companyId, s.acme.id));
     await s.db.update(worldLayouts).set({ layout: { buildings: 3 } }).where(eq(worldLayouts.companyId, s.acme.id));
@@ -195,6 +197,84 @@ describe('a merge applied', () => {
     expect([conflicts[0]!.here?.layout, conflicts[0]!.there?.layout]).toEqual([{ buildings: 3 }, { buildings: 2 }]);
     expect(JSON.stringify(conflicts)).not.toContain(theirs.marker);
     expect(JSON.stringify(conflicts)).not.toContain(other!.id);
+  });
+
+  it('refuses a source that holds more than one company, whole, by its journal and by comparing, with nothing written', async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    /* The copy holds a second company beside the one merged, after it: no deployment makes one. */
+    await fork.db.insert(companies).values({ name: 'Other', singleton: false });
+    await fork.db.update(tasks).set({ title: 'From a copy of two companies' }).where(eq(tasks.id, s.one.id));
+    for (const kept of [false, true]) await expect(s.merge(fork, { kept })).rejects.toThrow(new MergeRefused('This database is of another company.'));
+    expect(await s.titleOf(s.db, s.one.id)).toBe('One');
+    expect(await s.db.select(only(companies, 'name')).from(companies)).toEqual([{ name: 'Acme' }]);
+    expect(await s.conflicts()).toEqual([]);
+  });
+
+  it("refuses a source that brings a row of another company, or would write over one of the leader's other companies", async () => {
+    const s = await stand();
+    await s.db.insert(worldLayouts).values({ companyId: s.acme.id, packId: 'space', seed: 'acme', layout: { buildings: 1 } });
+    const fork = await s.sides.fork();
+    /* Another company the leader holds, which the copy never had: as only a test makes one. */
+    const [other] = await s.db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+    const marker = 'a-city-of-the-other-company';
+    /* The copy says it holds Acme alone, and carries a city of the other company all the same, as a crafted database
+       could: its keys are not checked while the row goes in. */
+    await fork.client.exec('SET session_replication_role = replica');
+    await fork.db.insert(worldLayouts).values({ companyId: other!.id, packId: 'space', seed: 'other', layout: { marker } });
+    await fork.client.exec('RESET session_replication_role');
+    await expect(s.merge(fork, { kept: true })).rejects.toThrow(new MergeRefused('This database is of another company.'));
+    expect(await s.db.select(only(worldLayouts, 'companyId')).from(worldLayouts)).toEqual([{ companyId: s.acme.id }]);
+    expect(await s.conflicts()).toEqual([]);
+
+    /* A row of Acme there whose key names a row of the other company here: the leader's row is not written over. */
+    const second = await s.sides.fork();
+    await second.db.update(tasks).set({ title: 'Written over' }).where(eq(tasks.id, s.two.id));
+    await s.db.execute(sql`SET session_replication_role = replica`);
+    await s.db.update(tasks).set({ companyId: other!.id, title: marker }).where(eq(tasks.id, s.two.id));
+    await s.db.execute(sql`RESET session_replication_role`);
+    await expect(s.merge(second)).rejects.toThrow(new MergeRefused('This database is of another company.'));
+    expect(await s.titleOf(s.db, s.two.id)).toBe(marker);
+    expect(await s.conflicts()).toEqual([]);
+  });
+
+  it('never writes a city the app would not save, from a copy or by a pick, and lists it for the orchestrator', async () => {
+    const s = await stand();
+    const valid = { buildings: 3 };
+    await s.db.insert(worldLayouts).values({ companyId: s.acme.id, packId: 'space', seed: 'acme', layout: valid });
+    const city = async () => (await s.db.select({ packId: worldLayouts.packId, seed: worldLayouts.seed, layout: worldLayouts.layout }).from(worldLayouts))[0];
+    /* Each copy changes the city in one way PUT /api/world/layout refuses: a layout that is no object, no pack, a seed
+       over its length, and an order to move a building with no task. */
+    const broken = [
+      sql`UPDATE world_layouts SET layout = '"not a city"'::jsonb`,
+      sql`UPDATE world_layouts SET pack_id = '  '`,
+      sql`UPDATE world_layouts SET seed = ${'s'.repeat(121)}`,
+      sql`UPDATE world_layouts SET relocations = '[{"id":"r1","buildingId":"house-ana"}]'::jsonb`,
+    ];
+    for (const change of broken) {
+      const fork = await s.sides.fork();
+      await fork.db.execute(change);
+      const { id, result } = await s.merge(fork);
+      expect(await city()).toEqual({ packId: 'space', seed: 'acme', layout: valid });
+      expect(result.counts.byTable.world_layouts).toEqual({ added: 0, changed: 0, deleted: 0, conflicts: 1 });
+      const [conflict] = await s.conflicts(id);
+      expect(conflict).toMatchObject({ tbl: 'world_layouts', key: { company_id: s.acme.id }, op: 'update', kind: 'refused', topic: 'work' });
+      expect(conflict!.why).toContain('Its city is not one the app saves');
+      /* Taking the copy's side writes nothing either. */
+      const ctx = { db: s.db, bus: { publish: () => undefined }, applyParked: async () => undefined, log: { warn: () => undefined } } as unknown as Ctx;
+      const picked = await pick(ctx, { kind: 'orchestrator', agentId: s.orchestrator.id }, { ids: [conflict!.id] }, 'there');
+      expect(picked).toMatchObject({ settled: 0, refused: [{ id: conflict!.id, why: expect.stringContaining('Its city is not one the app saves') }] });
+      expect(await city()).toEqual({ packId: 'space', seed: 'acme', layout: valid });
+      await s.db.execute(sql`UPDATE net.merge_conflicts SET picked = 'here', picked_at = now() WHERE id = ${conflict!.id}`);
+    }
+    /* Nor is a city the leader lacks brought over when it is not one the app saves. */
+    await s.db.delete(worldLayouts);
+    const fork = await s.sides.fork();
+    await fork.db.insert(worldLayouts).values({ companyId: s.acme.id, packId: 'space', seed: 'acme', layout: valid });
+    await fork.db.execute(sql`UPDATE world_layouts SET layout = '[1, 2, 3]'::jsonb`);
+    const { id } = await s.merge(fork);
+    expect(await city()).toBeUndefined();
+    expect(await s.conflicts(id)).toMatchObject([{ tbl: 'world_layouts', op: 'insert', kind: 'refused' }]);
   });
 
   it('keeps a value the leader changed where its journal lost it', async () => {
@@ -492,9 +572,9 @@ describe('a merge applied', () => {
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
   });
 
-  it('reads a file by its hash, and brings its bytes only for a row it writes', async () => {
+  it('brings a file as its hash, which names its bytes in the store', async () => {
     const s = await stand();
-    const file = (side: Db, bytes: string) => side.insert(attachments).values({ ...s.on, agentId: s.ana.id, mediaType: 'text/plain', bytes: Buffer.from(bytes), size: bytes.length, taskId: s.one.id }).returning().then(rows => rows[0]!);
+    const file = async (side: Db, bytes: string) => (await side.insert(attachments).values({ ...s.on, agentId: s.ana.id, mediaType: 'text/plain', sha256: await stored(side, bytes), size: bytes.length, taskId: s.one.id }).returning())[0]!;
     const same = await file(s.db, 'the same on both');
     const fork = await s.sides.fork();
     const added = await file(fork.db, 'only there');
@@ -511,13 +591,10 @@ describe('a merge applied', () => {
     })();
     await source.close();
     const [kept] = await s.db.select().from(attachments).where(eq(attachments.id, added.id));
-    expect(Buffer.from(kept!.bytes).toString()).toBe('only there');
-    expect(Buffer.from((await s.db.select().from(attachments).where(eq(attachments.id, same.id)))[0]!.bytes).toString()).toBe('the same on both');
-    /* Every page of the table comes with a hash in place of each file; the one file that is written is asked for by
-       its key. */
-    const reads = asked.filter(text => text.includes('public."attachments"'));
-    expect(reads.filter(text => !text.includes('sha256')).length).toBe(1);
-    expect(reads.find(text => !text.includes('sha256'))).toContain('jsonb_to_recordset');
+    expect(kept!.sha256).toBe(sha256Of('only there'));
+    expect((await s.db.select().from(attachments).where(eq(attachments.id, same.id)))[0]!.sha256).toBe(sha256Of('the same on both'));
+    /* Its rows name their files by hash, and no read of the source asks for a file's bytes. */
+    expect(asked.some(text => text.includes('public."attachments"'))).toBe(true);
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
   });
 
@@ -612,6 +689,23 @@ describe('a merge applied', () => {
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
   });
 
+  it("brings a file of a side that still holds its bytes into this side's store, and names it by their hash", async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    /* The fork's database had not moved its files into the store yet: it keeps their bytes in the old column. */
+    await fork.db.execute(sql`ALTER TABLE attachments ADD COLUMN bytes bytea`);
+    const bytes = Buffer.from('the old bytes of a file');
+    const [old] = await fork.db.insert(attachments).values({ ...s.on, agentId: s.ana.id, mediaType: 'application/octet-stream', size: bytes.length, taskId: s.one.id }).returning();
+    await fork.db.execute(sql`UPDATE attachments SET bytes = ${bytes} WHERE id = ${old!.id}`);
+    const files = looseFiles();
+    const { id } = await s.merge(fork, { files });
+    const [kept] = await s.db.select().from(attachments).where(eq(attachments.id, old!.id));
+    expect(kept!.sha256).toBe(sha256Of(bytes));
+    expect((await files.bytes(s.db, kept!.sha256!)).equals(bytes)).toBe(true);
+    expect(await s.kept(id)).toMatchObject([{ tbl: 'attachments', how: 'rewritten', cols: ['sha256'], was: { sha256: null } }]);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
   it('leaves the programs a server watched behind, and brings back a picture of one without it', async () => {
     const s = await stand();
     const [machine] = await s.db.insert(machines).values({ ...s.on, personId: s.owner.id, machineKey: 'm1', hostname: 'marat-mac' }).returning();
@@ -622,12 +716,12 @@ describe('a merge applied', () => {
     const [hung] = await fork.db.insert(programOperatorCases).values({
       ...s.on, agentId: s.ana.id, jobId: job!.id, nodeId: node!.id, instance: program!.id, reason: 'recorded_no_activity', evidenceKey: 'k1', capability: 'c'.repeat(32), deadlineAt: new Date(Date.now() + 3_600_000),
     }).returning();
-    const [picture] = await fork.db.insert(attachments).values({ ...s.on, agentId: s.ana.id, mediaType: 'image/png', bytes: Buffer.from('screen'), size: 6, operatorCaseId: hung!.id }).returning();
+    const [picture] = await fork.db.insert(attachments).values({ ...s.on, agentId: s.ana.id, mediaType: 'image/png', sha256: await stored(fork.db, 'screen'), size: 6, operatorCaseId: hung!.id }).returning();
     const { id, result } = await s.merge(fork);
     expect(await s.db.select().from(programInstances)).toEqual([]);
     expect(await s.db.select().from(programOperatorCases)).toEqual([]);
     const [kept] = await s.db.select().from(attachments).where(eq(attachments.id, picture!.id));
-    expect([kept!.operatorCaseId, Buffer.from(kept!.bytes).toString()]).toEqual([null, 'screen']);
+    expect([kept!.operatorCaseId, kept!.sha256]).toEqual([null, sha256Of('screen')]);
     expect(await s.kept(id)).toMatchObject([{ tbl: 'attachments', how: 'rewritten', cols: ['operator_case_id'], was: { operator_case_id: hung!.id } }]);
     expect([result.counts.added, await s.conflicts(id)]).toEqual([2, []]);
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });

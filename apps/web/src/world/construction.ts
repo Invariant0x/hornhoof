@@ -3,7 +3,7 @@
    demolition and stage-by-stage building relocation state machine.
    Contains zero theme-specific words. */
 
-import type { CityBuilding } from './city-layout';
+import type { CityBuilding, CityState } from './city-layout';
 import {
   resolveConstructionStages,
   type BuildingLoopKind,
@@ -52,15 +52,6 @@ export type StatueAlleyItem = Readonly<{
   span: 1 | 2 | 3;
 }>;
 
-/* Loops whose engine stand-in is never drawn over a building drawn from its picture: until a loop's own art arrives,
-   a painted building shows nothing for it (Ivan's word, #1947 item 11). The awning comes with the art as a layer. */
-const NO_STAND_IN_OVER_ART: ReadonlySet<BuildingLoopKind> = new Set(['awning', 'dust']);
-
-/* Whether the engine draws its stand-in for a loop with no art, over a painted building or a placeholder one. */
-export function drawsLoopStandIn(kind: BuildingLoopKind, painted: boolean): boolean {
-  return !painted || !NO_STAND_IN_OVER_ART.has(kind);
-}
-
 export type BuildingLoopSpec = Readonly<{
   kind: BuildingLoopKind;
   intensity: number;
@@ -108,6 +99,15 @@ export function resolveStageSpecForBuilding(
     const idx = Math.max(0, Math.min(stages.length - 1, rawStage - 1));
     return stages[idx]!;
   }
+  /* A job under way walks every stage before the finished one, by how far it is between its first and last stage,
+     whatever the building's own number of stages (#1947 item 7): a 3-step workshop shows all of the pack's construction
+     pictures in order, not 2 of them. */
+  if (state?.phase === 'building') {
+    const finishedAt = stages.findIndex(s => s.id === 'complete' || s.id === 'upgraded');
+    const before = finishedAt > 0 ? finishedAt : stages.length;
+    const along = Math.max(0, Math.min(1, (rawStage - 1 + state.stageProgress) / Math.max(1, maxStage - 1)));
+    return stages[Math.min(before - 1, Math.floor(along * before))]!;
+  }
   const ratio = Math.max(0, Math.min(1, (rawStage - 1) / Math.max(1, maxStage - 1)));
   const idx = Math.max(0, Math.min(stages.length - 1, Math.round(ratio * (stages.length - 1))));
   return stages[idx]!;
@@ -151,13 +151,31 @@ export function computeStatueAlleyProgress(
 
 type AddLoop = (kind: BuildingLoopKind, intensity?: number) => void;
 
+/* The smallest lot side that takes a crane. */
+const CRANE_MIN_SPAN = 3;
+
+/* The one lift over a building site (art order, 24.11): a lot of 3x3 and up gets the crane, whose sheet draws its own
+   block, and a smaller lot the hoisted block alone; never both, so one block hangs over a site. */
+function addLift(span: number, add: AddLoop, intensity = 1): void {
+  add(span >= CRANE_MIN_SPAN ? 'crane' : 'hoist_block', intensity);
+}
+
+function isLift(kind: BuildingLoopKind): boolean {
+  return kind === 'crane' || kind === 'hoist_block';
+}
+
+/* A site's lot side, from its job when it has one. */
+function siteSpan(building: CityBuilding, state: BuildingConstructionState | null): number {
+  return state ? Math.min(state.spanCol, state.spanRow) : Math.min(building.spanCol, building.spanRow);
+}
+
 /* Whether the shared building kit (crane, hoist) goes over this kind: not over kinds whose stage pictures carry their
    own scaffolds and ramps (WorldArtCatalog.ownConstruction). */
 function laysKit(pack: WorldPackManifest, kind: CityBuilding['kind']): boolean {
   return !(pack.art?.ownConstruction ?? []).includes(kind);
 }
 
-/* Goal monuments: dust, and cranes and hoists where the kit is laid, while growing; golden capstone celebration at 100%. */
+/* Goal monuments: dust, and the lift where the kit is laid, while growing; golden capstone celebration at 100%. */
 function monumentLoops(building: CityBuilding, state: BuildingConstructionState | null, kit: boolean, add: AddLoop): void {
   const reached = state ? state.phase === 'complete' && state.currentStage >= state.maxStage : Boolean(building.reached);
   if (reached) {
@@ -166,10 +184,7 @@ function monumentLoops(building: CityBuilding, state: BuildingConstructionState 
   }
   const stage = state ? state.currentStage : building.stage;
   add('dust', 1.0);
-  if (kit && stage >= 2) {
-    add('crane', 1.0);
-    add('hoist_block', 1.0);
-  }
+  if (kit && stage >= 2) addLift(siteSpan(building, state), add, 1.0);
 }
 
 /* A statue's stage, its last stage and whether it is finished, from its job or, without one, from the building. */
@@ -178,7 +193,7 @@ function statueProgress(building: CityBuilding, state: BuildingConstructionState
   return { stage: building.stage, maxS: building.maxStage, finished: Boolean(building.reached) || building.stage >= building.maxStage };
 }
 
-/* 20-stage statues: dust, and cranes and hoists where the kit is laid, while carving; celebration shimmer when finished. */
+/* 20-stage statues: dust, and the lift where the kit is laid, while carving; celebration shimmer when finished. */
 function statueLoops(building: CityBuilding, state: BuildingConstructionState | null, kit: boolean, add: AddLoop): void {
   const { stage, maxS, finished } = statueProgress(building, state);
   if (finished) {
@@ -186,10 +201,7 @@ function statueLoops(building: CityBuilding, state: BuildingConstructionState | 
     return;
   }
   add('dust', 0.85);
-  if (kit && stage >= 4 && stage <= maxS - 2) {
-    add('crane', 0.85);
-    add('hoist_block', 0.85);
-  }
+  if (kit && stage >= 4 && stage <= maxS - 2) addLift(siteSpan(building, state), add, 0.85);
 }
 
 /* Returns the active Stage 6 animation loops layered over a building for its kind and stage. */
@@ -213,7 +225,7 @@ export function buildingLoopsFor(
   /* Reverse-order demolition emits active rubble dust and dismantling activity. */
   if (state && state.phase === 'demolishing') {
     add('dust', 1.25);
-    if (state.currentStage >= 4) add('crane', 0.9);
+    if (state.currentStage >= 4) addLift(siteSpan(building, state), add, 0.9);
     if (state.currentStage >= 3) add('smoke', 0.65);
     return loops;
   }
@@ -236,11 +248,12 @@ export function buildingLoopsFor(
     return loops;
   }
 
-  /* Active construction job uses pack-declared stage loops directly. */
+  /* Active construction job uses pack-declared stage loops directly; a stage's crane or hoist is the site's one lift. */
   if (state && state.phase === 'building') {
     const spec = resolveStageSpecForBuilding(building, state, pack);
     for (const k of spec.defaultLoops) {
-      add(k, 1.0);
+      if (isLift(k)) addLift(siteSpan(building, state), add, 1.0);
+      else add(k, 1.0);
     }
     return loops;
   }
@@ -401,6 +414,64 @@ export function workSlotsForBuilding(
   }
 
   return slots;
+}
+
+/* Where a resident lays what it brings to a building, and stands while it works there (#2001): on the building's own lot,
+   a tenth of a tile inside one of its two front edges (the south-east and south-west faces on screen, the ones the
+   camera sees), on a lot tile with a road beside it, so the walk leaves that road for one short step and ends at the
+   wall's foot. Never a road tile, never behind the building. The building's work slots choose the spots: each takes
+   the front edge spot nearest it (the ramp and the sled on one side, a scaffold on another). A building with no slots,
+   or none near a road, offers every front edge spot with a road beside it. These are data only: nothing here draws a
+   worker, so the residents keep their spots whatever draws the slots. */
+export type DeliverySpot = Readonly<{
+  col: number;
+  row: number;
+  /* The road tile beside the spot, where the walk leaves the road. */
+  approach: Readonly<{ col: number; row: number }>;
+  /* One tile step from the spot into the building: the way a resident there faces. */
+  inward: Readonly<{ dc: number; dr: number }>;
+}>;
+
+/* How far inside its lot's edge a spot lies, in tiles: the lot's tile, at the foot of the wall. */
+const SPOT_INSET = 0.1;
+
+export function deliverySpotsForBuilding(
+  building: CityBuilding,
+  state: BuildingConstructionState | null,
+  pack: WorldPackManifest,
+  city: Pick<CityState, 'roads' | 'footprintOccupant'>,
+): DeliverySpot[] {
+  const c0 = state ? state.col : building.col;
+  const r0 = state ? state.row : building.row;
+  const sc = state ? state.spanCol : building.spanCol;
+  const sr = state ? state.spanRow : building.spanRow;
+  const onLot = (col: number, row: number): boolean => city.footprintOccupant.get(`${col},${row}`) === building.id;
+  const edge: DeliverySpot[] = [];
+  /* The face at the largest column, south-east on screen, then the one at the largest row, south-west. */
+  for (let r = r0; r < r0 + sr; r++) {
+    if (onLot(c0 + sc - 1, r) && city.roads.has(`${c0 + sc},${r}`)) {
+      edge.push({ col: c0 + sc - 0.5 - SPOT_INSET, row: r, approach: { col: c0 + sc, row: r }, inward: { dc: -1, dr: 0 } });
+    }
+  }
+  for (let c = c0; c < c0 + sc; c++) {
+    if (onLot(c, r0 + sr - 1) && city.roads.has(`${c},${r0 + sr}`)) {
+      edge.push({ col: c, row: r0 + sr - 0.5 - SPOT_INSET, approach: { col: c, row: r0 + sr }, inward: { dc: 0, dr: -1 } });
+    }
+  }
+  const chosen: DeliverySpot[] = [];
+  for (const slot of workSlotsForBuilding(building, state, pack, city.footprintOccupant)) {
+    let best: DeliverySpot | null = null;
+    let bestD = Infinity;
+    for (const spot of edge) {
+      const d = Math.hypot(spot.col - slot.col, spot.row - slot.row);
+      if (d < bestD) {
+        bestD = d;
+        best = spot;
+      }
+    }
+    if (best && !chosen.includes(best)) chosen.push(best);
+  }
+  return chosen.length > 0 ? chosen : edge;
 }
 
 export function createConstructionSimulation(pack: WorldPackManifest): ConstructionSimulation {
