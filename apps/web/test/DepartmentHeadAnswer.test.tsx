@@ -327,7 +327,7 @@ describe('department owner answering head on a large company', () => {
     }
   });
 
-  it('shows the retry card instead of crashing #root when /api/me returns a cut-off or partial 200 response', async () => {
+  it('says the notice of the service road instead of crashing #root when /api/me returns a cut-off or partial 200 response', async () => {
     mockApi({
       'GET /api/setup': [200, { needed: false }],
       'GET /api/me': [200, { person: { id: 'p-leo' } }],
@@ -339,7 +339,10 @@ describe('department owner answering head on a large company', () => {
       </LanguageProvider>,
     );
 
-    expect(await screen.findByRole('heading', { name: 'Hornhoof is not responding' }, { timeout: 1000 })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Hornhoof is not responding' }, { timeout: 1000 })).toBeInTheDocument();
+    /* No page of its own and nothing to press but the window's close. */
+    expect(screen.queryByRole('heading', { name: 'Hornhoof is not responding' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
     expect(container.childElementCount).toBeGreaterThan(0);
   });
 

@@ -4,6 +4,7 @@ import { decodeViewChallenge, decodeViewSignature, encodeViewChallenge, type Bin
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
+import { service } from '../src/service-state';
 import * as testTerminal from '../src/ui/AgentTerminal';
 import type { EventView, OrchestratorState } from '../src/types';
 import { ME, mockApi, ORG } from './api-mock';
@@ -384,6 +385,18 @@ describe("an agent's live terminal in its window", () => {
     expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
     ws.program(true);
     await waitFor(() => expect(terminal.queryByRole('status')).not.toBeInTheDocument());
+  });
+
+  it('says the state of the service road in place of its own words while one stands, and its own words again when it ends', async () => {
+    const { container } = open();
+    await socket();
+    const terminal = within(container.querySelector<HTMLElement>('.t-term')!);
+    expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
+    act(() => service.notify('t', 'A state of the service'));
+    expect(container.querySelector('.t-load .svc-loader')).toHaveTextContent('A state of the service');
+    expect(terminal.queryByText('Opening the Claude terminal…')).not.toBeInTheDocument();
+    act(() => service.clear('t'));
+    expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
   });
 
   it('shows what a program that sleeps printed, and says it sleeps until the next task, with no loader over it', async () => {

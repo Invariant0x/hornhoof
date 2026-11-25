@@ -776,11 +776,22 @@ function useNotesFoot(label: string, notes: WindowNote[], onNotes?: (notes: Wind
   return onNotes ? null : <WindowFoot label={label} notes={notes} />;
 }
 
+/* What stands where the terminal is not open yet: the program's own words, or, while a service state stands, that state in
+   place, the logo and the line of the road. */
+function TerminalOpening({ program }: { program: string }) {
+  const t = useT();
+  if (useServiceView() !== null) return <div className="t-load"><ServiceLoader /></div>;
+  return (
+    <div className="t-load" role="status">
+      <span className="spinner" aria-hidden="true" />
+      <span>{t.window.opening(program)}</span>
+    </div>
+  );
+}
+
 /* A live agent terminal or a proof-only standalone test view, both using the same renderer and local history. */
 export function AgentTerminal({ path, program, onGone, watching = false, testSession, onNotes }: Props) {
   const t = useT();
-  /* While a service state stands, the terminal that is not open yet says that in place, not words of its own. */
-  const serviceSays = useServiceView() !== null;
   const box = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const sendPicture = useRef<Send>(() => {});
@@ -866,12 +877,7 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
         <div className="t-xterm" ref={box} />
         <CopyMenu menu={menu} termRef={termRef} onClose={() => setMenu(null)} label={t.common.copy} pasteLabel={t.common.paste} />
         {dragging && <div className="t-drop" role="status">{t.window.dropPictures}</div>}
-        {!up && (serviceSays ? <div className="t-load"><ServiceLoader /></div> : (
-          <div className="t-load" role="status">
-            <span className="spinner" aria-hidden="true" />
-            <span>{t.window.opening(program)}</span>
-          </div>
-        ))}
+        {!up && <TerminalOpening program={program} />}
       </div>
       {foot}
     </>
