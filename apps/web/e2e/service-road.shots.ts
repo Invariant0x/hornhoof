@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test, type Page } from '@playwright/test';
+import { test, type Page, type Route } from '@playwright/test';
 import { BUILTIN_SKINS } from '../src/skins/registry';
 import type { UpdatesView } from '../src/types';
 import { serveApi } from './api';
@@ -29,19 +29,19 @@ const RUNNING: UpdatesView = {
   updater: { present: true, status: { id: 'u1', version: '0.45.0', commit: 'b'.repeat(40), state: 'running', step: 'install', log: '', at: '2026-11-25T02:05:00Z' }, waiting: null, calledOff: null },
 };
 
-/* The server as the state holds it: refused for any look, or installing an update whose progress its panel reads. */
+/* What the server answers to any look while each state holds it: no answer at all, or the refusal of an update. */
+const ANSWERS: Record<State | 'up', (route: Route) => Promise<void>> = {
+  up: route => route.fallback(),
+  lost: route => route.abort('connectionrefused'),
+  updating: route => route.fulfill({ status: 503, json: MAINTENANCE, headers: { 'retry-after': '10' } }),
+};
+
+/* The server as the state holds it. An update that holds it still tells its panel how far it is, so that answer comes first. */
 async function serveState(page: Page) {
   const server = { state: null as State | null };
   await serveApi(page);
-  await page.route('**/api/**', async route => {
-    const path = new URL(route.request().url()).pathname;
-    if (server.state === 'lost') return route.abort('connectionrefused');
-    if (server.state === 'updating') {
-      if (path === '/api/updates') return route.fulfill({ json: RUNNING });
-      return route.fulfill({ status: 503, json: MAINTENANCE, headers: { 'retry-after': '10' } });
-    }
-    return route.fallback();
-  });
+  await page.route('**/api/**', route => ANSWERS[server.state ?? 'up'](route));
+  await page.route('**/api/updates', route => (server.state === 'updating' ? route.fulfill({ json: RUNNING }) : route.fallback()));
   return server;
 }
 
