@@ -508,3 +508,47 @@ describe('the lease of a machine as its keeper starts', () => {
     expect(lines).toEqual([]);
   });
 });
+
+describe('the setting a session commits under, as the keeper asks for it', () => {
+  /* A session that keeps the statements it was asked, answering each with the rows its script has. */
+  const scripted = (rows: Record<string, unknown>[] = []) => {
+    const asked: string[] = [];
+    let closed = 0;
+    return {
+      asked,
+      closed: () => closed,
+      query: async <R>(text: string) => {
+        asked.push(text);
+        return { rows: rows as R[] };
+      },
+      close: async () => void closed++,
+    };
+  };
+
+  it('asks a session of no setting of its own, which it closes after each look, and not its own', async () => {
+    const own = scripted();
+    const plain = scripted([{ setting: 'local', source: 'configuration file' }]);
+    const lease = leaseStore(own, { machineId: 'machine-a', plain });
+    expect(await lease.commitSetting()).toEqual({ setting: 'local', source: 'configuration file' });
+    expect(await lease.commitSetting()).toEqual({ setting: 'local', source: 'configuration file' });
+    expect([own.asked, plain.asked.length, plain.closed()]).toEqual([[], 2, 2]);
+  });
+
+  it('closes that session when the look fails', async () => {
+    const plain = { ...scripted(), query: () => Promise.reject(new Error('refused')), closed: 0, close: async () => void (plain.closed += 1) };
+    const lease = leaseStore(scripted(), { machineId: 'machine-a', plain });
+    await expect(lease.commitSetting()).rejects.toThrow('refused');
+    expect(plain.closed).toBe(1);
+  });
+
+  it('asks the keeper\'s own session when it has no other, as a test database has', async () => {
+    const own = scripted([{ setting: 'on', source: 'default' }]);
+    expect(await leaseStore(own, { machineId: 'machine-a' }).commitSetting()).toEqual({ setting: 'on', source: 'default' });
+  });
+
+  it('puts it on in the server\'s file, and reloads', async () => {
+    const own = scripted();
+    await leaseStore(own, { machineId: 'machine-a', plain: scripted() }).commitOn();
+    expect(own.asked).toEqual([`ALTER SYSTEM SET synchronous_commit = 'on'`, 'SELECT pg_reload_conf()']);
+  });
+});

@@ -218,10 +218,13 @@ export class LedSaver {
     return false;
   }
 
+  /* Asked the first time at once, and again once LED_RETRY_MS passed with no request standing and no dump or line of its
+     own there: a request the updater took and left with no trace (as on a full disk, where not even its failure could be
+     written), or a dump it cleared before it was sealed, would else leave this save waiting for an answer for ever. */
   private requestDumpIfDue(led: LedState): false {
     const request = join(this.opts.controlDir, DUMP_FILE);
     const asked = led.asked === null ? null : Date.parse(led.asked);
-    const due = asked === null || (led.failed !== null && this.now().getTime() - asked >= LED_RETRY_MS);
+    const due = asked === null || this.now().getTime() - asked >= LED_RETRY_MS;
     if (due && !existsSync(request)) {
       writePrivately(request, JSON.stringify({ id: led.id, database: DATABASE, reason: 'fork' }));
       this.keep({ ...led, asked: this.now().toISOString(), failed: asked === null ? null : led.failed });
