@@ -1,6 +1,6 @@
 {
-  "id": "65439397-8557-4046-8f8a-0d5b72a6edce",
-  "prevId": "f87c021c-57fc-4ab5-a45a-d0c2df4ff675",
+  "id": "02ee6e81-0869-450a-aceb-807baa52b344",
+  "prevId": "782fb9c5-ad0e-44ec-8fa9-9ecadad17f2e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1944,11 +1944,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "sha256": {
-          "name": "sha256",
-          "type": "text",
+        "bytes": {
+          "name": "bytes",
+          "type": "bytea",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "size": {
           "name": "size",
@@ -2137,12 +2137,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "attachments_sha256": {
-          "name": "attachments_sha256",
-          "value": "\"attachments\".\"sha256\" ~ '^[0-9a-f]{64}$'"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.authority": {
@@ -3356,6 +3351,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "slot_cap": {
+          "name": "slot_cap",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -3432,6 +3433,10 @@
         "departments_repo_token_revision": {
           "name": "departments_repo_token_revision",
           "value": "\"departments\".\"repo_token_revision\" > 0"
+        },
+        "departments_slot_cap": {
+          "name": "departments_slot_cap",
+          "value": "\"departments\".\"slot_cap\" is null or \"departments\".\"slot_cap\" >= 1"
         }
       },
       "isRLSEnabled": false
@@ -12398,6 +12403,24 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "asked_by_person_id": {
+          "name": "asked_by_person_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subtask_reason": {
+          "name": "subtask_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "queued_at": {
+          "name": "queued_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -12548,6 +12571,42 @@
           ],
           "isUnique": false,
           "where": "\"tasks\".\"external_wait\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tasks_asked_by": {
+          "name": "tasks_asked_by",
+          "columns": [
+            {
+              "expression": "asked_by_person_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tasks_queued": {
+          "name": "tasks_queued",
+          "columns": [
+            {
+              "expression": "department_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "queued_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -12722,6 +12781,19 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "tasks_asked_by_person_id_people_id_fk": {
+          "name": "tasks_asked_by_person_id_people_id_fk",
+          "tableFrom": "tasks",
+          "tableTo": "people",
+          "columnsFrom": [
+            "asked_by_person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -12764,6 +12836,10 @@
         "tasks_risk_class": {
           "name": "tasks_risk_class",
           "value": "\"tasks\".\"risk_class\" IS NULL OR \"tasks\".\"risk_class\" IN ('money', 'access', 'security', 'data', 'none')"
+        },
+        "tasks_subtask_reason_known": {
+          "name": "tasks_subtask_reason_known",
+          "value": "\"tasks\".\"subtask_reason\" IS NULL OR \"tasks\".\"subtask_reason\" IN ('independent_result', 'other_owner', 'parallel_block')"
         }
       },
       "isRLSEnabled": false

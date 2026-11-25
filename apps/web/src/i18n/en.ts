@@ -1202,6 +1202,16 @@ export const en = {
       making: (percent: number) => `Copy: being made, ${percent}%`,
       remaking: (percent: number) => `Copy: being made again, ${percent}%`,
       saving: 'Copy: saving what it did while it led',
+      savingDump: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (reading the database, since ${since})` : 'Copy: saving what it did while it led (reading the database)',
+      savingSeal: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (encrypting the backup, since ${since})` : 'Copy: saving what it did while it led (encrypting the backup)',
+      savingServer: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (waiting for the company server, since ${since})` : 'Copy: saving what it did while it led (waiting for the company server)',
+      savingSend: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (sending the backup to the company server, since ${since})` : 'Copy: saving what it did while it led (sending the backup to the company server)',
+      savingRetry: (since: string | null) =>
+        since ? `Copy: saving what it did while it led (retrying after an error, since ${since})` : 'Copy: saving what it did while it led (retrying after an error)',
       ready: 'Copy: up to date',
       behind: (minutes: number) => `Copy: ${minutes} min behind`,
       catchingUp: 'Copy: catching up',
@@ -1209,6 +1219,8 @@ export const en = {
       stopped: 'Copy: stopped',
       stoppedDiskFull: 'Copy: stopped: disk full',
       stoppedSetup: "Copy: stopped: the company's settings cannot be written here",
+      stoppedGaveUp: (attempts: number, since: string | null) =>
+        `Copy: given up after ${attempts} failed attempts in a row${since ? ` (${since})` : ''}. Nothing more is copied to this machine until it is asked for.`,
       left: (date: string) => `Stopped holding the company's data on ${date}. If it may be in other hands, change the company secret and the API keys.`,
       one: (leader: string, copy: string) => `${leader} leads. ${copy} keeps a copy and takes over if ${leader} stops.`,
       many: (leader: string, copies: string, next: string) => `${leader} leads. ${copies} keep copies; ${next} takes over if ${leader} stops.`,
@@ -2022,6 +2034,8 @@ export const en = {
       showOutside: 'Outside releases',
       preparing: (n: number, base: string | null) => (base ? `Getting ready: turn ${n}, the release after ${base}` : `Getting ready: turn ${n}, the first release`),
       nextWhy: 'What goes into the next release. What is unfinished moves into it by itself.',
+      queueHeading: (ahead: number) => (ahead === 1 ? 'Waiting for the next turn' : ahead === 2 ? 'Waiting for the turn after next' : `Waiting ${ahead} turns ahead`),
+      queueWhy: 'Every slot of the turn is busy, so these start when a turn opens, in this order.',
       goalsDone: (done: number, total: number) => `${done} of ${total} goals done`,
       closedReleases: 'Closed releases',
       released: (n: number, version: string | null) => (version ? `Turn ${n}: release ${version}` : `Turn ${n}: released`),
@@ -2739,7 +2753,18 @@ export const en = {
       machine: 'Machine unavailable',
       expired: 'Time ran out',
       unavailable: 'Employee unavailable',
+      stuck: 'Stuck and asks for help',
+      turn: 'Its last turn failed',
       failedRun: (number: string | null, work: boolean) => `${work ? 'Work' : 'Test'} run${number ? `\u00a0#${number}` : ''} failed`,
+      /* What to do about each failure, in plain words; it goes away by itself once its cause is gone. */
+      todo: {
+        run: "Open the run's log on the task and fix what failed. A new run that passes clears this.",
+        expired: 'Nobody answered in time. Answer, or give the work a new wait.',
+        machine: 'The machine is away. Turn it on, or ask its owner. This clears when it is back.',
+        unavailable: 'The employee is unavailable. Give the work to someone else.',
+        stuck: 'The agent cannot go on alone. Answer its request for help.',
+        turn: "The agent's last turn failed and will not be tried again by itself. Ask Operations to find the cause.",
+      },
       runErrors: {
         timeout: 'Time ran out', machine: 'Machine unavailable', repository: 'Could not open the repository',
         files: 'Could not load the task files', revision: 'Checked the wrong version', stopped: 'Stopped on the machine',
@@ -2794,6 +2819,12 @@ export const en = {
       why: 'Why',
       facts: 'Facts',
       responsible: 'Responsible',
+      /* Of a task: whose request started its tree, and who answers its questions and approvals. */
+      askedBy: 'Asked by',
+      decides: 'Decides',
+      /* Where a task waits while every slot of its department's turn is busy. */
+      queue: 'Waits for',
+      queueText: (ahead: number, openTurn: number | null) => `${ahead === 1 ? 'The next turn' : ahead === 2 ? 'The turn after next' : `The turn ${ahead} turns ahead`}${openTurn === null ? '' : `, after turn ${openTurn}`}`,
       executor: 'Executor',
       pipeline: 'Pipeline',
       pipelineStage: (pipeline: string, stage: string) => `${pipeline} · stage ${stage}`,

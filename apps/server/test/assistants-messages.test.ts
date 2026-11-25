@@ -217,7 +217,7 @@ describe('files an assistant sends', () => {
     expect((await c.app.ctx.files.bytes(c.db, kept!.sha256!)).toString()).toBe('12345678');
   });
 
-  it("keeps a file over 50 MB in the company's store and out of the database, for the agent and the owner alike, and says plainly when the machine that holds it is away", async () => {
+  it("keeps a file over 50 MB in the company's store and out of the database, for the agent and the owner alike, and says plainly when the server lost it", async () => {
     const c = await company();
     const dir = mkdtempSync(join(tmpdir(), 'hh-files-'));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
@@ -246,12 +246,11 @@ describe('files an assistant sends', () => {
     expect(fetched.headers['content-length']).toBe(String(FILE_BYTES + 1));
     expect(fetched.rawPayload.equals(bytes)).toBe(true);
     expect((await c.app.inject({ url: `/api/attachments/${file.id}`, ...as(c.ceo) })).rawPayload.equals(bytes)).toBe(true);
-    /* This machine lost its copy, and no machine that holds one sends it back in time. */
+    /* The server's disk lost its copy, and no other is left. */
     rmSync(join(dir, 'store', sha256.slice(0, 2), sha256));
-    c.app.ctx.files.wantWaitMs = 0;
-    const away = await c.app.inject({ url: `/api/assistant/attachments/${file.id}`, headers: { authorization: `Bearer ${ava.key}`, 'accept-language': 'ru' } });
-    expect(away.statusCode).toBe(503);
-    expect(away.json().error).toEqual({ code: 'unavailable', reason: 'file_away', message: 'этот файл хранится на машине компании, которой сейчас нет в сети. Попробуйте еще раз, когда она вернется.' });
-    expect((await c.app.inject({ url: `/api/attachments/${file.id}`, ...as(c.ceo) })).json().error.reason).toBe('file_away');
+    const lost = await c.app.inject({ url: `/api/assistant/attachments/${file.id}`, headers: { authorization: `Bearer ${ava.key}`, 'accept-language': 'ru' } });
+    expect(lost.statusCode).toBe(410);
+    expect(lost.json().error).toEqual({ code: 'gone', reason: 'file_lost', message: 'этого файла больше нет в хранилище файлов компании, и его копии не осталось.' });
+    expect((await c.app.inject({ url: `/api/attachments/${file.id}`, ...as(c.ceo) })).json().error.reason).toBe('file_lost');
   });
 });

@@ -81,7 +81,7 @@ Where there is a `reason`, `message` says to the owner why, in one neutral phras
 | 400 | `file_empty` | The file sent has no bytes. |
 | 413 | `attachment_invalid` | Hornhoof has no room left for the company's files. |
 | 503 | `file_away` | The file is kept only on a machine of the company that is away now. Try again once it is back. |
-| 410 | `file_lost` | A file over 50 MB from before 0.44.0, when such a file was kept on the disk of one machine only, and that machine is gone. |
+| 410 | `file_lost` | The file is not in the company's file store any more, and no copy of it is left: see "Where files are kept". A file over 50 MB from before 0.44.0, kept then on the disk of one machine only that is gone, answers it too. |
 | 410 | `file_link_expired` | A file's link from a `reply` is older than 7 days: see "GET /api/files/&lt;link&gt;". |
 | 409 | `orchestrator_not_ready`, `agent_not_ready` | The agent cannot answer right now, for example while it has no plan to run on, or the message has no `agentId` and the assistant has no agent of its own yet. Try again later. |
 | 409 | `request_closed` | The request is answered already. |
@@ -181,6 +181,7 @@ Every file, of any size, goes into the company's file store as it comes, never w
 
 * When the machine Hornhoof runs on lacks a file, it asks the machines that hold it. If none of them answers within 30 seconds, every download of it, by link too, answers `503 file_away`. Try again once the machine is back.
 * A file kept on one machine before the store, whose machine is gone, answers `410 file_lost`.
+* A file the store does not have any more, on a server with no other machine of the company to ask, as one lost with the server's disk, answers `410 file_lost`, by link too.
 * A `reply` of an older Hornhoof may say `big: true` of a file. Nothing else differs: give the owner its `url` as for any file.
 
 ### GET /api/assistant/events?after=&lt;seq&gt;&amp;wait=&lt;seconds&gt;
@@ -321,7 +322,7 @@ GET /api/files/eyJmIjoiM2YwYzlhNmUt….Jx0v…
 ```
 
 * Answers `200` with the file's bytes and the headers of `GET /api/assistant/attachments/:id`.
-* After the 7 days it answers `410 file_link_expired`; ask the agent for the file again. A file kept only on a machine of the company that is away now answers `503 file_away`, and one over 50 MB from before 0.44.0 whose one machine is gone answers `410 file_lost`. A link changed in any way, signed for anything else, or of a file Hornhoof no longer keeps answers `404 attachment_unknown`. The words in `message` follow the phone's `Accept-Language`.
+* After the 7 days it answers `410 file_link_expired`; ask the agent for the file again. A file kept only on a machine of the company that is away now answers `503 file_away`, and a file the store does not have any more answers `410 file_lost`. A link changed in any way, signed for anything else, or of a file Hornhoof no longer keeps answers `404 attachment_unknown`. The words in `message` follow the phone's `Accept-Language`.
 * Anyone who has the link opens the file until the 7 days end: pass it only to the owner.
 
 ## MCP

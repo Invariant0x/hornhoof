@@ -12,7 +12,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, DECISION_TOPICS, departments, people, tasks, type AgentKind, type DecisionTopic } from '../../db/schema.js';
+import { agents, DECISION_TOPICS, departments, people, SUBTASK_REASONS, tasks, type AgentKind, type DecisionTopic } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { ApiError } from '../../errors.js';
 import { commitApprovalRequired } from './commit-approval.js';
@@ -35,6 +35,7 @@ import { setUrgent } from './urgency.js';
 import { ceoPrincipal, departmentPrincipal, standingPrincipal } from '../conversation/decision-context.js';
 import { ONLY_CEO_ASKED, ONLY_DEPARTMENT_OWNER } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
+import { requireTreeRules, underText } from './tree-rules.js';
 import { refusePaused, setPaused } from './pause.js';
 import { resolveStuckComment } from './stuck.js';
 import { appendOutgoing } from '../events/store.js';
@@ -149,7 +150,7 @@ const TurnkeyInput = z.strictObject({
   baseCommit: z.string().regex(/^[0-9a-f]{40}$/).describe(`The ${START_COMMIT}. It holds where the turn branch was as your work started.`),
 });
 
-const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('Marks this work and its child tasks urgent.'), ...TrackerFields });
+const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('Marks this work and its child tasks urgent. Urgent work takes no slot and waits for none: it goes past the queue, to the department\'s hotfix lane.'), small: z.boolean().optional().describe('One place, a clear result: a small addition of the same product may join a running slot of the department\'s turn instead of waiting in the queue.'), askedBy: z.uuid().optional().describe('Orchestrator only: the person whose request this work carries out, as company lists people. It is shown as who asked, goes down the whole tree, and puts the work in that person\'s own list. Name it only for a person\'s request; leave it out for work you started yourself.'), ...TrackerFields });
 const Turn = z.number().int().positive().describe('The turn number, like 2.');
 /* The tools an agent gets for tasks, by its kind. Each one checks that the task is the agent's to move. */
 export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
@@ -384,7 +385,8 @@ class TaskTools {
 
   private async createdTaskText(task: Task, executor: Agent, architect: Agent | null = null): Promise<string> {
     const holder = architect && task.assigneeAgentId === architect.id ? architect : executor;
-    return `Created #${task.number} for ${holder.name}.${await this.waiting(task)}`;
+    const [parent] = task.parentId ? await this.db.select({ number: tasks.number, title: tasks.title }).from(tasks).where(eq(tasks.id, task.parentId)) : [];
+    return `Created #${task.number} for ${holder.name}.${parent ? ` ${underText(parent, task)} If that title is narrower than the whole result it serves, fix the parent's title with update_task.` : ''}${await this.waiting(task)}`;
   }
 
   private registerTasks(): void {
@@ -643,7 +645,7 @@ class TaskTools {
       {
         description:
           (this.boss ? 'Gives tasks to the heads of their departments, each task naming its department, ' : 'Gives tasks of your own department to you as its head, ') +
-          'who take them on at once: work flows, nothing waits for a turn. No turn holds a task: it joins its department\'s open turn, the next release, as its result is accepted into the turn branch. Follow the shared admission rule in hh-lead-tasks. ' +
+          'who take them on at once, unless every slot of the department\'s turn is busy: then the task waits in the department\'s queue for the next turn, with no one woken, and the answer says which. Work flows, nothing else waits for a turn. No turn holds a task: it joins its department\'s open turn, the next release, as its result is accepted into the turn branch. Follow the shared admission rule in hh-lead-tasks. ' +
           'A member of a turnkey team does a task end to end alone; everybody else\'s goes through the route of its department.',
         inputSchema: { tasks: z.array(TurnItem), improvement: Improvement.optional(), backlog: Backlog.optional() },
       },
@@ -651,7 +653,7 @@ class TaskTools {
         this.run(async () => {
           const scope = await this.turnScope();
           await this.urgentFromCeo(input.tasks.map(t => ({ ...t, department: t.department ?? scope ?? '' })));
-          const items = await Promise.all(input.tasks.map(async ({ goal, responsible, why, due, pipeline, stage, priority, ...item }) => ({ ...item, ...(await trackerInputOf(this.ctx, this.job.companyId, { goal, responsible, why, due, pipeline, stage, priority })) })));
+          const items = await Promise.all(input.tasks.map(async ({ goal, responsible, why, due, pipeline, stage, priority, askedBy, ...item }) => ({ ...item, askedByPersonId: askedBy, ...(await trackerInputOf(this.ctx, this.job.companyId, { goal, responsible, why, due, pipeline, stage, priority })) })));
           const given = await giveTasks(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, items, input.improvement, input.backlog, scope);
           return { text: given.text, moved: { wakes: given.wakes } };
         }),
@@ -712,7 +714,7 @@ class TaskTools {
       'create_task',
       {
         description: 'Assigns one whole result in your department. Code follows Architecture (unless small or shared with its Development owner), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and the product whose repository it changes when that is not the department\'s own; one task changes one repository, so a change across repositories is a task per repository. checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. A document is files, not code, even where the department keeps a repository: no paths and no commit, its holder attaches the files and hands them in with submit, and the head closes it with report. A task given to a member of a turnkey team goes through no echelons, whatever its text says: its holder does it end to end alone and closes it with report, with no checker, Cleanup or paths; everybody else\'s goes through the route of its department. No task is in a turn until its result is accepted into the open turn\'s branch. Never write the echelons into a task\'s text: the route is the server\'s.',
-        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), architectAgentId: z.uuid().optional().describe('Optional distinct Architecture owner; when omitted or equal to executor, Architecture collapses into Development.'), resultKind: z.enum(['code', 'document', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: Product.optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional(), ...TrackerFields },
+        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), architectAgentId: z.uuid().optional().describe('Optional distinct Architecture owner; when omitted or equal to executor, Architecture collapses into Development.'), resultKind: z.enum(['code', 'document', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: Product.optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional(), subtaskReason: z.enum(SUBTASK_REASONS).optional().describe('Required with parent, and only then: why this is a task of its own and not a step in its parent\'s body. independent_result: a result a person can check on its own. other_owner: other skills, another department or an independent checker. parallel_block: work that runs at the same time as its siblings and shortens the whole. At most 3 sub-tasks per task without the head, 5 under any parent, 3 levels deep; no coordination task holds one sub-task only: assign that task directly.'), ...TrackerFields },
       },
       async input =>
         this.run(async () => {
@@ -725,7 +727,8 @@ class TaskTools {
           const parent = input.parent !== undefined ? (await this.find(input.parent)).task : null;
           const after = await this.afterIds(input.after);
           await this.checkCreatedScope(agent, executor, input);
-          const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, architectAgentId: architect?.id, executor: input.resultKind !== 'coordination', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small, ...(await trackerInputOf(this.ctx, this.job.companyId, input)) });
+          await requireTreeRules(this.ctx, { id: agent.id, kind: agent.kind, departmentId: agent.departmentId }, parent, input.subtaskReason);
+          const moved = await createTask(this.ctx, { agentId: agent.id }, { subtaskReason: input.subtaskReason, title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, architectAgentId: architect?.id, executor: input.resultKind !== 'coordination', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small, ...(await trackerInputOf(this.ctx, this.job.companyId, input)) });
           return { text: await this.createdTaskText(moved.task, executor, architect), moved };
         }),
     );

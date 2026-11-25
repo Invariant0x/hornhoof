@@ -40,6 +40,7 @@ import { createTask } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import { readWorldLiveState } from './live-data.js';
 import { isAllowedCompanyTheme, worldPackForTheme } from './packs/index.js';
+import { registerWorldRewardsRoutes } from './rewards-routes.js';
 
 const MAX_STORED_RELOCATIONS = 200;
 
@@ -128,6 +129,7 @@ async function restoreCompanyAgentNames(db: Ctx['db'], me: Person): Promise<Worl
 
 export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
+  registerWorldRewardsRoutes(app, ctx);
 
   /* Strictly read-only live world snapshot of the signed-in person's company. */
   app.get('/api/world/state', async req => {
@@ -403,6 +405,7 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
       assigneeAgentId,
       executor: false,
       small: true,
+      askedByPersonId: me.id,
     });
     await wakeAll(ctx, wakes);
 

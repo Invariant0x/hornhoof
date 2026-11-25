@@ -116,6 +116,8 @@ export type ErrorReason =
   | 'pipeline_invalid'
   | 'stage_gone'
   | 'responsible_invalid'
+  | 'asked_by_invalid'
+  | 'tree_rule'
   | 'view_as_ceo_only'
   | 'urgent_not_allowed'
   | 'urgent_follows_parent'

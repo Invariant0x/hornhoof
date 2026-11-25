@@ -31,6 +31,9 @@ export type Kept = { sha256: string; size: number };
 export const fileAway = () =>
   new ApiError(503, 'unavailable', 'This file is kept on a machine of the company that is away now. Try again once it is back.', 'file_away');
 
+/* A file a row names that the store does not keep, on a server with no other machine to ask: lost with its disk. */
+export const storeLost = () => new ApiError(410, 'gone', "This file is not in the company's file store any more, and no copy of it is left.", 'file_lost');
+
 /* Records a file the store of this machine keeps, and that this machine keeps it. A record there already keeps its
    sealed facts, which every copy has: the caller sealed this one under its salt (sealedAsRecorded). A file named again
    is in use again. */
@@ -177,11 +180,14 @@ export class Files {
     }
   }
 
-  /* A file's bytes as they go out. One this machine lacks is asked for, and waited for a while. */
+  /* A file's bytes as they go out. One this machine lacks is asked of the company's other machines, and waited for a
+     while; with none to ask, it is lost. */
   async open(db: FilesDb, sha256: string, waitMs = this.wantWaitMs): Promise<Readable> {
     const key = await this.key(db);
     const store = this.store();
     if (store.has(sha256)) return store.open(sha256, key);
+    const mine = await this.machineId(db);
+    if (!(await seats(db, mine)).some(seat => seat.id !== mine)) throw storeLost();
     await db.execute(sql`UPDATE net.files SET wanted_at = now() WHERE sha256 = ${sha256}`);
     for (let waited = 0; waited < waitMs; waited += WANT_LOOK_MS) {
       await new Promise(resolve => setTimeout(resolve, WANT_LOOK_MS));

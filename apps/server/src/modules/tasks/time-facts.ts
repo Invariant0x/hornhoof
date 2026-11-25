@@ -1,9 +1,10 @@
 import { externalWaitFact, validSourceKey, type TaskWaitFact as WaitFact, type WaitRunError, type WaitWho as Who } from '@hornhoof/protocol/waits';
-import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { jobs, people, requests, taskEvents, testParts, testRuns } from '../../db/schema.js';
+import { agents, jobs, people, requests, taskEvents, testParts, testRuns } from '../../db/schema.js';
 import { candidates } from './decision-people.js';
+import { NO_FAILURE, turnFailed } from './failure-records.js';
 import { decisionOwner, openPersonRequests } from './decisions.js';
 import { requestSubject, type Task } from './state.js';
 import { waitForSourceKey, type TaskWait } from './wait-state.js';
@@ -87,7 +88,48 @@ const RUN_ERRORS: Record<string, WaitRunError> = {
   files_failed: 'files', commit_mismatch: 'revision', cancelled: 'stopped',
 };
 
+/* The last turn of each task's holder on it since the task came to its status, where it failed and no turn of the holder on
+   the task waits or runs to take it on: the task fails until a turn of its holder goes well, or the task moves on. */
+async function failedTurns(db: Ctx['db'], open: TimedTask[], since: Map<string, Date>): Promise<Map<string, Date>> {
+  if (!open.length) return new Map();
+  const ids = open.map(t => t.id);
+  const ended = { id: jobs.id, taskId: jobs.taskId, agentId: jobs.agentId, status: jobs.status, error: jobs.error, failure: jobs.failure, finishedAt: jobs.finishedAt, createdAt: jobs.createdAt };
+  const last = await db.selectDistinctOn([jobs.taskId, jobs.agentId], ended)
+    .from(jobs).where(and(inArray(jobs.taskId, ids), eq(jobs.kind, 'conversation'), inArray(jobs.status, ['done', 'failed']), or(isNull(jobs.error), notInArray(jobs.error, NO_FAILURE))))
+    .orderBy(jobs.taskId, jobs.agentId, desc(sql`coalesce(${jobs.finishedAt}, ${jobs.createdAt})`), desc(jobs.createdAt));
+  /* Whoever holds it now, as a reviewer does, before whoever does its work. */
+  const holders = new Map(open.map(t => [t.id, t.assigneeAgentId ?? t.executorAgentId]));
+  const at = (j: { finishedAt: Date | null; createdAt: Date }) => j.finishedAt ?? j.createdAt;
+  const own = last.filter(j => j.taskId && holders.get(j.taskId) === j.agentId && at(j) >= (since.get(j.taskId) ?? new Date(0)));
+  if (!own.some(j => j.status === 'failed')) return new Map();
+  const going = await db.selectDistinct({ taskId: jobs.taskId, agentId: jobs.agentId }).from(jobs)
+    .where(and(inArray(jobs.taskId, ids), eq(jobs.kind, 'conversation'), inArray(jobs.status, ['queued', 'running'])));
+  const goesOn = new Set(own.filter(j => going.some(g => g.taskId === j.taskId && g.agentId === j.agentId)).map(j => j.id));
+  return new Map(own.filter(j => turnFailed(j, goesOn)).map(j => [j.taskId!, at(j)]));
+}
+
 export type WaitNames = { agent(id: string): string | undefined; task(id: string): number | undefined };
+
+type StuckAsk = { triage: string | null; triageName: string | null; at: Date };
+
+/* An agent stuck on its task asked for help: the task fails until someone answers. The first open ask of each task counts,
+   with the name of who is to answer, which nothing else on the task may name. */
+async function stuckAsks(db: Ctx['db'], openIds: string[]): Promise<Map<string, StuckAsk>> {
+  if (!openIds.length) return new Map();
+  const asks = await db.select({ taskId: requests.taskId, triage: requests.triageAgentId, triageName: agents.name, at: requests.createdAt }).from(requests)
+    .leftJoin(agents, eq(agents.id, requests.triageAgentId))
+    .where(and(inArray(requests.taskId, openIds), eq(requests.kind, 'stuck'), eq(requests.status, 'open'))).orderBy(asc(requests.createdAt));
+  return asks.reduce((byTask, ask) => (byTask.has(ask.taskId) ? byTask : byTask.set(ask.taskId, ask)), new Map<string, StuckAsk>());
+}
+
+/* The failures of a task that need someone: its holder's last turn failed, or an agent stuck on it asked for help. */
+function failureFacts(turn: Date | undefined, asked: StuckAsk | undefined, names: WaitNames): WaitFact[] {
+  const who = (id: string, name: string | null): Who => ({ kind: 'agent', id, name: name ?? names.agent(id) ?? '' });
+  return [
+    ...(turn ? [{ kind: 'external' as const, who: null, reason: null, since: turn.toISOString(), failure: 'turn' as const }] : []),
+    ...(asked ? [{ kind: 'external' as const, who: asked.triage ? who(asked.triage, asked.triageName) : null, reason: null, since: asked.at.toISOString(), failure: 'stuck' as const }] : []),
+  ];
+}
 
 /* The facts of every task at once. The task lookup exposes only prerequisites this reader sees. */
 export async function timeFacts(db: Ctx['db'], rows: TimedTask[], waits: (t: TimedTask) => TaskWait[], names: WaitNames, now = Date.now()): Promise<Map<string, TimeFacts>> {
@@ -113,9 +155,13 @@ export async function timeFacts(db: Ctx['db'], rows: TimedTask[], waits: (t: Tim
   const runFields = { id: testRuns.id, taskId: testRuns.taskId, kind: testRuns.kind, number: testRuns.number,
     status: testRuns.status, createdAt: testRuns.createdAt, finishedAt: testRuns.finishedAt };
   const runs = runIds.length ? await db.select(runFields).from(testRuns).where(inArray(testRuns.id, runIds)) : [];
+  /* A refused or stopped run proves nothing, so it neither fails the task nor clears the failure of a run before it. */
   const latestRuns = (openIds.length ? await db.selectDistinctOn([testRuns.taskId, testRuns.kind], runFields).from(testRuns)
-    .where(inArray(testRuns.taskId, openIds)).orderBy(testRuns.taskId, testRuns.kind, desc(testRuns.number)) : [])
+    .where(and(inArray(testRuns.taskId, openIds), inArray(testRuns.status, ['running', 'passed', 'failed']))).orderBy(testRuns.taskId, testRuns.kind, desc(testRuns.number)) : [])
     .reduce((byTask, run) => byTask.set(run.taskId, [...(byTask.get(run.taskId) ?? []), run]), new Map<string, typeof runs>());
+  const stuck = await stuckAsks(db, openIds);
+  const open = new Set(openIds);
+  const turnsFailed = await failedTurns(db, rows.filter(t => open.has(t.id)), sinceByTask);
   const byRun = new Map(runs.map(r => [r.id, r]));
   const failedIds = [...new Set([...runs, ...[...latestRuns.values()].flat()].filter(r => r.status === 'failed').map(r => r.id))];
   const failedParts = failedIds.length ? await db.select({ runId: testParts.runId, error: testParts.error }).from(testParts)
@@ -172,6 +218,7 @@ export async function timeFacts(db: Ctx['db'], rows: TimedTask[], waits: (t: Tim
       if (latest.status === 'failed' && at < (sinceByTask.get(task.id) ?? task.createdAt)) continue;
       facts.push(runFact(latest, at.toISOString()));
     }
+    facts.push(...failureFacts(turnsFailed.get(task.id), stuck.get(task.id), names));
     if (external) {
       const on = external.on;
       const owner = owners.get(task.companyId);

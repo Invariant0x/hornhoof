@@ -49,6 +49,10 @@ const questionChecks = (name: string, t: QuestionColumns) => [
   check(`${name}_classification_bound`, questionObjectBound(t.classification)),
   unique(`${name}_source_episode`).on(t.companyId, t.sourceKey),
 ];
+/* Why a task is made under another: a result a person can check on its own, another owner's work, or a block that runs at the same time as its siblings. */
+export const SUBTASK_REASONS = ['independent_result', 'other_owner', 'parallel_block'] as const;
+export type SubtaskReason = (typeof SUBTASK_REASONS)[number];
+
 export type QuestionRecoveryIntent = {
   sourceKey: string;
   reason: 'internal_route_unavailable' | 'plan_unavailable';
@@ -330,8 +334,11 @@ export const departments = pgTable('departments', {
      commits for its main line with a green full run, an independent PASS verdict and a fast-forward path from main pass
      without a human approval card. Its products and parts go by it. */
   autonomousRelease: boolean('autonomous_release').notNull().default(false),
+  /* How many slots its turn holds at most, one per developer of the department: a task takes a slot and the next waits in the
+     queue for the next turn. None: the department runs no slots and gives every task out at once. */
+  slotCap: integer('slot_cap'),
   createdAt: createdAt(),
-}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`)]);
+}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`), check('departments_slot_cap', sql`${t.slotCap} is null or ${t.slotCap} >= 1`)]);
 
 /* A key of a git host Hornhoof creates repositories with, for now GitHub's: its token, encrypted with the server's secret and
    shown by its last 4 characters, and the user or organization the repositories go to. The company keeps one, and a
@@ -1272,10 +1279,17 @@ export const tasks = pgTable(
     goalId: uuid('goal_id').references((): AnyPgColumn => goals.id),
     /* The person who answers for it, named when it is made: it changes attention, counts and filters, never rights. */
     responsiblePersonId: uuid('responsible_person_id').references(() => people.id),
+    /* The person whose request started the tree this task is in, inherited down the tree and empty for work agents started themselves:
+       the person's list of what they asked for. responsible_person_id is who decides. */
+    askedByPersonId: uuid('asked_by_person_id').references(() => people.id),
+    /* Why a task made under another was made: independent_result, other_owner or parallel_block; empty for a task with nothing above it. */
+    subtaskReason: text('subtask_reason').$type<SubtaskReason>(),
     /* Why the task exists, in plain words; the brief says what the result is. */
     why: text('why').notNull().default(''),
     priority: text('priority').$type<TaskPriority>(),
     dueAt: timestamp('due_at', { withTimezone: true }),
+    /* Since when it waits in its department's queue for a turn with a free slot: nobody holds it until that turn takes it in. */
+    queuedAt: timestamp('queued_at', { withTimezone: true }),
     /* The department's map of hand-offs the task is placed on, and the stage it stands in. */
     pipelineId: uuid('pipeline_id').references((): AnyPgColumn => pipelines.id),
     pipelineStageId: uuid('pipeline_stage_id').references((): AnyPgColumn => pipelineStages.id),
@@ -1291,6 +1305,9 @@ export const tasks = pgTable(
     unique('tasks_company_number').on(t.companyId, t.number),
     index('tasks_goal_id').on(t.goalId),
     index('tasks_responsible').on(t.responsiblePersonId),
+    index('tasks_asked_by').on(t.askedByPersonId),
+    index('tasks_queued').on(t.departmentId, t.queuedAt),
+    check('tasks_subtask_reason_known', sql`${t.subtaskReason} is null or ${t.subtaskReason} in ('independent_result', 'other_owner', 'parallel_block')`),
     index('tasks_pipeline_id').on(t.pipelineId),
     index('tasks_department_id').on(t.departmentId),
     index('tasks_assignee').on(t.assigneeAgentId),
@@ -1769,7 +1786,9 @@ export const programOperatorSignals = pgTable('program_operator_signals', {
   caseId: uuid('case_id').notNull().references(() => programOperatorCases.id),
 }, t => [primaryKey({ columns: [t.agentId, t.instance, t.reason, t.evidenceKey] })]);
 
-export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as const;
+/* refused: Hornhoof refused what it was asked to run before any of it started, as a command a part may not run or a product
+   with no tests set up. It is a hint to the one who asked: no result, and no failure. */
+export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped', 'refused'] as const;
 
 /* A command an agent runs for a task on whichever machines of the company are free, in parts when it splits: the full
    test suite of a task's branch, or any other work, on a branch or in an empty folder with the task's files. The agent
@@ -1912,7 +1931,7 @@ export const updateWaits = pgTable('update_waits', {
   error: text('error'),
 }, t => [index('update_waits_open').on(t.endedAt), index('update_waits_company_since').on(t.companyId, t.since)]);
 
-export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
+export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped', 'refused'] as const;
 /* A machine that lost a part of a run as it ran: the place (a machine's id, or builtin), its name then, and why. */
 export type LostRun = { key: string; machine: string; why: string; computer?: string };
 

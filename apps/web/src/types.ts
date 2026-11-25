@@ -534,6 +534,11 @@ export type TaskLine = {
      it exists, by when, its time, and the pipeline and stage it stands on. An older server sends none. */
   goal?: { id: string; number: number; title: string } | null;
   responsible?: PersonRef | null;
+  /* The person whose request started the tree the task is in; none for work agents started themselves. */
+  askedBy?: PersonRef | null;
+  /* Where it waits for a turn with a free slot: how many turns ahead (the next is 1), its place in its department's queue and the
+     open turn it waits behind; none for work given out. An older server sends none. */
+  queue?: { ahead: number; position: number; openTurn: number | null } | null;
   why?: string;
   dueAt?: string | null;
   time?: TimeFacts;
@@ -969,13 +974,16 @@ export type Unfit =
   | { why: 'phone' | 'no_core' | 'no_link' }
   | { why: 'scope'; person: string; departments?: number };
 
+export type SavingWait = 'dump' | 'seal' | 'server' | 'send' | 'retry';
+
 /* How a machine's copy of the company's data does. */
 export type CopyLine =
   | { line: 'making' | 'remaking'; progress: number }
-  | { line: 'ready' | 'catching_up' | 'saving' }
+  | { line: 'saving'; waiting?: SavingWait; since?: string | null }
+  | { line: 'ready' | 'catching_up' }
   | { line: 'behind'; minutes: number }
   | { line: 'asleep'; since: string | null }
-  | { line: 'stopped'; why: 'disk_full' | 'setup' | null };
+  | { line: 'stopped'; why: 'disk_full' | 'setup' | 'gave_up' | null; since?: string; attempts?: number };
 
 /* A machine's place in the order of who holds the company's data, why it holds no copy, how its copy does, when it
    stopped holding the data, and, for the machine the server last moved from, until when it ran the server, once its

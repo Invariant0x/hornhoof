@@ -1,5 +1,6 @@
 import { move, refuseOpenUnder, statusNoted, letStuckGo, comingAfter } from './transitions.js';
 import { note, published, lastMove, type Note } from './events.js';
+import { slotVerdict } from './slots.js';
 import { CLOSED, SILENT_TURNS, GOING_ON_TURNS, COMMIT, refuse, notYours, loadTask, stillOpen, listed, openAfter, taskSpot, giver, waitsForPerson, liveAgent, workingAgent, requireOwner, mayAsk, requestSubject, type Task, type Request, type Actor, type Wake, type Moved, type Tx, type Live } from './state.js';
 import { hideCredentialsIn } from '@hornhoof/protocol/redaction';
 import { countOnly, idOnly, only } from '../../db/selections.js';
@@ -32,7 +33,7 @@ import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, attachments, companies, jobs, people, requests, taskEvents, tasks, type DecisionTopic, type RequestOption } from '../../db/schema.js';
+import { agentEvents, agents, attachments, companies, jobs, people, requests, taskEvents, tasks, type DecisionTopic, type RequestOption, type SubtaskReason } from '../../db/schema.js';
 import { clearlyAnswered, flat, holds } from './direct-words.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
@@ -139,6 +140,10 @@ export type NewTask = {
   afterPlans?: AfterPlans;
   independentPart?: IndependentPartInput;
   independentNone?: string;
+  /* Why a task under another is made; the tools and routes that keep the tree rules ask for it, tree-rules.ts. */
+  subtaskReason?: SubtaskReason;
+  /* A task with nothing above it takes a slot of its department's turn or waits in the queue for the next one, slots.ts: the doors that give out new work ask for it. */
+  useSlots?: boolean;
   workKind?: Task['workKind'];
   riskClass?: Task['riskClass'];
   /* Of a task with nothing above it; one under a task is what that task is. */
@@ -171,6 +176,7 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
     urgent: parent.urgent,
     /* A part of the same work answers to the same person and serves its whole's goal. */
     responsiblePersonId: parent.responsiblePersonId,
+    askedByPersonId: parent.askedByPersonId,
     dueAt: parent.dueAt,
     createdByPersonId: actor.personId ?? null,
     createdByAgentId: actor.agentId ?? null,
@@ -226,6 +232,7 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   const declaration = checkIndependent(input.after ?? [], input.independentPart, input.independentNone, null);
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
   await requireNewCleanup(ctx, actor, assignee.companyId, input);
+  await requireNewAsker(ctx, actor, assignee.companyId, input);
   await requireNewReviewer(ctx, assignee, input);
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
@@ -234,6 +241,17 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   const plan = await departmentStages(ctx, input.departmentId, tracker.pipelineId);
   const architect = await resolveArchitect(ctx, assignee, input, plan);
   return { assignee, architect, parent, declaration, plan, tracker };
+}
+
+/* Who asked for work is named by a person for their own request, or by the orchestrator for a person's: never by a head or a worker. */
+async function requireNewAsker(ctx: Ctx, actor: Actor, companyId: string, input: NewTask): Promise<void> {
+  if (!input.askedByPersonId) return;
+  if (actor.personId) {
+    if (input.askedByPersonId !== actor.personId) throw refuse(403, 'task_not_yours', 'A person can name only themselves as the one who asked.');
+    return;
+  }
+  const by = actor.agentId ? await liveAgent(ctx.db, companyId, actor.agentId) : null;
+  if (by?.kind !== 'orchestrator') throw refuse(403, 'task_not_yours', 'Only the orchestrator names the person whose request work carries out.');
 }
 
 async function requireNewCleanup(ctx: Ctx, actor: Actor, companyId: string, input: NewTask): Promise<void> {
@@ -266,7 +284,10 @@ function independentData(declaration: IndependentDeclaration | null): Record<str
   return {};
 }
 
-function newTaskValues(actor: Actor, input: NewTask, { assignee, architect, parent, tracker }: NewTaskSetup, position: { urgent: boolean; number: number }): typeof tasks.$inferInsert {
+/* Who holds a new task and since when it waits: a task the turn has no free slot for is held by no one until a turn takes it in. */
+const heldBy = (queued: boolean, ownerId: string): { assigneeAgentId: string | null; queuedAt: Date | null } => (queued ? { assigneeAgentId: null, queuedAt: new Date() } : { assigneeAgentId: ownerId, queuedAt: null });
+
+function newTaskValues(actor: Actor, input: NewTask, { assignee, architect, parent, tracker }: NewTaskSetup, position: { urgent: boolean; number: number; queued: boolean }): typeof tasks.$inferInsert {
   const initialOwner = architect ?? assignee;
   return {
         ...tracker,
@@ -278,13 +299,14 @@ function newTaskValues(actor: Actor, input: NewTask, { assignee, architect, pare
         title: input.title.trim(),
         brief: input.brief.trim(),
         body: input.body,
-        assigneeAgentId: initialOwner.id,
+        ...heldBy(position.queued, initialOwner.id),
         executorAgentId: input.executor ? assignee.id : null,
         after: input.after ?? [],
         workKind: input.workKind,
         riskClass: input.riskClass,
         urgent: position.urgent,
         small: input.small === true,
+        subtaskReason: parent ? input.subtaskReason ?? null : null,
         createdByPersonId: actor.personId ?? null,
         createdByAgentId: actor.agentId ?? null,
         updatedAt: new Date(),
@@ -312,6 +334,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   const above = await parentForNewTask(tx, parent);
   /* With the company held, so a change of urgency on its way reaches this task, or waits for it. */
   const urgent = await urgencyOfNew(tx, assignee.companyId, actor, above, input.urgent, input.departmentId);
+  const queued = input.useSlots === true && !above && input.departmentId !== null && (await slotVerdict(tx, input.departmentId, { productId: input.productId ?? null, small: input.small === true, urgent })) === 'queue';
   const last = await lastTaskNumber(tx, assignee.companyId);
   /* One of them done at this moment would not see the new task wait for it, so they are held while it is decided
      whether it waits: that one is done after the task is made, and starts it. */
@@ -319,7 +342,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   const waits = after.some(t => t.status !== 'done');
   const [row] = await tx
     .insert(tasks)
-    .values(newTaskValues(actor, input, setup, { urgent, number: last + 1 }))
+    .values(newTaskValues(actor, input, setup, { urgent, number: last + 1, queued }))
     .returning();
   const skipped = await createRoute(tx, row!, input, plan);
   const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {
@@ -336,7 +359,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
     wakes.push(made.wake);
   }
   /* One that waits for what it comes after is not given out yet: the move that finishes the last of them wakes its holder. */
-  if (!waits) wakes.push({ agentId: row!.assigneeAgentId!, taskId: row!.id, why: 'assigned' });
+  if (!waits && !queued) wakes.push({ agentId: row!.assigneeAgentId!, taskId: row!.id, why: 'assigned' });
   recordCause(wakes, { kind: 'created', actor }, event.id, row!);
   await keepWakes(tx, row!.companyId, wakes);
   return { task: row!, wakes, independent };

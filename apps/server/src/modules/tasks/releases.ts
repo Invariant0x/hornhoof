@@ -5,6 +5,7 @@ import { agents, autonomousReleases, ciDispatches, companies, departments, peopl
 import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { note } from './events.js';
+import { loadQueue, publishLoaded } from './slots.js';
 import { refuse, type Task, type Tx } from './state.js';
 import { taskByRef } from './lookup.js';
 import { keepSnapshot } from './pipeline-report.js';
@@ -491,9 +492,12 @@ async function closeTurn(ctx: Reader, repo: Repo, turn: Turn, record: Release, v
     if (left.length) await tx.update(tasks).set({ turnId: next!.id }).where(inArray(tasks.id, left.map(row => row.id)));
     const by = record.requestedByAgentId;
     if (by) for (const row of left) await note(tx, row, { kind: 'updated', actor: { agentId: by }, text: `${version} was released without it, so it goes into Turn ${next!.number}.`, data: { fields: ['turn'], from: turn.number, to: next!.number } });
-    return { done: done!, next: next! };
+    /* The turn that opens takes the department's queue in, as many as its slots hold. */
+    const queue = await loadQueue(tx, turn.companyId, turn.departmentId);
+    return { done: done!, next: next!, queue };
   });
   if (typeof closed === 'string') return closed;
+  publishLoaded(ctx, closed.queue);
   ctx.bus.publish(turn.companyId, { type: 'org' });
   ctx.log?.info({ companyId: turn.companyId, turn: turn.number, version, next: closed.next.number, startCommit: head }, `Turn ${turn.number} was released as ${version}; turn-${closed.next.number} starts from ${head}.`);
   await makeBranchOf(ctx, repo, closed.next);

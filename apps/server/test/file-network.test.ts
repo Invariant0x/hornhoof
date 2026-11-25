@@ -587,7 +587,7 @@ describe('where the files of the store are kept', () => {
   });
 
   it('keeps no live copy on the machine that keeps the store backup while the others are as many as the copies asked for', () => {
-    const seat = (id: string, over: Partial<Seat> = {}): Seat => ({ id, leader: false, fit: true, online: true, lost: false, addresses: [], relayed: false, area: 100, assigned: 0, room: 100, backup: false, ...over });
+    const seat = (id: string, over: Partial<Seat> = {}): Seat => ({ id, leader: false, fit: true, online: true, lost: false, addresses: [], relayed: false, area: 100, assigned: 0, room: 100, capacity: 100, backup: false, ...over });
     const all = [seat('a', { leader: true }), seat('b'), seat('c')];
     expect(apartFromBackup(all, ['c'], 2).map(one => [one.id, one.fit, one.backup])).toEqual([['a', true, false], ['b', true, false], ['c', false, true]]);
     expect(apartFromBackup(all, ['c'], 3).map(one => [one.id, one.fit, one.backup])).toEqual([['a', true, false], ['b', true, false], ['c', true, true]]);

@@ -21,7 +21,7 @@ export const en = {
     attachment_unknown: 'there is no such file in Hornhoof, it was deleted after its 30 days, or you cannot open it there.',
     file_empty: 'the file is empty.',
     file_too_big: (megabytes: number) => `the file is bigger than ${megabytes} MB.`,
-    file_lost: 'this file was kept on one machine before files had a store, and that machine is gone with it.',
+    file_lost: "this file is not in the company's file store any more, and no copy of it is left.",
     file_away: 'this file is kept on a machine of the company that is away now. Try again once it is back.',
     file_store_full: "the company's machines have no room left for it, until files go or a machine gives the files more room.",
     file_store_busy: "the company's server holds as many files for its other machines as it has room for, until they take them. Try again in a little while.",

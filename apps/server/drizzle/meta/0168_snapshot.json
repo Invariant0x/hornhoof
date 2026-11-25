@@ -1,6 +1,6 @@
 {
-  "id": "8a054d7c-a9e7-4103-b4c8-7ca776ef17d5",
-  "prevId": "1867e87d-3812-42b8-b04a-7afd13155d0e",
+  "id": "d782d8bf-05af-49c8-ab8a-ffd201ac9264",
+  "prevId": "5251b73b-b812-4279-8311-55866d6306d0",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1956,12 +1956,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "test_run_id": {
-          "name": "test_run_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2036,21 +2030,6 @@
           "columns": [
             {
               "expression": "operator_case_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "attachments_test_run_id": {
-          "name": "attachments_test_run_id",
-          "columns": [
-            {
-              "expression": "test_run_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2147,19 +2126,6 @@
           "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "attachments_test_run_id_test_runs_id_fk": {
-          "name": "attachments_test_run_id_test_runs_id_fk",
-          "tableFrom": "attachments",
-          "tableTo": "test_runs",
-          "columnsFrom": [
-            "test_run_id"
           ],
           "columnsTo": [
             "id"
@@ -3390,6 +3356,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "slot_cap": {
+          "name": "slot_cap",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -3466,6 +3438,10 @@
         "departments_repo_token_revision": {
           "name": "departments_repo_token_revision",
           "value": "\"departments\".\"repo_token_revision\" > 0"
+        },
+        "departments_slot_cap": {
+          "name": "departments_slot_cap",
+          "value": "\"departments\".\"slot_cap\" is null or \"departments\".\"slot_cap\" >= 1"
         }
       },
       "isRLSEnabled": false
@@ -5900,31 +5876,6 @@
           "notNull": true,
           "default": "'{}'::uuid[]"
         },
-        "file_store_limit_bytes": {
-          "name": "file_store_limit_bytes",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "file_store_used_bytes": {
-          "name": "file_store_used_bytes",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "files_disk_free": {
-          "name": "files_disk_free",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "files_disk_total": {
-          "name": "files_disk_total",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
         "server_order": {
           "name": "server_order",
           "type": "integer",
@@ -5985,6 +5936,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "copy_schema_since": {
+          "name": "copy_schema_since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "copy_schema_attempt": {
+          "name": "copy_schema_attempt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "copy_old": {
           "name": "copy_old",
           "type": "integer",
@@ -6029,18 +5992,6 @@
         },
         "internet_mbps": {
           "name": "internet_mbps",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "copy_schema_since": {
-          "name": "copy_schema_since",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "copy_schema_attempt": {
-          "name": "copy_schema_attempt",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
@@ -6135,14 +6086,6 @@
           "name": "machines_path",
           "value": "path IS NULL OR path IN ('direct', 'relay')"
         },
-        "machines_file_store_limit": {
-          "name": "machines_file_store_limit",
-          "value": "file_store_limit_bytes IS NULL OR (file_store_limit_bytes >= 0 AND file_store_limit_bytes <= 9007199254740991)"
-        },
-        "machines_file_store_used": {
-          "name": "machines_file_store_used",
-          "value": "file_store_used_bytes >= 0 AND file_store_used_bytes <= 9007199254740991"
-        },
         "machines_update_state": {
           "name": "machines_update_state",
           "value": "update_state IS NULL OR update_state IN ('ready', 'installing', 'failed')"
@@ -6174,10 +6117,6 @@
         "machines_measures_range": {
           "name": "machines_measures_range",
           "value": "link_rtt_ms >= 0 AND link_mbps >= 0 AND internet_rtt_ms >= 0 AND internet_mbps >= 0"
-        },
-        "machines_files_disk": {
-          "name": "machines_files_disk",
-          "value": "(files_disk_free IS NULL OR files_disk_free BETWEEN 0 AND 9007199254740991) AND (files_disk_total IS NULL OR files_disk_total BETWEEN 0 AND 9007199254740991)"
         }
       },
       "isRLSEnabled": false
@@ -12469,6 +12408,24 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "asked_by_person_id": {
+          "name": "asked_by_person_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subtask_reason": {
+          "name": "subtask_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "queued_at": {
+          "name": "queued_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -12619,6 +12576,42 @@
           ],
           "isUnique": false,
           "where": "\"tasks\".\"external_wait\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tasks_asked_by": {
+          "name": "tasks_asked_by",
+          "columns": [
+            {
+              "expression": "asked_by_person_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tasks_queued": {
+          "name": "tasks_queued",
+          "columns": [
+            {
+              "expression": "department_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "queued_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -12793,6 +12786,19 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "tasks_asked_by_person_id_people_id_fk": {
+          "name": "tasks_asked_by_person_id_people_id_fk",
+          "tableFrom": "tasks",
+          "tableTo": "people",
+          "columnsFrom": [
+            "asked_by_person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -12835,6 +12841,10 @@
         "tasks_risk_class": {
           "name": "tasks_risk_class",
           "value": "\"tasks\".\"risk_class\" IS NULL OR \"tasks\".\"risk_class\" IN ('money', 'access', 'security', 'data', 'none')"
+        },
+        "tasks_subtask_reason_known": {
+          "name": "tasks_subtask_reason_known",
+          "value": "\"tasks\".\"subtask_reason\" IS NULL OR \"tasks\".\"subtask_reason\" IN ('independent_result', 'other_owner', 'parallel_block')"
         }
       },
       "isRLSEnabled": false

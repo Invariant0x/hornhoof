@@ -157,6 +157,10 @@ describe('the carry of a restore', () => {
     expect((await read()).fileBackup).toEqual({ keepDays: 30, setBy: null, machineId: machine });
     expect(((await db.execute(sql`SELECT key_enc FROM net.file_key`)) as unknown as { rows: { key_enc: string }[] }).rows).toEqual([{ key_enc: keyEnc }]);
     expect((await app.ctx.files.bytes(db, kept.sha256)).toString()).toBe('a file of the company');
+    /* A restored database with a key of its own, made after the backup, gives way to the carried one. */
+    await db.execute(sql`UPDATE net.file_key SET key_enc = 'other'`);
+    await applyCarry(app.ctx, carry);
+    expect(((await db.execute(sql`SELECT key_enc FROM net.file_key`)) as unknown as { rows: { key_enc: string }[] }).rows).toEqual([{ key_enc: keyEnc }]);
   });
 
   it("carries the area each machine gives the company's files, so a restore neither fills a machine whose owner set less nor drops a limit", async () => {
