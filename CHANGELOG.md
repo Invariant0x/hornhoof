@@ -40,6 +40,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A company with one machine keeps one copy of each file. An upload is answered after at most 10 seconds even when the machines picked for the file do not keep it yet, and at once when they are away.
 - Files on a task of no turn go 30 days after the task closed, and a test or work run's logs and files 30 days after the run ended, also on a task still open; a file an agent or a person put on a task under a name like a run's, such as `test-3-plan.md`, is no run's and stays. Migration `run_files` names its run on each run's file, and finds the files of earlier runs by their task, name, the turn that started the run and their time. On a server updated from 0.43 these two rules wait for the CEO's yes to the move, as the old column is still there until then.
 
+## [0.44.2] - 2026-11-25
+
+### Fixed
+
+- A machine that led the company before and follows another now asks its updater again for the dump of what it did while it led, ten minutes after a request that left no dump and no line, or after a dump the updater cleared before it was sealed, so its copy no longer stays in "Saving" for ever after such a request was lost.
+
 ## [0.44.1] - 2026-11-25
 
 ### Fixed
