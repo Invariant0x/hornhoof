@@ -15,6 +15,7 @@ import { liveAgent } from '../src/modules/tasks/engine.js';
 import { checkedWaitTarget } from '../src/modules/tasks/wait-target.js';
 import { as, connectNode, invitePerson, listen, mcp, openStream, setUpCompany, testApp, until, type FakeNode, type StreamReader } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
+import { stored } from './files-fixture.js';
 
 await prepareSharedDatabase();
 
@@ -473,7 +474,7 @@ describe('GET /api/assistant/attachments/:id', () => {
     /* hh-attach keeps no backslash or line break in a name; one already in the database still goes out escaped. */
     const [odd] = await c.db
       .insert(attachments)
-      .values({ companyId: c.owner.companyId, jobId: run.jobId, agentId: agent.id, name: 'a\\b\r\nX-Injected: 1\u2028\ud800.txt', mediaType: 'application/octet-stream', bytes: BYTES, size: BYTES.length })
+      .values({ companyId: c.owner.companyId, jobId: run.jobId, agentId: agent.id, name: 'a\\b\r\nX-Injected: 1\u2028\ud800.txt', mediaType: 'application/octet-stream', sha256: await stored(c.db, BYTES, c.app.ctx.config), size: BYTES.length })
       .returning();
     const got = await download(c, ava.key, odd!.id);
     expect(got.statusCode).toBe(200);
@@ -503,7 +504,7 @@ describe('GET /api/assistant/attachments/:id', () => {
     const turnOf = async (agentId: string, companyId = c.owner.companyId, subscriptionId = c.plan) =>
       (await c.db.insert(jobs).values({ companyId, subscriptionId, agentId, kind: 'conversation', prompt: 'Hi', status: 'running', startedAt: new Date(), timeoutMs: 9_000_000 }).returning())[0]!.id;
     const file = async (values: Partial<typeof attachments.$inferInsert>) =>
-      (await c.db.insert(attachments).values({ companyId: c.owner.companyId, agentId: agent.id, name: 'file.bin', mediaType: 'application/octet-stream', bytes: BYTES, size: BYTES.length, ...values }).returning())[0]!.id;
+      (await c.db.insert(attachments).values({ companyId: c.owner.companyId, agentId: agent.id, name: 'file.bin', mediaType: 'application/octet-stream', sha256: await stored(c.db, BYTES, c.app.ctx.config), size: BYTES.length, ...values }).returning())[0]!.id;
     const bo = await assistantOf(c, c.olgaSession, c.olga.id, 'Bo');
     expect((await pick(c, c.olgaSession, bo.id, c.olgaPlan)).statusCode).toBe(200);
     const boAgent = await ownAgent(c, bo.id);
@@ -536,7 +537,7 @@ describe('GET /api/assistant/attachments/:id', () => {
     const instance = randomUUID();
     await c.db.insert(programInstances).values({ id: instance, companyId: c.owner.companyId, agentId: agent.id, nodeId: node!.id });
     const [incident] = await c.db.insert(programOperatorCases).values({ companyId: c.owner.companyId, agentId: agent.id, jobId: run.jobId, nodeId: node!.id, instance, reason: 'assignment_unrecorded', evidenceKey: 'file-test', capability: randomUUID(), deadlineAt: new Date('2099-01-01') }).returning();
-    const [picture] = await c.db.insert(attachments).values({ companyId: c.owner.companyId, agentId: agent.id, jobId: run.jobId, operatorCaseId: incident!.id, name: 'case.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+    const [picture] = await c.db.insert(attachments).values({ companyId: c.owner.companyId, agentId: agent.id, jobId: run.jobId, operatorCaseId: incident!.id, name: 'case.png', mediaType: 'image/png', sha256: await stored(c.db, PNG, c.app.ctx.config), size: PNG.length }).returning();
     expect((await c.app.inject({ url: `/api/attachments/${picture!.id}`, ...as(c.ceo) })).statusCode).toBe(200);
     const got = await download(c, ava.key, picture!.id);
     const missing = await download(c, ava.key, randomUUID());

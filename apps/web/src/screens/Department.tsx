@@ -341,43 +341,18 @@ function DrawerHead({ title, onClose }: { title: string; onClose(): void }) {
   );
 }
 
-/* The line of what happened, in its own direction: as many lines as its words take, up to three. A longer one folds to three,
-   and its own button at the end of the first row unfolds it whole and folds it again. It is measured folded, as it shows. */
+/* The line of what happened, in its own direction, on one row with its dot and time. Words wider than the row end in an
+   ellipsis, and the whole text is the line's title. */
 function HintLine({ said }: { said: Said }) {
   const t = useT();
-  const id = useId();
-  const fold = useRef<HTMLSpanElement>(null), words = useRef<HTMLSpanElement>(null);
-  const [open, setOpen] = useState(false);
-  const [long, setLong] = useState(false);
   const text = said?.text ?? t.dept.hint;
-  useLayoutEffect(() => {
-    setOpen(false);
-    const box = fold.current, line = words.current;
-    if (!box || !line) return;
-    const measure = () => {
-      if (box.classList.contains('folded')) setLong(line.offsetHeight > box.clientHeight + 1);
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = guardedResizeObserver(measure, 'department-hint');
-    observer.observe(line);
-    return () => observer.disconnect();
-  }, [said?.key]);
-  const toggle = open ? t.dept.hintLess : t.dept.hintMore;
   return (
     <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
       <span className="live" />
       {said && <span className="tt">{said.at}</span>}
-      <span ref={fold} id={id} className={`tx-fold${open ? '' : ' folded'}`}>
-        <span ref={words} key={said?.key ?? 0} className="tx in" dir="auto" title={text}>
-          {text}
-        </span>
+      <span key={said?.key ?? 0} className="tx in" dir="auto" title={text}>
+        {text}
       </span>
-      {long && (
-        <button className="zbtn tx-more" type="button" aria-expanded={open} aria-controls={id} aria-label={toggle} title={toggle} onClick={() => setOpen(!open)}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={open ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} /></svg>
-        </button>
-      )}
     </div>
   );
 }
@@ -397,7 +372,7 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
   const root = useRef<HTMLDivElement>(null), dock = useRef<HTMLDivElement>(null), actions = useRef<HTMLDivElement>(null), crumbs = useRef<HTMLElement>(null);
   /* plate: how tall the department's name stands, as it wraps; 0 until it is measured. */
   const [space, setSpace] = useState({ right: 16, bottom: 228, plate: 0, tickerHidden: false });
-  /* What Show everything leaves free at the bottom: the dock, with the line of what happened as tall as it shows folded. */
+  /* What Show everything leaves free at the bottom: the dock, with the line of what happened. */
   const fitBottom = useRef(76);
   const tickerHidden = space.tickerHidden;
   const [icons, setIcons] = useState(false);
@@ -418,14 +393,11 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
       }
       setIcons(phone || (!!el.clientWidth && need.current!.px > width - ZOOM_ROOM - 16));
       const right = phone ? 16 : acts.offsetWidth + 32;
-      /* A wide screen ends the tree and the drawers 16 px above the line of what happened, which grows up with its words. */
+      /* A wide screen ends the tree and the drawers 16 px above the line of what happened. */
       const line = el.querySelector<HTMLElement>(':scope > .dv-dock > .ticker');
       const bottom = phone ? (el.clientHeight ? el.clientHeight - (dock.current ?? acts).offsetTop + 8 : 228)
         : Math.max(76, el.clientHeight && line ? el.clientHeight - line.offsetTop + 16 : 0);
-      /* The line of what happened keeps its own room: as much as it shows folded, three lines, whatever it says now. */
-      const fold = line?.querySelector<HTMLElement>(':scope > .tx-fold.folded');
-      const most = fold ? parseFloat(getComputedStyle(fold).maxHeight) : NaN;
-      fitBottom.current = bottom + (fold && most > fold.offsetHeight ? most - fold.offsetHeight : 0);
+      fitBottom.current = bottom;
       const name = crumbs.current;
       setSpace({ right, bottom, plate: name?.offsetHeight ?? 0, tickerHidden: !phone && width - right - ZOOM_ROOM < 220 });
       onPlate?.(name?.offsetHeight ? name.getBoundingClientRect().height + 8 : null);

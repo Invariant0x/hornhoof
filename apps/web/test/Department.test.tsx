@@ -1709,21 +1709,21 @@ describe('the department bar', () => {
     /* The zoom keeps out and in and Show everything, at its end: a finger does not pinch the schema. */
     expect(decl('.dv-dock .zoom', 'align-self', PHONE)).toBe('flex-end');
     expect(decl('.dv-dock .zv', 'display', PHONE)).toBe('none');
-    /* The line wraps its words over as many lines as it needs, on a phone and on a wide screen alike, where it grows up
-       from the bottom between the zoom and the tools, as the orchestrator's line does on the map. */
-    expect(decl('.ticker', 'white-space')).toBe('normal');
+    /* The line stands on one row, on a phone and on a wide screen alike, between the zoom and the tools, with its dot and
+       time (#2102): words wider than the row end in an ellipsis, and the whole text stays in the line's title. The box of the
+       line itself hides nothing. */
+    expect(decl('.ticker', 'white-space')).toBe('nowrap');
     expect(decl('.ticker', 'overflow')).toBe('visible');
     expect(decl('.dview .ticker', 'max-width')).toBe('none');
-    expect(decl('.ticker .tx', 'overflow-wrap')).toBe('break-word');
-    for (const part of ['.ticker', '.ticker .tx'])
-      for (const rule of rulesFor(part)) {
-        expect.soft(rule.decls['text-overflow'], part).not.toBe('ellipsis');
-        expect.soft(rule.decls.overflow, part).not.toBe('hidden');
-        expect.soft(rule.decls['white-space'], part).not.toBe('nowrap');
-      }
+    expect(decl('.ticker .tx', 'overflow')).toBe('hidden');
+    expect(decl('.ticker .tx', 'text-overflow')).toBe('ellipsis');
+    for (const rule of rulesFor('.ticker')) {
+      expect.soft(rule.decls['text-overflow'], '.ticker').not.toBe('ellipsis');
+      expect.soft(rule.decls.overflow, '.ticker').not.toBe('hidden');
+    }
     for (const part of ['.ticker', '.dv-dock > .ticker', '.ticker .tx', '.dv-dock .ticker .tx', '.ticker .live', '.dv-dock .ticker .live'])
       expect(rulesFor(part).filter(r => r.media === PHONE && ['white-space', 'overflow', 'text-overflow', 'overflow-wrap', 'align-items', 'padding-block', 'margin-block-start'].some(p => p in r.decls))).toEqual([]);
-    /* A line of several rows keeps its dot and time on the first row; one row still stands in the middle of 44 px. */
+    /* One row stands in the middle of 44 px. */
     expect(decl('.ticker', 'align-items')).toBe('flex-start');
     expect(decl('.ticker', 'padding-block')).toBe('max(8px, calc((44px - 1lh) / 2))');
     expect(decl('.ticker .live', 'margin-block-start')).toBe('calc((1lh - 7px) / 2)');
@@ -1747,41 +1747,17 @@ describe('the department bar', () => {
     expect(decl('.dv-empty', 'bottom')).toBe('var(--tree-bottom, 76px)');
   });
 
-  /* The Head of Design's word for #1489 (#1539, N2): the line of what happened takes at most three lines; a longer one folds
-     to three, and its own button unfolds it whole and folds it again. */
-  it.each([['en', 'Show all of it', 'Show less'], ['ru', ru.dept.hintMore, ru.dept.hintLess]] as const)(
-    'folds a line of what happened longer than three lines, and unfolds it whole by its button (%s)', async (language, more, less) => {
-      localStorage.setItem('hh-lang', language);
-      onTestFinished(() => localStorage.removeItem('hh-lang'));
-      const measure = observed();
-      const user = userEvent.setup();
-      shell(treeRoute(), TREE_ORG);
-      await user.click(await screen.findByRole('button', { name: new RegExp(`^${language === 'en' ? 'Development' : 'Разработка'}`) }));
-      const ticker = await waitFor(() => document.querySelector<HTMLElement>('.dview .ticker')!);
-      const fold = ticker.querySelector<HTMLElement>('.tx-fold')!, words = ticker.querySelector<HTMLElement>('.tx')!;
-      /* The words read in their own direction, and a line that fits has nothing to unfold. */
-      expect(words).toHaveAttribute('dir', 'auto');
-      expect(fold).toHaveClass('folded');
-      Object.defineProperty(fold, 'clientHeight', { configurable: true, value: 57 });
-      Object.defineProperty(words, 'offsetHeight', { configurable: true, value: 57 });
-      measure();
-      expect(ticker.querySelector('button')).toBeNull();
-      /* Six lines: three show, and the button says what it does. */
-      Object.defineProperty(words, 'offsetHeight', { configurable: true, value: 114 });
-      measure();
-      const button = within(ticker).getByRole('button', { name: more });
-      expect(button).toHaveAttribute('aria-expanded', 'false');
-      expect(button).toHaveAttribute('aria-controls', fold.id);
-      await user.click(button);
-      expect(fold).not.toHaveClass('folded');
-      expect(within(ticker).getByRole('button', { name: less })).toHaveAttribute('aria-expanded', 'true');
-      await user.click(within(ticker).getByRole('button', { name: less }));
-      expect(fold).toHaveClass('folded');
-      /* Folded, it shows three lines and hides the rest until it is unfolded. */
-      expect(decl('.ticker .tx-fold.folded', 'max-block-size')).toBe('3lh');
-      expect(decl('.ticker .tx-fold.folded', 'overflow')).toBe('hidden');
-      expect([en.dept.hintMore, en.dept.hintLess]).toEqual(['Show all of it', 'Show less']);
-    });
+  /* The line of what happened stands on one row (#2102): its whole text is its title, and nothing in it unfolds. */
+  it('keeps the whole text of the line of what happened in its title, with nothing to unfold', async () => {
+    const user = userEvent.setup();
+    shell(treeRoute(), TREE_ORG);
+    await user.click(await screen.findByRole('button', { name: /^Development/ }));
+    const ticker = await waitFor(() => document.querySelector<HTMLElement>('.dview .ticker')!);
+    const words = ticker.querySelector<HTMLElement>('.tx')!;
+    expect(words).toHaveAttribute('dir', 'auto');
+    expect(words).toHaveAttribute('title', words.textContent!);
+    expect(ticker.querySelector('button')).toBeNull();
+  });
 
   it('puts the zoom of the tree in the same dock, the only zoom on the screen', async () => {
     const { user } = await open(375);

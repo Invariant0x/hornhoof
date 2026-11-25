@@ -794,30 +794,25 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .zbtn:hover { color: var(--cyan-ink); }
 .zbtn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .zv { flex: none; box-sizing: border-box; min-inline-size: 52px; padding-inline: 8px; white-space: nowrap; text-align: center; font-family: var(--f-body); font-size: 13px; font-weight: 500; line-height: 1.45; color: var(--muted); font-variant-numeric: tabular-nums; }
-/* The orchestrator's line on the map and the line of what happened in a department wrap their words over as many lines as
-   they need, growing up from the bottom, and break a word with a hyphen, by the syllables of the page's language. A line of
-   several rows keeps its dot and time on the first row; one row still stands in the middle of 44 px. */
+/* The orchestrator's line on the map and the line of what happened in a department stand on one row, the dot, the time and
+   the words: words wider than the row end in an ellipsis, and the whole text stays in the line's title (#2102). One row
+   stands in the middle of 44 px. */
 .ticker {
   position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: flex-start; gap: 10px; min-height: 44px;
-  max-width: calc(100% - 2 * 240px); padding: 8px 16px; padding-block: max(8px, calc((44px - 1lh) / 2)); font-size: 13px; white-space: normal; overflow: visible;
+  max-width: calc(100% - 2 * 240px); padding: 8px 16px; padding-block: max(8px, calc((44px - 1lh) / 2)); font-size: 13px; white-space: nowrap; overflow: visible;
   -webkit-hyphens: auto; hyphens: auto;
 }
 .map > .ticker { width: max-content; }
 .ticker .live { flex: none; width: 7px; height: 7px; margin-block-start: calc((1lh - 7px) / 2); border-radius: 50%; background: var(--cyan); animation: blink 1.6s ease-in-out infinite; }
 .ticker .live.off { background: var(--amber); animation: none; }
 .ticker .tt { flex: none; font-family: var(--f-display); color: var(--muted); }
-.ticker .tx { display: block; min-width: 0; overflow-wrap: break-word; }
-/* A department's line shows three lines at most: a longer one folds there, and its button at the end of the first row, 44 px
-   to touch, unfolds it whole. */
-.ticker .tx-fold { flex: 1 1 auto; min-width: 0; }
-.ticker .tx-fold.folded { max-block-size: 3lh; overflow: hidden; }
-.ticker .tx-more { margin-block: calc((1lh - 44px) / 2); margin-inline-end: -12px; }
+.ticker .tx { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ticker .tc { flex: none; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ticker .tc .bar { width: 48px; }
 .ticker .te { flex: none; font-size: 12px; color: var(--muted); }
 .ticker .tx.in { animation: tin .45s ease-out; }
 @keyframes blink { 50% { opacity: .35; } }
-@media (max-width: 720px) { .ticker { bottom: 72px; max-width: calc(100% - 32px); } .map > .ticker { flex-wrap: wrap; row-gap: 4px; } }
+@media (max-width: 720px) { .ticker { bottom: 72px; max-width: calc(100% - 32px); } }
 /* On a narrow screen the orchestrator's line stands over the zoom, and the way back over that line. */
 @media (max-width: 720px) { .map-arrange { bottom: 124px; } }
 @media (prefers-reduced-motion: reduce) { .ticker .live { animation: none; } }
@@ -1712,9 +1707,8 @@ body:has(.dview) .version-mark { display: none; }
 }
 .dview.structure-open .ticker {
   grid-area: ticker; position: relative; inset: auto; transform: none; margin: 0 16px 8px;
-  max-inline-size: none; white-space: normal; overflow: visible;
+  max-inline-size: none; overflow: visible;
 }
-.structure-open .ticker .tx { overflow: visible; overflow-wrap: anywhere; }
 @media (max-width: 760px) {
   .dview.structure-open .crumbs { margin-block-start: 64px; margin-inline: 16px; }
 }

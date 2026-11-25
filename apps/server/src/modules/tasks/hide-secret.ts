@@ -12,6 +12,9 @@ import { factsOf, type Facts, type Query, type TableFacts } from '../merge/facts
 import { queryOf, quote } from '../merge/leader.js';
 import { loadTask, taskSpot, type Task } from './state.js';
 import { note } from './events.js';
+import { fileBytes } from './file-bytes.js';
+import { idOnly } from '../../db/selections.js';
+import { StoreRefused } from '../files/store.js';
 
 type Row = Record<string, unknown>;
 /* What a mask does to one text: the hidden value, wherever it stands, becomes HIDDEN. */
@@ -169,20 +172,51 @@ async function eachBatch(q: Query, select: string, work: (rows: Row[]) => Promis
 
 const jsonOf = (columns: string[], alias: string): string => `jsonb_build_object(${columns.map(name => `'${name}', ${alias}.${quote(name)}`).join(', ')})`;
 
+/* The text files of the store, as the mask reads and rewrites them: a text that changes is kept as a new file, and the
+   one it was goes from the store at once, unless a row still names it. */
+export type StoredTexts = { read: (sha256: string) => Promise<Buffer>; write: (bytes: Buffer) => Promise<{ sha256: string; size: number }> };
+
+/* A file the store has no copy of any more, as on a machine that leads after another kept it, has nothing left to mask:
+   it stops no value from being hidden everywhere else. */
+function unlessLost(err: unknown): null {
+  if ((err instanceof ApiError && err.reason === 'file_lost') || (err instanceof StoreRefused && err.reason === 'missing')) return null;
+  throw err;
+}
+
+/* A text file of the store as the mask leaves it: its new hash and size, or null when the mask changes nothing. */
+async function maskStored(row: Row, mask: Mask, texts: StoredTexts | undefined): Promise<Row | null> {
+  if (!texts || !textFile(row.media_type) || typeof row.sha256 !== 'string') return null;
+  const bytes = await texts.read(row.sha256).catch(unlessLost);
+  if (!bytes) return null;
+  const text = bytes.toString('utf8');
+  if (!Buffer.from(text, 'utf8').equals(bytes)) return null;
+  const masked = mask(text);
+  if (masked === text) return null;
+  const kept = await texts.write(Buffer.from(masked, 'utf8'));
+  return { sha256: kept.sha256, size: kept.size };
+}
+
 /* Every row of the company's prose as the mask leaves it, then every copy of it the journal and the merges kept. Nothing
    of another company is read, and nothing of the value goes to SQL: only text it has already left. */
-export async function maskCompanyRows(q: Query, facts: Facts, company: string, mask: Mask): Promise<number> {
+export async function maskCompanyRows(q: Query, facts: Facts, company: string, mask: Mask, texts?: StoredTexts): Promise<number> {
   if (!UUID.test(company)) throw new Error('A company id is a uuid.');
   let changed = 0;
+  const left = new Set<string>();
   const tables = [...facts.tables.values()].filter(t => t.key.length > 0 && (proseColumns(t).length > 0 || t.name === 'attachments') && scopeOf(t, company));
+  /* The old bytes of a file not moved into the store yet are no column of the merge's shape, but are read here all the same. */
+  const oldBytes = (await q("SELECT 1 AS there FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'attachments' AND column_name = 'bytes'")).length > 0;
   for (const t of tables) {
     const prose = proseColumns(t);
     const files = t.name === 'attachments';
-    const wanted = [...new Set([...t.key, ...prose, ...(files ? ['media_type', 'bytes'] : [])])];
+    const has = (name: string) => (name === 'bytes' ? oldBytes : t.columns.some(column => column.name === name));
+    const wanted = [...new Set([...t.key, ...prose, ...(files ? ['media_type', ...['bytes', 'sha256'].filter(has)] : [])])];
     const only = files ? " AND (t.media_type LIKE 'text/%' OR t.media_type = 'application/json')" : '';
     await eachBatch(q, `SELECT ${jsonOf(wanted, 't')} AS row FROM public.${quote(t.name)} t WHERE ${scopeOf(t, company)!.rows}${only}`, async rows => {
       for (const row of rows) {
-        const now = maskRow(t, row, mask);
+        const stored = files ? await maskStored(row, mask, texts) : null;
+        if (stored) left.add(row.sha256 as string);
+        const masked = maskRow(t, row, mask);
+        const now = masked || stored ? { ...masked, ...stored } : null;
         if (!now) continue;
         await q(
           `UPDATE public.${quote(t.name)} t SET ${Object.keys(now).map(name => `${quote(name)} = r.${quote(name)}`).join(', ')}
@@ -193,8 +227,10 @@ export async function maskCompanyRows(q: Query, facts: Facts, company: string, m
       }
     });
   }
-  for (const t of tables) changed += await maskCopies(q, t, company, mask);
+  for (const t of tables) changed += await maskCopies(q, t, company, mask, texts, left);
   changed += await maskParked(q, company, mask);
+  /* The text as it was leaves the store at the next round, not after the day an unused file waits. */
+  for (const sha256 of left) await q('UPDATE net.files SET drop_at = now() WHERE sha256 = $1 AND NOT EXISTS (SELECT 1 FROM public.attachments WHERE sha256 = $1)', [sha256]);
   return changed;
 }
 
@@ -206,8 +242,18 @@ const patched = (t: TableFacts, image: Row | null, mask: Mask, also: Row = {}): 
   return kept && Object.keys(kept).length > 0 ? { ...image, ...kept } : null;
 };
 
+/* A side of a merge's conflict as the mask leaves it: its prose, and the text file it names, which a pick would bring
+   back, kept again as it reads now. The text it named is noted in left, to leave the store. */
+async function patchedSide(t: TableFacts, image: Row | null, mask: Mask, also: Row, texts: StoredTexts | undefined, left: Set<string>): Promise<Row | null> {
+  const masked = patched(t, image, mask, also);
+  const stored = image && t.name === 'attachments' ? await maskStored({ ...also, ...image }, mask, texts) : null;
+  if (!stored) return masked;
+  left.add(image!.sha256 as string);
+  return { ...(masked ?? image), ...stored };
+}
+
 /* The journal's old values of the company's rows, here or deleted since, and what merges kept of them. */
-async function maskCopies(q: Query, t: TableFacts, company: string, mask: Mask): Promise<number> {
+async function maskCopies(q: Query, t: TableFacts, company: string, mask: Mask, texts: StoredTexts | undefined, left: Set<string>): Promise<number> {
   const scope = scopeOf(t, company)!;
   const name = t.name.replaceAll("'", "''");
   const keys = `SELECT ${jsonOf(t.key, 't')} FROM public.${quote(t.name)} t WHERE ${scope.rows}
@@ -233,11 +279,14 @@ async function maskCopies(q: Query, t: TableFacts, company: string, mask: Mask):
       changed += 1;
     }
   });
-  await eachBatch(q, `SELECT jsonb_build_object('id', c.id, 'here', c.here, 'there', c.there, 'value', c.value, 'why', c.why) AS row FROM net.merge_conflicts c
+  const sideMedia = t.name === 'attachments' ? ", 'media_type', (SELECT a.media_type FROM public.attachments a WHERE a.id = (c.key->>'id')::uuid)" : '';
+  await eachBatch(q, `SELECT jsonb_build_object('id', c.id, 'here', c.here, 'there', c.there, 'value', c.value, 'why', c.why${sideMedia}) AS row FROM net.merge_conflicts c
     WHERE c.tbl = '${name}' AND (c.key IN (${keys}) OR ${scope.image('c.here')} OR ${scope.image('c.there')}
       OR c.task_id IN (SELECT id FROM public.tasks WHERE company_id = '${company}'::uuid))`, async rows => {
     for (const row of rows) {
-      const [here, there, value] = [patched(t, row.here as Row | null, mask), patched(t, row.there as Row | null, mask), patched(t, row.value as Row | null, mask)];
+      const also = { media_type: row.media_type };
+      const side = (image: unknown) => patchedSide(t, image as Row | null, mask, also, texts, left);
+      const [here, there, value] = [await side(row.here), await side(row.there), await side(row.value)];
       const why = typeof row.why === 'string' && mask(row.why) !== row.why ? mask(row.why) : null;
       if (!here && !there && !value && !why) continue;
       await q('UPDATE net.merge_conflicts SET here = coalesce($1::jsonb, here), there = coalesce($2::jsonb, there), value = coalesce($3::jsonb, value), why = coalesce($4, why) WHERE id = $5::uuid',
@@ -265,17 +314,23 @@ async function maskParked(q: Query, company: string, mask: Mask): Promise<number
 
 /* The value goes out of every row of the company, and its fingerprint stays for old copies. The caller holds the
    write gate and the transaction; the value is in memory only for this call. */
-export async function hideSecretIn(db: Db, companyId: string, personId: string, value: string): Promise<number> {
+export async function hideSecretIn(db: Db, companyId: string, personId: string, value: string, texts?: StoredTexts): Promise<number> {
   const { fingerprint, characters, window_hash } = fingerprintOf(value);
   await db.insert(secretRedactions).values({ companyId, fingerprint, characters, windowHash: window_hash, personId }).onConflictDoNothing();
   const q = queryOf(db);
-  return maskCompanyRows(q, await factsOf(q), companyId, valueMask(value));
+  return maskCompanyRows(q, await factsOf(q), companyId, valueMask(value), texts);
 }
+
+/* The store's text files as a transaction reads and writes them. */
+export const storedTexts = (ctx: Pick<Ctx, 'files'>, tx: Pick<Db, 'execute'>): StoredTexts => ({
+  read: sha256 => ctx.files.bytes(tx, sha256),
+  write: bytes => ctx.files.putBytes(tx, bytes),
+});
 
 const invalid = () => new ApiError(400, 'validation', `Select a secret of at least ${MIN_SECRET_LENGTH} characters in this task or its log.`);
 
 /* Only validation, hashing and the replacement in this process see the value. No SQL text, parameter or entry carries it. */
-export async function hideTaskSecret(ctx: Pick<Ctx, 'db' | 'bus'>, person: Person, task: Task, value: string): Promise<Task> {
+export async function hideTaskSecret(ctx: Pick<Ctx, 'db' | 'bus' | 'config' | 'files'>, person: Person, task: Task, value: string): Promise<Task> {
   if (task.companyId !== person.companyId || person.via || person.assistant || !(await runsDepartment(ctx.db, person, task.departmentId))) {
     throw new ApiError(403, 'forbidden', 'Only the CEO, the CEO delegate and people running this department may hide a secret.');
   }
@@ -291,10 +346,12 @@ export async function hideTaskSecret(ctx: Pick<Ctx, 'db' | 'bus'>, person: Perso
     const log = await tx.select({ text: taskEvents.text, data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.companyId, person.companyId)));
     const evidence = log.flatMap(e => typeof e.data?.evidence === 'string' ? [e.data.evidence] : []);
     const archiveIds = log.flatMap(e => Array.isArray(e.data?.fullTexts) ? e.data.fullTexts.flatMap((ref: unknown) => ref && typeof ref === 'object' && 'id' in ref && typeof ref.id === 'string' ? [ref.id] : []) : []);
-    const archives = archiveIds.length ? await tx.select({ bytes: attachments.bytes }).from(attachments).where(and(eq(attachments.companyId, person.companyId), eq(attachments.taskId, task.id), eq(attachments.mediaType, 'text/plain'), inArray(attachments.id, archiveIds))) : [];
-    const texts = [current.title, current.brief, current.body, ...log.map(e => e.text), ...evidence, ...archives.map(file => Buffer.from(file.bytes).toString('utf8'))];
+    const archives = archiveIds.length ? await tx.select(idOnly(attachments)).from(attachments).where(and(eq(attachments.companyId, person.companyId), eq(attachments.taskId, task.id), eq(attachments.mediaType, 'text/plain'), inArray(attachments.id, archiveIds))) : [];
+    const read = { db: tx as unknown as Db, config: ctx.config, files: ctx.files };
+    const archived = await Promise.all(archives.map(async file => (await fileBytes(read, file.id).catch(unlessLost))?.toString('utf8') ?? ''));
+    const texts = [current.title, current.brief, current.body, ...log.map(e => e.text), ...evidence, ...archived];
     if (!texts.some(text => text.includes(value))) throw invalid();
-    await hideSecretIn(tx as unknown as Db, person.companyId, person.id, value);
+    await hideSecretIn(tx as unknown as Db, person.companyId, person.id, value, storedTexts(ctx, tx));
     await note(tx, task, { actor: { personId: person.id }, kind: 'comment', text: 'Secret hidden.', data: { secretHidden: true } });
     await tx.update(tasks).set({ version: sql`${tasks.version} + 1`, updatedAt: new Date() }).where(eq(tasks.id, task.id));
   }));

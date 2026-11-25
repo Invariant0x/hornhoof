@@ -29,13 +29,14 @@ export async function refreshCasePicture(ctx: Ctx, row: Case): Promise<ProgramVi
 async function keepLook(tx: Tx, inside: Ctx, row: Case, view: ProgramView, png: Buffer): Promise<void> {
   await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, row.agentId)).for('update');
   const settled = await settleAnsweredQuestions(inside, row.agentId, view, png);
-  if (!settled.includes(row.id)) await storeCasePicture(tx, row, png);
+  if (!settled.includes(row.id)) await storeCasePicture(tx, inside.files, row, png);
 }
 
 type Tx = Parameters<Parameters<Ctx['db']['transaction']>[0]>[0];
 
-export async function storeCasePicture(tx: Tx, row: Case, png: Buffer): Promise<void> {
-  const [picture] = await tx.insert(attachments).values({ companyId: row.companyId, jobId: row.jobId, agentId: row.agentId, operatorCaseId: row.id, mediaType: 'image/png', bytes: png, size: png.length }).returning({ id: attachments.id });
+export async function storeCasePicture(tx: Tx, files: Ctx['files'], row: Case, png: Buffer): Promise<void> {
+  const kept = await files.putBytes(tx, png);
+  const [picture] = await tx.insert(attachments).values({ companyId: row.companyId, jobId: row.jobId, agentId: row.agentId, operatorCaseId: row.id, mediaType: 'image/png', sha256: kept.sha256, size: kept.size }).returning({ id: attachments.id });
   await tx.update(programOperatorCases).set({ pictureId: picture!.id }).where(eq(programOperatorCases.id, row.id));
 }
 

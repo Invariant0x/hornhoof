@@ -63,9 +63,9 @@ it('the operator of the case may open the picture, and the program it shows may 
   const incident = await c.caseOf(turn.id);
   const [notice] = await noticesFor(c, incident);
   await c.db.update(jobs).set({ status: 'running' }).where(eq(jobs.id, notice!.job.id));
-  const bytes = await agentCasePicture(c.db, { id: notice!.job.id, companyId: c.companyId, agentId: notice!.job.agentId!, agentKind: 'worker', roleKey: 'OPS-PROGRAM', departmentId: null, skills: [] }, `operator-case:${incident.id}`, incident.pictureId!);
+  const bytes = await agentCasePicture(c.ctx, { id: notice!.job.id, companyId: c.companyId, agentId: notice!.job.agentId!, agentKind: 'worker', roleKey: 'OPS-PROGRAM', departmentId: null, skills: [] }, `operator-case:${incident.id}`, incident.pictureId!);
   expect(bytes.equals(await render(CELLS))).toBe(true);
-  await expect(agentCasePicture(c.db, { id: turn.id, companyId: c.companyId, agentId: c.agent.id, agentKind: 'worker', roleKey: null, departmentId: null, skills: [] }, `operator-case:${incident.id}`, incident.pictureId!)).rejects.toMatchObject({ status: 404 });
+  await expect(agentCasePicture(c.ctx, { id: turn.id, companyId: c.companyId, agentId: c.agent.id, agentKind: 'worker', roleKey: null, departmentId: null, skills: [] }, `operator-case:${incident.id}`, incident.pictureId!)).rejects.toMatchObject({ status: 404 });
 });
 
 it('keeps the screen only as its masked picture, and keeps no way to press keys on it', async () => {
@@ -76,8 +76,8 @@ it('keeps the screen only as its masked picture, and keeps no way to press keys 
   const cells = `${CELLS} ${secret}`;
   await c.unrecorded(c.agent.id, turn.id, new Date(), seen({ screen: { cols: 80, rows: 24, cells } }));
   const [picture] = await picturesOf(c, turn.id);
-  expect(Buffer.from(picture!.bytes).equals(await render(cells, [secret]))).toBe(true);
-  expect(Buffer.from(picture!.bytes).equals(await render(cells))).toBe(false);
+  expect((await c.ctx.files.bytes(c.db, picture!.sha256!)).equals(await render(cells, [secret]))).toBe(true);
+  expect((await c.ctx.files.bytes(c.db, picture!.sha256!)).equals(await render(cells))).toBe(false);
   const stored = await c.db.select(only(agentEvents, 'data')).from(agentEvents).where(eq(agentEvents.jobId, turn.id));
   expect(JSON.stringify(stored)).not.toContain('the words nobody sent');
   expect(JSON.stringify(stored)).not.toContain(secret);
@@ -89,7 +89,7 @@ it('a screen of sign-in or terms is drawn as the program shows it: nothing but t
   const cells = 'Sign in to go on\n> Accept the terms of use';
   await c.unrecorded(c.agent.id, turn.id, new Date(), seen({ screen: { cols: 80, rows: 24, cells } }));
   const [picture] = await picturesOf(c, turn.id);
-  expect(Buffer.from(picture!.bytes).equals(await render(cells))).toBe(true);
+  expect((await c.ctx.files.bytes(c.db, picture!.sha256!)).equals(await render(cells))).toBe(true);
 });
 
 it('the same fact sent again is the same fact: no second picture, case or notice', async () => {
@@ -120,7 +120,7 @@ it('a second look at the same turn goes on its case: the latest picture, and no 
   expect(incident.id).toBe(first.id);
   expect(incident.evidence).toMatchObject([{ input: 'text' }, { input: 'empty' }]);
   const [latest] = await c.db.select().from(attachments).where(eq(attachments.id, incident.pictureId!));
-  expect(Buffer.from(latest!.bytes).equals(await render('Second look.'))).toBe(true);
+  expect((await c.ctx.files.bytes(c.db, latest!.sha256!)).equals(await render('Second look.'))).toBe(true);
   expect(await noticesFor(c, incident)).toHaveLength(1);
 });
 
