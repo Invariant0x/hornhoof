@@ -21,7 +21,7 @@ export type LeaseStore = {
   endSessions(): Promise<number>;
   /* What keeps this machine from leading, a line each; none when every fence holds. */
   problems(): Promise<string[]>;
-  /* How many rows older than a week it removed, of the journal, the sources and the kept answers of tool calls, while this
+  /* How many rows past their day it removed, of the journal, the sources and the kept answers of tool calls, while this
      machine keeps the data alone and nobody reads them. */
   prune(batch?: number): Promise<number>;
   /* Whether another machine is listed as keeping the company's data. Null: it cannot be told now. */
@@ -61,44 +61,55 @@ const END_SESSIONS = `SELECT count(*) FILTER (WHERE pg_terminate_backend(pid))::
   WHERE datname = current_database() AND pid <> pg_backend_pid() AND (application_name = $1 OR usename = ANY($2::text[]))`;
 
 /* One statement, so that all three go or none: journal rows, the steps of sources, and the kept answers of tool calls whose
-   job no longer runs, each older than a week and a batch at most. Only while this machine's lease stands under a flag,
-   and no merge waits to be applied or checked, as a merge reads the journal from where the two sides parted. Where
-   other machines keep copies, only what every copy that follows already holds: a copy knows by the leader's pulse how
-   far it reaches, and whatever is newer than the oldest of those stays for it. A copy still being made, one that
-   stopped, and one whose slot is lost make themselves again from what the leader holds then, and hold nothing back. A
-   prune that took a journal row says how far back the journal now goes, and lets go of what merges noted of rows older
-   than that. */
+   job no longer runs, each older than the bound and a batch at most. Only while this machine's lease stands under a
+   flag, and no merge waits to be applied or checked, as a merge reads the journal from where the two sides parted.
+   The bound is a day ago. A page sends a change again for a minute after its first failure and front a tool call for
+   50 seconds, so a day is far past every retry of theirs. A node sends a message again for as long as it is not
+   confirmed, however long it was away: the steps of its messages go all the same, and its stream's floor rises to the
+   last message whose steps went, below which a message counts as handled.
+   Where other machines keep copies, the bound is a day before what the oldest copy that follows already holds: a copy
+   knows by the leader's pulse how far it reaches, whatever is newer stays for it, and a merge of it reads the journal
+   from a day before where the two parted. A copy still being made, one that stopped, one whose slot is lost, and one
+   silent for over a week make themselves again from what the leader holds then, or are merged row by row, and hold
+   nothing back. A prune that took a journal row says how far back the journal now goes, never less far than it said
+   before, and lets go of what merges noted of rows older than that. */
 const HELD = `EXISTS (SELECT FROM net_local.lease WHERE sync IS NOT NULL AND until > clock_timestamp()) AND NOT EXISTS (SELECT FROM net.merges WHERE status IN ('pending', 'applied'))`;
-const WEEK_OLD = `at < now() - interval '7 days'`;
-const COPIES_HOLD = `at < COALESCE((
+const KEPT = `interval '1 day'`;
+const COPY_HOLDS = `interval '7 days'`;
+const COPIES_HOLD = `COALESCE((
     SELECT min(m.copy_at) FROM public.machines m
-    WHERE m.role = 'data' AND m.revoked_at IS NULL AND m.network_id IS DISTINCT FROM $2 AND m.copy_state = 'ready' AND m.copy_at IS NOT NULL
+    WHERE m.role = 'data' AND m.revoked_at IS NULL AND m.network_id IS DISTINCT FROM $2 AND m.copy_state = 'ready' AND m.copy_at > now() - ${COPY_HOLDS}
       AND NOT EXISTS (SELECT FROM pg_replication_slots slot WHERE slot.slot_name = m.copy_name AND slot.wal_status = 'lost')
-  ), 'infinity')`;
-/* old: the rows of a table that may go; c.old for a table that goes by another name in its statement. */
-const pruneWith = (copies: boolean): string => {
-  const old = (prefix = ''): string => `${prefix}${WEEK_OLD}${copies ? ` AND ${prefix}${COPIES_HOLD}` : ''}`;
-  return `WITH journal_gone AS (
-    DELETE FROM net.journal WHERE id IN (SELECT id FROM net.journal WHERE ${old()} ORDER BY at LIMIT $1) AND ${HELD} RETURNING 1
+  ), 'infinity') - ${KEPT}`;
+/* A step of a node's message, node:<node>:<stream>:<message>: its stream and its message's number. */
+const NODE_STEP = `'^(node:[^:]+:[^:]+):([0-9]+)$'`;
+const pruneWith = (copies: boolean): string => `WITH bound AS (
+    SELECT LEAST(now() - ${KEPT}${copies ? `, ${COPIES_HOLD}` : ''}) AS below
+  ), journal_gone AS (
+    DELETE FROM net.journal WHERE id IN (SELECT id FROM net.journal WHERE at < (SELECT below FROM bound) ORDER BY at LIMIT $1) AND ${HELD} RETURNING 1
   ), sources_gone AS (
-    DELETE FROM public.applied WHERE source IN (SELECT source FROM public.applied WHERE ${old()} ORDER BY at LIMIT $1) AND ${HELD} RETURNING 1
+    DELETE FROM public.applied WHERE source IN (SELECT source FROM public.applied WHERE at < (SELECT below FROM bound) ORDER BY at LIMIT $1) AND ${HELD} RETURNING base
+  ), floors AS (
+    INSERT INTO public.node_stream_floors (stream, upto)
+    SELECT (regexp_match(base, ${NODE_STEP}))[1], max((regexp_match(base, ${NODE_STEP}))[2]::bigint) FROM sources_gone WHERE base ~ ${NODE_STEP} GROUP BY 1
+    ON CONFLICT (stream) DO UPDATE SET upto = GREATEST(public.node_stream_floors.upto, EXCLUDED.upto) RETURNING 1
   ), calls_gone AS (
     DELETE FROM public.tool_calls WHERE id IN (
-      SELECT c.id FROM public.tool_calls c JOIN public.jobs j ON j.id = c.job_id WHERE ${old('c.')} AND j.status <> 'running' ORDER BY c.at LIMIT $1
+      SELECT c.id FROM public.tool_calls c JOIN public.jobs j ON j.id = c.job_id WHERE c.at < (SELECT below FROM bound) AND j.status <> 'running' ORDER BY c.at LIMIT $1
     ) AND ${HELD} RETURNING 1
   ), horizon AS (
-    INSERT INTO net.horizon (below) SELECT now() - interval '7 days' WHERE EXISTS (SELECT FROM journal_gone)
-    ON CONFLICT (id) DO UPDATE SET below = EXCLUDED.below RETURNING below
+    INSERT INTO net.horizon (below) SELECT below FROM bound WHERE EXISTS (SELECT FROM journal_gone)
+    ON CONFLICT (id) DO UPDATE SET below = GREATEST(net.horizon.below, EXCLUDED.below) RETURNING below
   ), noted_gone AS (
-    DELETE FROM net.merge_consumed WHERE ${WEEK_OLD} AND EXISTS (SELECT FROM horizon) RETURNING 1
+    DELETE FROM net.merge_consumed WHERE at < (SELECT below FROM horizon) RETURNING 1
   ) SELECT ((SELECT count(*) FROM journal_gone) + (SELECT count(*) FROM sources_gone) + (SELECT count(*) FROM calls_gone))::int AS pruned, $2::text IS NOT NULL AS named`;
-};
 /* The keeper of a new build runs a while on the schema of the build before, which knows no copies: it prunes as one
    machine does until the app has migrated. */
 const HAS_COPIES = `SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'machines' AND column_name = 'copy_at') AS there`;
-/* The keeper of a new build runs a while on the schema of the build before, which has no record of merges: it prunes
-   nothing until the app has migrated. */
-const HAS_MERGES = `SELECT to_regclass('net.merges') IS NOT NULL AND to_regclass('net.horizon') IS NOT NULL AND to_regclass('net.merge_consumed') IS NOT NULL AS there`;
+/* The keeper of a new build runs a while on the schema of the build before, which has no record of merges or no floors of
+   node streams: it prunes nothing until the app has migrated. */
+const HAS_MERGES = `SELECT to_regclass('net.merges') IS NOT NULL AND to_regclass('net.horizon') IS NOT NULL AND to_regclass('net.merge_consumed') IS NOT NULL
+  AND to_regclass('public.node_stream_floors') IS NOT NULL AS there`;
 
 /* The keeper of a new build runs a while on the schema of the build before, which has no roles yet: it asks first. */
 const HAS_ROLES = `SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'machines' AND column_name = 'role') AS there`;
@@ -107,7 +118,7 @@ const OTHER_DATA = `SELECT EXISTS (SELECT FROM public.machines WHERE role = 'dat
 /* Any right on a table at all. */
 const TABLE_RIGHTS = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'].join(', ');
 /* The tables of public that say where a change came from: an agent that could write them could make a retry run twice. */
-const SOURCE_TABLES = ['applied', 'tool_calls'];
+const SOURCE_TABLES = ['applied', 'tool_calls', 'node_stream_floors'];
 
 /* Every fence, in the order a person would mend them. A trigger counts only as Hornhoof leaves it: enabled the ordinary
    way, and the fence deferred to the commit. */

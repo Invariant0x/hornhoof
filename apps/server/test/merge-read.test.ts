@@ -123,6 +123,11 @@ describe('reading both sides of a merge', () => {
     const [job] = await db.insert(jobs).values({ companyId: c.acme.id, subscriptionId: plan!.id, prompt: 'Say hi', timeoutMs: 60_000 }).returning();
     await db.execute(sql`INSERT INTO tool_calls (id, job_id, answer) VALUES (${call}, ${job!.id}, '{}'::jsonb)`);
     expect(await listedSources(q, ['node:n1:jobs:7:0', 'node:n1:jobs:8:0'], [call, randomUUID()])).toEqual({ sources: new Set(['node:n1:jobs:7:0']), calls: new Set([call]) });
+    /* A node's message whose steps were pruned here is listed by its stream's floor. */
+    await db.execute(sql`INSERT INTO node_stream_floors (stream, upto) VALUES ('node:n1:jobs', 9)`);
+    expect(await listedSources(q, ['node:n1:jobs:8:0', 'node:n1:jobs:9:2', 'node:n1:jobs:12:0', 'node:n2:jobs:3:0', 'web:x:0'], [])).toEqual({
+      sources: new Set(['node:n1:jobs:8:0', 'node:n1:jobs:9:2']), calls: new Set(),
+    });
     const conflict = (picked: string | null, key: string) =>
       db.execute(sql`INSERT INTO net.merge_conflicts (merge, tbl, key, op, kind, topic, why, picked) VALUES (${merge}, 'tasks', ${JSON.stringify({ id: key })}::jsonb, 'update', 'differs', 'work', 'Both changed it.', ${picked})`);
     await conflict(null, c.one.id);

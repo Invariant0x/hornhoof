@@ -184,6 +184,28 @@ describe('numbered messages of a node', () => {
     expect((await listed(c.db, `node:builtin:${c.stream}:7`))!.next).toBeGreaterThanOrEqual(first!.next);
   });
 
+  it("skips a message at or below its stream's floor once its steps were pruned, and handles an end there again", async () => {
+    const c = await live();
+    const run = await c.turn();
+    c.builtin.send(word(run.jobId, 'Five.', 5));
+    await until(() => c.builtin.upto.length === 1);
+    /* As the keeper's prune leaves it: the steps gone, the stream's floor at the last message it pruned. */
+    await c.db.execute(sql`DELETE FROM applied WHERE base LIKE ${`node:builtin:${c.stream}:%`}`);
+    await c.db.execute(sql`INSERT INTO node_stream_floors (stream, upto) VALUES (${`node:builtin:${c.stream}`}, 7)`);
+    c.builtin.send(word(run.jobId, 'Five.', 5));
+    c.builtin.send(word(run.jobId, 'Seven.', 7));
+    c.builtin.send(word(run.jobId, 'Eight.', 8));
+    await until(() => c.builtin.upto.length === 4);
+    expect(c.builtin.upto).toEqual([5, 5, 7, 8]);
+    expect(await textsOf(c.db, run.jobId)).toEqual(['Five.', 'Eight.']);
+    /* A job's end has guards of its own and is handled again, as when it is listed. */
+    const end = { type: 'job.done' as const, jobId: run.jobId, ok: false, sessionId: null, result: '', tail: '', error: 'agent_failed' as const, n: 6 };
+    c.builtin.send(end);
+    await until(() => c.builtin.upto.length === 5);
+    expect(c.builtin.acks).toEqual([run.jobId]);
+    expect(await jobOf(c.db, run.jobId)).toMatchObject({ status: 'failed', error: 'agent_failed' });
+  });
+
   it('takes a message again after a failure that passes, and nothing that came after it', async () => {
     const c = await live();
     const run = await c.turn();

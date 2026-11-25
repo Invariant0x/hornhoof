@@ -130,11 +130,27 @@ export async function consumedIds(q: Query, ids: string[]): Promise<Set<string>>
   return found;
 }
 
-/* Which of these sources and tool calls the side lists as done. */
+/* A step of a node's message: its stream and its message's number. */
+const NODE_STEP = /^(node:[^:]+:[^:]+):(\d+):\d+$/;
+
+/* Which of these sources and tool calls the side lists as done. A node's message is done too at or below its stream's
+   floor, where its steps were pruned; a side of the build before keeps no floors. */
 export async function listedSources(q: Query, sources: string[], calls: string[]): Promise<{ sources: Set<string>; calls: Set<string> }> {
   const found = { sources: new Set<string>(), calls: new Set<string>() };
   for (const batch of batches(sources, JOURNAL_BATCH)) {
     for (const row of await q<{ source: string }>('SELECT source FROM public.applied WHERE source IN (SELECT jsonb_array_elements_text($1::jsonb))', [JSON.stringify(batch)])) found.sources.add(row.source);
+  }
+  const steps = sources.flatMap(source => {
+    const step = NODE_STEP.exec(source);
+    return step && !found.sources.has(source) ? [{ source, stream: step[1]!, n: Number(step[2]) }] : [];
+  });
+  const [floored] = steps.length ? await q<{ there: boolean }>(`SELECT to_regclass('public.node_stream_floors') IS NOT NULL AS there`) : [];
+  if (floored?.there) {
+    const floors = new Map<string, number>();
+    for (const batch of batches([...new Set(steps.map(step => step.stream))], KEYS_BATCH)) {
+      for (const row of await q<{ stream: string; upto: unknown }>('SELECT stream, upto FROM public.node_stream_floors WHERE stream IN (SELECT jsonb_array_elements_text($1::jsonb))', [JSON.stringify(batch)])) floors.set(row.stream, Number(row.upto));
+    }
+    for (const step of steps) if (step.n <= (floors.get(step.stream) ?? -1)) found.sources.add(step.source);
   }
   for (const batch of batches(calls, JOURNAL_BATCH)) {
     for (const row of await q<{ id: string }>('SELECT id FROM public.tool_calls WHERE id IN (SELECT value::uuid FROM jsonb_array_elements_text($1::jsonb))', [JSON.stringify(batch)])) found.calls.add(row.id);

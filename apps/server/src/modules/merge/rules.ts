@@ -61,6 +61,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   /* Records that are written once: one the leader lacks is added, and none is compared. */
   applied: add('work'),
   tool_calls: add('work'),
+  /* A floor the leader has stands: a node's stream is handled in order on one side at a time. */
+  node_stream_floors: add('work'),
   machine_online: add('machines'),
   person_changes: add('people'),
   node_connections: add('plans'),

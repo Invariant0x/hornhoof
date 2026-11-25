@@ -2382,6 +2382,15 @@ export const toolCalls = pgTable(
   t => [index('tool_calls_at').on(t.at)],
 );
 
+/* How far the steps of a node's stream were pruned from applied: the last message of it whose steps went. A node sends
+   a message again for as long as it is not confirmed, however long it was away, and a socket's messages are handled in
+   order, so every message of the stream numbered up to this one was handled here. stream: the source of its messages
+   without their number. */
+export const nodeStreamFloors = pgTable('node_stream_floors', {
+  stream: text('stream').primaryKey(),
+  upto: bigint('upto', { mode: 'number' }).notNull(),
+});
+
 /* The company's own certificate authority, made once by the app that leads. Its key is kept sealed with the server's
    secret, as the link's key is, and only the leading app signs with it. The three tables below keep their rows to their
    owner, whatever a role is granted. */

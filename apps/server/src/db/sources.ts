@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { asc, eq, sql } from 'drizzle-orm';
 import type { Db } from './client.js';
 import { writeGate } from './gate.js';
-import { applied } from './schema.js';
+import { applied, nodeStreamFloors } from './schema.js';
 
 /* The work running now, when a node message, a page's request or a tool call started it: its name without a step, the
    step its next commit takes, whether it still runs, and whether any step of it committed. */
@@ -10,7 +10,8 @@ export type Source = { base: string; next: number; open: boolean; wrote: boolean
 
 export const sources = new AsyncLocalStorage<Source>();
 
-export const nodeSource = (node: string, stream: string, n: number): string => `node:${node}:${stream}:${n}`;
+export const nodeStream = (node: string, stream: string): string => `node:${node}:${stream}`;
+export const nodeSource = (node: string, stream: string, n: number): string => `${nodeStream(node, stream)}:${n}`;
 export const webSource = (id: string): string => `web:${id}`;
 export const toolSource = (invocation: string): string => `tool:${invocation}`;
 export const stepOf = (base: string, step: number): string => `${base}:${step}`;
@@ -125,6 +126,13 @@ export async function listed(db: Db, base: string): Promise<{ steps: number; fir
   if (!rows[0]) return null;
   const last = Math.max(...rows.map(row => Number(row.source.slice(base.length + 1))));
   return { steps: rows.length, first: rows[0].source, at: rows[0].at, next: last + 1 };
+}
+
+/* Whether a node's message is at or below the floor of its stream, whose steps were pruned: handled here, as every
+   message of the stream up to the floor was. */
+export async function belowFloor(db: Db, stream: string, n: number): Promise<boolean> {
+  const [row] = await db.select({ upto: nodeStreamFloors.upto }).from(nodeStreamFloors).where(eq(nodeStreamFloors.stream, stream));
+  return row !== undefined && n <= row.upto;
 }
 
 /* Writes a source's first step again as it is, so the journal carries it to whoever keeps a copy, and no step is taken. */

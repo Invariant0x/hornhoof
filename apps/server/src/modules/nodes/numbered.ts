@@ -1,14 +1,14 @@
 import type { Ctx } from '../../app.js';
 import { fromDatabase, notConfirmed } from '../../db/confirm.js';
 import { isLeaseRefused } from '../../db/net.js';
-import { listed, nodeSource, touch, withSource } from '../../db/sources.js';
+import { belowFloor, listed, nodeSource, nodeStream, touch, withSource } from '../../db/sources.js';
 import { ApiError, loggable } from '../../errors.js';
 import type { NodeIdentity, NodeTransport, NumberedMessage } from './hub.js';
 import { receiveNodeMessage } from './lifecycle.js';
 
 /* The ends of jobs and of test parts commit more than once, and their own guards make a second run safe, so one that is
-   listed is handled again: what its first run did not reach still happens. Every other numbered message is skipped once
-   it is listed. */
+   listed, or below its stream's floor, is handled again: what its first run did not reach still happens. Every other
+   numbered message is skipped once it is listed or below the floor. */
 const AGAIN_WHEN_LISTED: ReadonlySet<string> = new Set(['job.done', 'tests.done']);
 
 /* A serialization failure, a deadlock, a lock not available, and a database that cannot take connections. */
@@ -47,11 +47,14 @@ export function passing(err: unknown): boolean {
 export async function handleNumbered(ctx: Ctx, id: NodeIdentity, stream: string, msg: NumberedMessage, transport: NodeTransport): Promise<boolean> {
   /* A built-in node's messages are named without its machine: each node's stream is its own, so two never share a name,
      and a message applied by a build before, which knew one built-in node, is found again. */
-  const base = nodeSource(id.kind === 'builtin' ? 'builtin' : id.nodeId, stream, msg.n);
+  const node = id.kind === 'builtin' ? 'builtin' : id.nodeId;
+  const base = nodeSource(node, stream, msg.n);
   try {
     const before = await listed(ctx.db, base);
-    if (before && !AGAIN_WHEN_LISTED.has(msg.type)) await touch(ctx.db, before.first);
-    else await withSource(base, () => receiveNodeMessage(ctx, id, msg, transport), before?.next);
+    const handled = before !== null || (await belowFloor(ctx.db, nodeStream(node, stream), msg.n));
+    if (handled && !AGAIN_WHEN_LISTED.has(msg.type)) {
+      if (before) await touch(ctx.db, before.first);
+    } else await withSource(base, () => receiveNodeMessage(ctx, id, msg, transport), before?.next);
     return true;
   } catch (err) {
     if (passing(err)) return false;

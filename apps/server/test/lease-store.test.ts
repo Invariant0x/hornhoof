@@ -112,15 +112,17 @@ describe('the lease the keeper holds in the database', () => {
     ]);
   });
 
-  it('prunes journal rows older than a week, a batch at a time, and only while its lease stands under a flag', async () => {
+  it('prunes journal rows older than a day, a batch at a time, and only while its lease stands under a flag', async () => {
     const s = await store();
     await s.lease.take('normal', FAR);
     /* A company is made and renamed twice: three rows of the journal, then a fourth that is new. */
     await s.db.insert(companies).values({ name: 'One' });
     await s.db.update(companies).set({ name: 'Two' });
     await s.db.update(companies).set({ name: 'Three' });
-    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days' WHERE tbl = 'companies'`);
+    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '25 hours' WHERE tbl = 'companies'`);
+    /* Less than a day old: it stays. */
     await s.db.update(companies).set({ name: 'New' });
+    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '23 hours' WHERE at > now() - interval '1 minute'`);
     expect(await s.lease.prune(2)).toBe(2);
     expect(await s.lease.prune()).toBe(1);
     expect(await s.lease.prune()).toBe(0);
@@ -177,8 +179,14 @@ describe('the lease the keeper holds in the database', () => {
     await s.db.insert(companies).values({ name: 'One' });
     await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
     expect(await s.lease.prune()).toBe(1);
-    expect(Math.abs((await horizon()) - 7 * 86_400)).toBeLessThan(2);
+    expect(Math.abs((await horizon()) - 86_400)).toBeLessThan(2);
     expect((await s.run.query<{ n: number }>(`SELECT count(*)::int AS n FROM net.merge_consumed`)).rows).toEqual([{ n: 1 }]);
+    /* A horizon only goes forward: a prune that stops further back, for a copy, leaves it where it was. */
+    await s.run.query(`UPDATE net.horizon SET below = now() - interval '1 hour'`);
+    await s.db.update(companies).set({ name: 'Two' });
+    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
+    expect(await s.lease.prune()).toBe(1);
+    expect(Math.abs((await horizon()) - 3600)).toBeLessThan(2);
   });
 
   it('prunes nothing in a database of the build before, which has no record of merges', async () => {
@@ -187,6 +195,15 @@ describe('the lease the keeper holds in the database', () => {
     await s.db.insert(companies).values({ name: 'One' });
     await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
     await s.run.query('DROP TABLE net.merge_rows, net.merge_conflicts, net.merge_consumed, net.merges, net.restores, net.horizon');
+    expect(await s.lease.prune()).toBe(0);
+  });
+
+  it('prunes nothing in a database of the build before, which keeps no floors of node streams', async () => {
+    const s = await store();
+    await s.lease.take('normal', FAR);
+    await s.db.insert(companies).values({ name: 'One' });
+    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
+    await s.run.query('DROP TABLE node_stream_floors');
     expect(await s.lease.prune()).toBe(0);
   });
 
@@ -216,6 +233,40 @@ describe('the lease the keeper holds in the database', () => {
     expect(await s.lease.prune()).toBe(1);
     expect(await left()).toEqual({ sources: 1, calls: 2 });
     expect((await s.run.query(`SELECT 1 FROM tool_calls WHERE job_id = '${RUNNING}'`)).rows).toHaveLength(1);
+  });
+
+  it('keeps a source and a call for a day, longer than any page or tool call is sent again', async () => {
+    const s = await store();
+    await s.lease.take('normal', FAR);
+    const ENDED = '00000000-0000-4000-8000-000000000002';
+    await s.run.query(`BEGIN; SET LOCAL session_replication_role = replica;
+      INSERT INTO jobs (id, company_id, subscription_id, prompt, timeout_ms, status) VALUES ('${ENDED}', gen_random_uuid(), gen_random_uuid(), 'x', 1000, 'done');
+      INSERT INTO applied (source, base, at) VALUES ('web:old:0', 'web:old', now() - interval '25 hours'), ('web:new:0', 'web:new', now() - interval '23 hours'),
+        ('tool:old:0', 'tool:old', now() - interval '25 hours');
+      INSERT INTO tool_calls (id, job_id, at) VALUES (gen_random_uuid(), '${ENDED}', now() - interval '25 hours'), (gen_random_uuid(), '${ENDED}', now() - interval '23 hours');
+      COMMIT`);
+    expect(await s.lease.prune()).toBe(3);
+    expect((await s.run.query(`SELECT source FROM applied`)).rows).toEqual([{ source: 'web:new:0' }]);
+    expect((await s.run.query<{ n: number }>(`SELECT count(*)::int AS n FROM tool_calls`)).rows).toEqual([{ n: 1 }]);
+  });
+
+  it("raises a node stream's floor to the last message whose steps it pruned, and never lowers it", async () => {
+    const s = await store();
+    await s.lease.take('normal', FAR);
+    /* A node sends its messages again for as long as they are not confirmed, however long it was away: below the floor
+       they count as handled. */
+    await s.run.query(`BEGIN; SET LOCAL session_replication_role = replica;
+      INSERT INTO applied (source, base, at) VALUES
+        ('node:n1:s1:3:0', 'node:n1:s1:3', now() - interval '2 days'), ('node:n1:s1:4:0', 'node:n1:s1:4', now() - interval '2 days'),
+        ('node:n1:s1:4:1', 'node:n1:s1:4', now() - interval '2 days'), ('node:n1:s1:9:0', 'node:n1:s1:9', now()),
+        ('node:builtin:s2:12:0', 'node:builtin:s2:12', now() - interval '2 days'), ('node:n1:s3:2:0', 'node:n1:s3:2', now() - interval '2 days'),
+        ('web:old:0', 'web:old', now() - interval '2 days');
+      INSERT INTO node_stream_floors (stream, upto) VALUES ('node:n1:s3', 40);
+      COMMIT`);
+    expect(await s.lease.prune()).toBe(6);
+    const floors = async () => (await s.run.query<{ stream: string; upto: string }>(`SELECT stream, upto::text FROM node_stream_floors ORDER BY stream`)).rows;
+    expect(await floors()).toEqual([{ stream: 'node:builtin:s2', upto: '12' }, { stream: 'node:n1:s1', upto: '4' }, { stream: 'node:n1:s3', upto: '40' }]);
+    expect((await s.run.query(`SELECT source FROM applied`)).rows).toEqual([{ source: 'node:n1:s1:9:0' }]);
   });
 
   it('takes and renews a lease with the flag it is given', async () => {
@@ -249,32 +300,39 @@ describe('the lease the keeper holds in the database', () => {
     expect(await s.lease.take('normal', FAR)).toEqual({ number: 10, machine: 'machine-a', split: false });
   });
 
-  it('prunes only what every copy holds', async () => {
+  it('prunes only what every copy holds, and a day before it', async () => {
     const s = await store('a1b2c3d4'.repeat(4));
     await s.lease.take('normal', FAR, 'copy');
     await s.db.insert(companies).values({ name: 'One' });
-    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
+    await s.db.update(companies).set({ name: 'Two' });
+    await s.db.update(companies).set({ name: 'Three' });
+    /* Rows of eight days, three and a half and two days ago. */
+    const rows = async () => (await s.run.query<{ id: string }>(`SELECT id FROM net.journal ORDER BY at, id`)).rows.map(row => row.id);
+    const [old, mid, recent] = await rows();
+    await s.run.query(`UPDATE net.journal SET at = CASE id WHEN $1 THEN now() - interval '8 days' WHEN $2 THEN now() - interval '84 hours' ELSE now() - interval '2 days' END`, [old, mid]);
     /* A machine that keeps a copy, written past the checks that a company and a person stand behind it. */
     const copy = (key: string, more: string) =>
       s.run.query(`BEGIN; SET LOCAL session_replication_role = replica;
         INSERT INTO machines (company_id, person_id, machine_key, role, network_id, copy_state, copy_name, copy_at)
           VALUES (gen_random_uuid(), gen_random_uuid(), '${key}', 'data', '${key}', ${more}); COMMIT`);
-    await copy('c1', `'ready', 'copy_c1_1', now() - interval '9 days'`);
-    const journal = async () => (await s.run.query<{ n: number }>('SELECT count(*)::int AS n FROM net.journal')).rows[0]!.n;
-    const before = await journal();
-    /* The copy holds the leader only as far as nine days ago: what is newer stays for it. */
-    expect(await s.lease.prune()).toBe(0);
-    expect(await journal()).toBe(before);
-    /* It holds the leader as of now: the old rows go. */
-    await s.run.query(`BEGIN; SET LOCAL session_replication_role = replica; UPDATE machines SET copy_at = now() WHERE machine_key = 'c1'; COMMIT`);
-    expect(await s.lease.prune()).toBeGreaterThan(0);
-    expect(await journal()).toBeLessThan(before);
+    await copy('c1', `'ready', 'copy_c1_1', now() - interval '3 days'`);
+    const horizon = async () => (await s.run.query<{ ago: number }>(`SELECT extract(epoch FROM now() - below)::float8 AS ago FROM net.horizon`)).rows[0]!.ago;
+    /* The copy holds the leader as of three days ago: what is newer stays for it, and so does the day before, which a
+       merge of it reads from. */
+    expect(await s.lease.prune()).toBe(1);
+    expect(await rows()).toEqual([mid, recent]);
+    expect(Math.abs((await horizon()) - 4 * 86_400)).toBeLessThan(2);
+    /* A copy silent for over a week holds nothing back any more: a merge of it compares row by row. */
+    await s.run.query(`BEGIN; SET LOCAL session_replication_role = replica; UPDATE machines SET copy_at = now() - interval '8 days' WHERE machine_key = 'c1'; COMMIT`);
+    expect(await s.lease.prune()).toBe(2);
+    expect(await rows()).toEqual([]);
+    expect(Math.abs((await horizon()) - 86_400)).toBeLessThan(2);
     /* A copy that is still being made, or stopped, holds nothing back: it has no pulse of its own to go by. */
-    await s.db.update(companies).set({ name: 'Two' });
-    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
+    await s.db.update(companies).set({ name: 'Four' });
+    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '2 days'`);
     await copy('c2', `'making', 'copy_c2_1', NULL`);
-    await copy('c3', `'stopped', 'copy_c3_1', now() - interval '30 days'`);
-    expect(await s.lease.prune()).toBeGreaterThan(0);
+    await copy('c3', `'stopped', 'copy_c3_1', now() - interval '3 days'`);
+    expect(await s.lease.prune()).toBe(1);
   });
 
   it('knows when another machine holds the data', async () => {
