@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
-import { LANGUAGES, type Language, type Messages } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../src/i18n';
 import type { AgentCardView, Employee, Org } from '../src/types';
 import { ME, serveApi } from './api';
 
@@ -30,7 +30,7 @@ const CARD: AgentCardView = {
   ],
 };
 
-async function wordsFor(locale: Language): Promise<Messages> {
+async function wordsFor(locale: ShippedLanguage): Promise<Messages> {
   return (await import(`../src/i18n/${locale}.ts`) as Record<string, Messages>)[locale]!;
 }
 

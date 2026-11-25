@@ -1,7 +1,5 @@
 ---
 id: sup-kb-article
-title: { en: "Help article", ru: "Справочная статья" }
-description: { en: "Writes a help article that answers one question and matches the product as it is today.", ru: "Пишет справочную статью, которая отвечает на один вопрос и соответствует продукту в его текущем виде." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins customer-support/skills/kb-article/SKILL.md]
 ---

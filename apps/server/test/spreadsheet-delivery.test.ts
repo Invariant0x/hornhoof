@@ -679,7 +679,7 @@ describe('the edges of a table delivered to a person', () => {
     expect(c.tg.sentDocuments).toEqual([]);
   });
 
-  it('gives a file over 50 MB on Telegram as its link, saying it lives 30 days on one machine, and goes on with the chat', async () => {
+  it('gives a file over 50 MB on Telegram as its link, saying Telegram passes no file that big on, and goes on with the chat', async () => {
     const c = await marketingCompany();
     const dir = mkdtempSync(join(tmpdir(), 'hh-files-'));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
@@ -700,14 +700,14 @@ describe('the edges of a table delivered to a person', () => {
     const client = await mcp(c.app, run.toolToken!);
     const tool = (await client.callTool({ name: 'send_telegram_file', arguments: { person: c.ceo.id, attachment: up.json().id } })) as ToolReply;
     expect(tool.isError).toBe(true);
-    expect(tool.content[0]!.text).toMatch(/^archive\.zip is over 50 MB, more than a Telegram bot sends\. Give Ivan its link instead, which opens it for 7 days with no sign-in, and say that a big file lives 30 days on one machine and is lost if that machine goes: http\S+\/api\/files\/\S+$/);
+    expect(tool.content[0]!.text).toMatch(/^archive\.zip is over 50 MB, more than a Telegram bot sends\. Give Ivan its link instead, which opens it for 7 days with no sign-in: http\S+\/api\/files\/\S+$/);
     c.node.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'Вот архив.' } });
     c.node.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
     await until(() => c.tg.sent.filter(s => s.chat_id === CEO_TG.id).length === 2);
     expect(c.tg.sentDocuments).toHaveLength(0);
     const said = c.tg.sent.filter(s => s.chat_id === CEO_TG.id).map(s => s.text);
     expect(said).toContain('Вот архив.');
-    const link = said.map(s => /^Файл archive\.zip большой: он хранится 30 дней на одной машине и пропадет, если этой машины не станет\. По ссылке его можно скачать 7 дней: (\S+)$/.exec(s)?.[1]).find(Boolean);
+    const link = said.map(s => /^Файл archive\.zip больше 50 МБ, столько Telegram не передает\. По ссылке его можно скачать 7 дней: (\S+)$/.exec(s)?.[1]).find(Boolean);
     const opened = await c.app.inject({ url: new URL(link!).pathname });
     expect(opened.rawPayload.equals(big)).toBe(true);
 

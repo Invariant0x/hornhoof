@@ -35,7 +35,10 @@ it.each([
   if (!prework) expect(children[0]).toMatchObject({ agentId: c.agent.id, taskId: task!.id, status: 'queued', notBefore: new Date(+now + 60000) });
   expect((await c.db.select().from(tasks).where(eq(tasks.id, task!.id)))[0]).toMatchObject({ status: 'working', assigneeAgentId: c.agent.id, executorAgentId: c.agent.id });
   expect(await c.turnsOf(c.watcher.id)).toEqual([]);
-  const expected = { retry: prework ? null : { attempt: 1, max: 4, at: +now + 60000, kind: 'overloaded' }, failure: { kind: 'overloaded', text: 'The provider is busy.', at: +now, tail: 'Busy.' }, obsolete: null };
+  /* A busy provider is no failure while its retry waits; held with no retry, it is one, for a person to look at. */
+  const expected = prework
+    ? { retry: null, failure: { kind: 'overloaded', text: 'The provider is busy.', at: +now, tail: 'Busy.' }, obsolete: null }
+    : { retry: { attempt: 1, max: 4, at: +now + 60000, kind: 'overloaded' }, failure: null, obsolete: null };
   expect(await agentFailureState(c.ctx, c.agent.id)).toEqual(expected);
   const shown = await agentFailureStates(c.ctx, c.companyId, [c.agent.id, c.watcher.id]);
   expect(shown.get(c.agent.id)).toEqual(expected);

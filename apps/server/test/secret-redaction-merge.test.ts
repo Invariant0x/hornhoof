@@ -1,11 +1,12 @@
 import { eq, sql } from 'drizzle-orm';
 import { expect, it } from 'vitest';
-import { companies, people, secretRedactions, tasks } from '../src/db/schema.js';
+import { agents, attachments, companies, people, secretRedactions, tasks } from '../src/db/schema.js';
 import type { Db } from '../src/db/client.js';
 import { runMerge } from '../src/modules/merge/apply.js';
 import { fingerprintOf, hideSecretIn } from '../src/modules/tasks/hide-secret.js';
 import { ownDatabases } from './helpers-db.js';
 import { pgliteSource, twoSides, type Side } from './merge-fixture.js';
+import { looseFiles, sha256Of, stored } from './files-fixture.js';
 
 ownDatabases();
 
@@ -69,4 +70,29 @@ it.each(['leader', 'offline'] as const)('keeps another company unchanged when th
   }
   expect((await target.db.select().from(tasks).where(eq(tasks.id, mine!.id)))[0]!.body).not.toContain(marker);
   expect((await target.db.select().from(tasks).where(eq(tasks.id, theirs!.id)))[0]!.body).toBe(marker);
+});
+
+it('masks the text files the receiving side keeps when a value hidden on the other arrives', async () => {
+  const { leader, fork } = await twoSides();
+  const [company] = await leader.db.insert(companies).values({ name: 'Acme' }).returning();
+  const companyId = company!.id;
+  const [person] = await leader.db.insert(people).values({ companyId, name: 'Ivan', email: 'ivan@acme.test', status: 'active', scopeKind: 'company', isOwner: true }).returning();
+  const [agent] = await leader.db.insert(agents).values({ companyId, kind: 'worker', name: 'Developer', model: '' }).returning();
+  const [task] = await leader.db.insert(tasks).values({ companyId, number: 1, title: 'Notes', body: 'plain' }).returning();
+  const marker = 'storedForkMarker2102!';
+  const offline = await fork();
+  /* The leader keeps a text file with the value while the copy is away, and the copy hides the value. */
+  const text = `notes ${marker}`;
+  await leader.db.insert(attachments).values({ companyId, taskId: task!.id, agentId: agent!.id, name: 'notes.txt', mediaType: 'text/plain', sha256: await stored(leader.db, text), size: Buffer.byteLength(text) });
+  await offline.db.transaction(tx => hideSecretIn(tx as unknown as Db, companyId, person!.id, marker));
+  const merge = await leader.client.query<{ id: string }>("insert into net.merges (source, label) values ('machine:other', 'other') returning id");
+  const source = await pgliteSource(offline.client, 'other');
+  try {
+    await runMerge(leader.db, { id: merge.rows[0]!.id, label: 'other', kept: false, companyId }, source, { log: () => {}, clock: () => 0, files: looseFiles() });
+  } finally {
+    await source.close();
+  }
+  const [file] = await leader.db.select().from(attachments);
+  expect([file!.sha256, file!.size]).toEqual([sha256Of('notes [hidden]'), 14]);
+  expect((await looseFiles().bytes(leader.db, file!.sha256!)).toString()).toBe('notes [hidden]');
 });

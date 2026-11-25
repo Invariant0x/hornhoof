@@ -1,6 +1,6 @@
 # World art contract
 
-This is the agreement between the artists of a world pack and the world engine. A pack declares slots for pictures and sheets (its art catalog in `world-packs/<pack>/art.ts`); artists fill the slots with PNG files and a small passport JSON beside each; the engine draws a file as soon as it is in the pack's art folder and keeps its geometric placeholder for every slot still empty. Art can arrive one file at a time; nothing in the engine changes when it does.
+This is the agreement between the artists of a world pack and the world engine. A pack declares slots for pictures and sheets (its art catalog in `world-packs/<pack>/art.ts`); artists fill the slots with PNG files and a small passport JSON beside each; the engine draws a file as soon as it is in the pack's art folder. A slot still empty in a step that has other pictures shows the nearest drawn picture of the same line (a fill level, tier or stage next to it; at the same distance the later one), so a half-delivered step never shows a placeholder; only a step with no picture at all keeps its geometric placeholder. Art can arrive one file at a time; nothing in the engine changes when it does.
 
 Contract version: **2** (`ART_CONTRACT_VERSION` in `art.ts`). Version 2 adds a building's own construction line (`stage_01.png` to `stage_10.png`, scaffolding drawn in) and demolition (`demol_01.png`, `demol_02.png`), and layers over a picture (a shadow that darkens what is under it, props, an awning that sways); the version 1 construction pictures stay valid. Rebuild `art-index.json` with the version 2 check.
 
@@ -12,8 +12,9 @@ What is specific to one world (which buildings, which looks, its colours and sty
 * A pack's art folder is served at the pack's `art.baseUrl`, for example `/world-art/<pack>/`.
   * Local work and builds: put the folder at `apps/web/public/world-art/<pack>/`. The path is ignored by git; Vite serves it and copies it into the build.
   * A running server: put the folder at `<WEB_DIST>/world-art/<pack>/`.
-* Buildings, people, loops and flags (sections 4 to 8): the folder holds `art-index.json` at its root. The engine reads only that file at start and then downloads each picture the first time it is on screen. Without `art-index.json` they all draw on placeholders. Build and check the index with the art check command (section 10). A file the check rejects is left out of the index and keeps its placeholder; one broken file never breaks the city.
-* Ground and plants (section 9) are loaded straight from the paths the pack's manifest names, without `art-index.json`.
+* Buildings, people, loops and flags (sections 4 to 8): the folder holds `art-index.json` at its root. Without `art-index.json` they all draw on placeholders. Build and check the index with the art check command (section 10). A file the check rejects is held out of the index, and its slot shows the nearest drawn picture as if it were still empty; one broken file never breaks the city.
+* Ground and plants (section 9) are named by the pack's manifest. The index lists them too.
+* The index gives every file its byte size and a hash of its bytes. On the first visit the map downloads every file the engine draws behind its loading screen and keeps it in the browser. Later visits read the kept copies and download only the files whose hash changed. The web build writes the index of the art folders it ships from their files, so the index in a release always has the hashes; the `--dist` check fails a dist whose index lacks a hash or gives one its file does not have.
 
 ## 2. Standard sizes
 
@@ -26,7 +27,7 @@ All art is drawn at the **master 4x tier**.
 | Rig source for people | 544 px tall (8x), baked down to 136 px |
 | Camera | 30 degrees above the ground, looking down the diamond's vertical axis; people alone at 19 degrees (section 7) |
 | Sun | top left (azimuth -45 degrees, elevation 55 degrees), 5200 K |
-| Directions | Up to 5 drawn (N, NE, E, SE, S), as the animation needs; SW, W and NW are mirrors of SE, E and NE |
+| Directions | As the animation needs, any of the 8 (N, NE, E, SE, S, SW, W, NW); a direction not drawn shows the nearest drawn one or its mirror (SE, E and NE mirror to SW, W and NW) |
 
 The engine shows the master art at four tiers: 1x (tile 60 x 30, person 34 px), 2x (120 x 60, 68 px, the default 100% zoom), 4x (240 x 120, 136 px, 200% zoom) and 8x (480 x 240, 272 px, Retina at 200%). Do not deliver separate small versions; the engine scales down.
 
@@ -58,8 +59,9 @@ Building footprints, square, in master pixels:
 | `wallTopLine` | no | y of the top of the walls. |
 | `roofLine` | no | y of the roof edge. |
 | `wallCutY` | no | y where a full-height wall picture may be cut to stand in for waist-high walls (section 4). |
-| `flagAnchor` | no | Foot of the flag pole on the roof. Without it the building has no flag. |
+| `flagAnchor` | no | Foot of the flag pole on the roof. Without it the building has no flag. Top loops attach here when the picture has no `topAnchor`. |
 | `awningAnchor` | no | Top edge of a swaying awning. |
+| `awningLoop` | no | `true`: the building takes the `awning` loop sheet at its `awningAnchor` (section 8), which it then must name. Leave it out on a building whose awning is painted in or comes as a layer. |
 | `topAnchor` | no | Top centre (apex, spire, chimney): where a capstone or a top loop attaches. |
 | `workSlots` | no | Up to 3 points `{ x, y, layer }` with `layer` `front` (on scaffolding, in front of walls) or `inside` (in open rooms) where workers stand. |
 | `layers` | no | Pictures drawn over this one, in order (section 4, layers). |
@@ -80,8 +82,9 @@ Every point must lie inside the picture; the picture must not be taller than its
 | `fps` | Playback speed. |
 | `anchor` | In one frame: the feet of a person, or the attach point of a loop. |
 | `attach` | Loops only: `top`, `awning`, `door`, `ground` or `head` (section 8). |
-| `directions` | People only, optional: the drawn directions among N, NE, E, SE, S, one row each in this order (section 7). |
+| `directions` | People only, optional: the drawn directions among N, NE, E, SE, S, SW, W, NW, one row each in this order (section 7). |
 | `headAnchor` | People, `sleep` only, optional: in one frame, where the sleeper's Z loop stands (section 7). |
+| `stride` | People, `walk` and `carry`, optional: px the figure moves on in one cycle, as the E row draws it; 92 without it (section 7). |
 
 ## 4. Buildings
 
@@ -107,7 +110,7 @@ The door is on one of the two front walls, the walls that face the viewer: `fron
 
 ### Pictures of one step
 
-A step may come in drawn **variants** (`variants` in the pack catalog): each a full set of the step's pictures in its own folder, `<step>/v01/`, `<step>/v02/`, and so on, with the step's canvas, anchor, door row and lot. `v01` is required, the others optional. The engine gives each building one variant from its id, the same in every session; next-door buildings of the same step do not repeat one while another is free, and a variant not delivered yet gives way to the next delivered one.
+A step may come in drawn **variants** (`variants` in the pack catalog): each a full set of the step's pictures in its own folder, `<step>/v01/`, `<step>/v02/`, and so on, with the step's canvas, anchor, door row and lot. `v01` is required, the others optional. The engine gives each building one variant from its id, the same in every session; next-door buildings of the same step do not repeat one while another is free, and a variant not delivered yet gives way to the next delivered one. A variant whose stages are not all drawn yet stands only as a finished building: a building under construction takes the next variant, from its own, that has every stage drawn (as its own picture or its `stage_NN`) and keeps it once built, while one torn down keeps the look it stood in. When no variant has every stage, construction shows the building's own variant with the nearest drawn picture. A step delivered with no variant folders, its pictures directly in `<step>/`, counts as its `v01`; a `v01/` folder of its own wins over it.
 
 | File | Shown when |
 |---|---|
@@ -139,12 +142,12 @@ A picture passport may name layers: PNG files beside the picture, of exactly the
 "layers": [
   { "file": "shadow.png", "blend": "multiply" },
   { "file": "props.png" },
-  { "file": "awning.png", "sway": { "pivot": [[210, 542], [426, 650]] } }
+  { "file": "awning.png" }
 ]
 ```
 
 * `blend: "multiply"` multiplies what is under the layer by the layer's colour: a shadow keeps the colour of the ground and walls it falls on. Black with alpha for its strength works, and so does a tinted shadow.
-* `sway` moves the layer in the wind about the line through the two `pivot` points (picture pixels), where the cloth is fixed: the line stays put and the free edge lifts and drops. `amplitude` (default 0.03, at most 0.2) is how many pixels a point shifts per pixel of distance from the line at the strongest gust. Neighbouring buildings sway with different phases.
+* A layer sways in the wind only by its cloth mask, `<layer>_w.png` beside it (for example `awning_w.png`), in the plants' format (section 9): 8-bit grey, the same size, 0 still (the line where the cloth is fastened, posts and frame), 255 moves the most (the free edge). The engine lifts and drops the cloth by the mask, a little; a pixel at 0 never moves, and a layer without a mask never moves. The layer's own passport (`awning.json`) may carry `amplitude`: how many px the free edge lifts at the strongest wind, 3 by default, at most 8. Neighbouring buildings sway with different phases. Wooden posts and frames go into the picture or `props.png`, never into a swaying layer.
 * Keep a layer to what moves or must stay separate; whatever never moves belongs in the picture itself.
 
 ### Construction stages
@@ -224,27 +227,34 @@ People are drawn with an orthographic camera tilted 19 degrees down, not the 30 
 A missing animation falls back to `walk` for moving states and to `idle` for the rest.
 
 * **Sheet layout:** one row per drawn direction, in the order of the passport's `directions`; without the field 5 rows top to bottom N, NE, E, SE, S. Frames left to right; every frame the same size; the feet at the same `anchor` in every frame.
-* **Directions:** draw an animation only in the directions its meaning needs. The engine shows the nearest drawn direction or its mirror (SE, E and NE mirror to SW, W and NW). `pray` and `sad_sit` face the camera: drawn S only and shown as drawn whatever way the resident faces, never mirrored.
+* **Directions:** draw an animation only in the directions its meaning needs. For each facing the engine shows the drawn row when there is one; a direction not drawn shows the nearest drawn direction or its mirror (SE, E and NE mirror to SW, W and NW), a drawn row winning at the same distance. A mirror moves a carried item to the other hand, so an animation with an item in one hand or on one shoulder draws every way a resident walks on screen (NE, SE, SW, NW): `carry` of every look, and the `walk` of a look whose prop is a large item (the pack's `largeItem`: a staff, banner, jar and the like), whose `idle` draws SE and SW; the check rejects them otherwise. `pray` and `sad_sit` face the camera: drawn S only and shown as drawn whatever way the resident faces, never mirrored.
+* **Stride:** a walking sheet's `stride` is how far the figure moves on in one cycle, as the E row draws it: twice the distance a planted foot travels back in half a cycle. The engine walks a resident exactly one stride per cycle (`frames` / `fps` seconds), the same ground in every direction, so the feet do not slide. Without the field it takes 92 px, measured on the pilot walk sheets.
 * **The sleeper's Z:** `loops/sleep_z.png`, a loop sheet with `attach` `head`, its `anchor` at the bottom centre of the letters. The engine stands it at the `sleep` sheet's `headAnchor`, or 146 px above the feet without one, and never mirrors the letters.
 * **Cloak layer:** `<animation>.cloak.png`, exactly the same size and grid as its sheet, white or light grey where the cloak is and transparent elsewhere. The engine tints it with the subscription provider's colour from the pack palette, so one drawing serves every provider.
 * **Rig and baking:** characters may be rigged by parts (body, head, arms, legs, outfit, cloak, prop) at the 544 px source and baked to sheets at 136 px. Keep the cloak as its own baked layer, keep the light at 5200 K from the top left, bake no ground shadow, and keep the feet on the anchor so walking does not slide.
 
 ## 8. Animation loops
 
-`loops/<loop>.png` with a sheet passport, one row of frames: `crane`, `hoist_block`, `dust`, `smoke`, `water`, `awning`, `celebration`, and for people `sleep_z` (section 7). On a building drawn from its picture, a loop is placed at the point named by its `attach`: `top` (the picture's `topAnchor`, or its roof line), `awning` (`awningAnchor`), `door` (`door`) or `ground` (the lot centre). Loops of buildings still on placeholders stay placeholders.
+`loops/<loop>.png` with a sheet passport, one row of frames: `crane`, `hoist_block`, `dust`, `smoke`, `water`, `awning`, `celebration`, and for people `sleep_z` (section 7). On a building drawn from its picture, a loop is placed at the point named by its `attach`: `top` (the picture's `topAnchor`; without it the foot of its flag pole, `flagAnchor`; then its roof line, its wall top, or the back corner of its lot), `awning` (`awningAnchor`), `door` (`door`) or `ground` (the lot centre). Loops of buildings still on placeholders stay placeholders.
+
+The `awning` loop is drawn only on a picture whose passport says `awningLoop: true`, at its `awningAnchor`; without the flag a building gets no awning loop, so a house with its own awning never shows two.
+
+A building site shows one lift, never both: `crane` on a lot of 3 x 3 tiles or more, its sheet drawing its own hanging block, and `hoist_block` alone on a smaller lot.
 
 ## 9. Ground, roads, decals and plants
 
-The terrain and plant layers load these files straight from the pack's art folder, not through `art-index.json`. The pack names every file in its manifest: `terrainArt` for ground, transitions, roads and liquid, and the `art` list of each plant kind (one entry per drawn variant). A slot whose file is missing keeps its procedural look. The paths below are the usual layout; the manifest is what counts.
+The terrain and plant layers load the files the pack names in its manifest; the index lists them with their hash like every other file. The pack names every file in its manifest: `terrainArt` for ground, transitions, roads and liquid, and the `art` list of each plant kind (one entry per drawn variant). A slot whose file is missing keeps its procedural look. The paths below are the usual layout; the manifest is what counts.
 
 * **Ground:** one texture per ground material id of the pack's terrain recipe, `ground/<material>.png`, 1024 x 1024 px, seamless on both axes, seen from straight above, with no objects and no cast shadows. One map tile is 256 x 256 px of the texture, so one texture covers 4 x 4 tiles: tile (x, y) starts at ((x * 256) mod 1024, (y * 256) mod 1024). The engine projects it onto the 2:1 ground.
 * **Transitions:** `ground/edges/<first>_<second>.png`, 1024 x 256 px, 8-bit grey, one file per pair of material ids the pack declares. Rows run across the border, one tile deep: 255 is the first material, 0 the second. Columns wrap, so the border has no seam along its length.
 * **Liquid:** a surface texture, a bed texture (the relief of the bottom without the liquid's tint) and a ripple map (8-bit grey, mean 128), each 1024 x 1024 and seamless, plus the base colour in the manifest. The engine mixes them every frame, so the surface moves without a sheet of frames.
-* **Roads:** `roads/<tier>.png`, seamless along the length (1024 px = 4 tiles), alpha 0 on the first and last row, as tall as the road is wide (256 px per tile of width: a 0.4 tile path is 102 px, a 2 tile avenue 512 px). With a strip for each of the four city street tiers (`terrainArt.roads`: `trail`, `dirt`, `brick`, `stone`), the city lays its streets as these strips from tile centre to tile centre, where two tiers meet the lower one, and keeps only its bridges as drawn tiles.
+* **Roads:** `roads/<tier>.png`, seamless along the length (1024 px = 4 tiles), alpha 0 on the first and last row, as tall as the road is wide (256 px per tile of width: a 0.4 tile path is 102 px, a 2 tile avenue 512 px). With a strip for each of the four city street tiers (`terrainArt.roads`: `trail`, `dirt`, `brick`, `stone`), the engine bakes the city's streets into the ground: each tier is one strip along the tile centres with one soft edge, so a crossing, a T-join and a bend show a single outline, and where two tiers meet the higher lies over the lower. Rows across the strip follow the distance from the street's middle, columns run along it, so paint the edge rows as the street's edge and the middle as its trodden core. Road joins need no pictures of their own.
+* **Bridge:** the map's one bridge (`bridge-site.ts`) is drawn from six pictures the pack catalog declares with `bridge: true`: `bridge/<axis>_<piece>.png` for axis `u` (down right on screen) and `v` (down left) and piece `start`, `span` and `end`, one water tile of the deck each. Unlike the ground they go through `art-index.json`, each with a picture passport of footprint 1x1 (canvas up to 420 px high, 320 x 400 px in the order); the engine puts `groundAnchor` on the centre of the water tile. The deck meets the street at ground level on both banks. Until every piece is in the folder, the city lays no street across water and no resident crosses it, and nothing stands in for the bridge.
 * **Decals:** `decals/<name>.png`, small RGBA details laid on the ground at master scale.
 * **Plants:** three files per plant, all at master scale next to the 136 px person:
   * `veg/<name>.png`: RGBA, transparent background, no ground shadow;
   * `veg/<name>_w.png`: 8-bit grey sway weights, the same size: 0 stays still, 255 moves the most;
+    a building layer's cloth mask, `<layer>_w.png`, has the same format (section 4, layers);
   * `veg/<name>.json`: `root_point` [x, y] (the pivot on the ground), `crown_center` [x, y], `height_px`, `crown_width_px` (older passports say `height` and `crown_width`), optional `crown_hub` [x, y] (where a palm's leaves meet the trunk, the pivot of their flutter; `crown_center` without it) and optional `recommended_sway` (frequency range in Hz, largest tip excursion in percent of the height, secondary flutter in px).
 
   Every plant sways with its own phase, so a grove never moves as one.
@@ -261,6 +271,6 @@ npx tsx apps/web/scripts/world-art-import.ts <delivery> --to <art folder> --pack
 
 The import command takes one building as the art pipeline delivers it (its construction line, demolition, layers and the larger steps it grows into, on plot canvases) and lays it out in the art folder with passports, as this contract asks; its header lists the delivery's layout.
 
-The check prints every error with the file it is about, every file the pack has no slot for, and how many required files are still missing. It writes `art-index.json` only when there are no errors. Deliver the folder with its fresh `art-index.json`; the engine needs nothing else.
+The check prints every file it holds out with what is wrong with it (`HELD OUT <file>: ...`), every file the pack has no slot for, and how many required files are still missing. A file it rejects is held out, with any file that needs it (a cloak whose sheet is held out), and `art-index.json` is written for the rest; the command then ends with exit code 1 so the rejection is not missed. Only an error of the whole folder (another pack or contract) writes nothing. The web build holds out the same files from the index it writes. Deliver the folder with its fresh `art-index.json`; the engine needs nothing else.
 
-The `--dist` check reads a built web dist. It fails unless `<web dist>/world-art/<pack>/art-index.json` lists art the pack draws and the dist holds every file it lists with the size the index gives, so a production build can't ship the placeholder look without anyone noticing. It isn't a step of the image build yet: the first pack's painted art is licensed for Hornhoof only and may not go into the public repository or the public image, so the build has no source for it yet, and the check would stop every image from main. It joins the image build in the change that brings the art source (#1944).
+The `--dist` check reads a built web dist. It fails unless `<web dist>/world-art/<pack>/art-index.json` lists art the pack draws and the dist holds every file it lists with the size and the content hash the index gives, so a production build can't ship the placeholder look without anyone noticing. It isn't a step of the image build yet: the first pack's painted art is licensed for Hornhoof only and may not go into the public repository or the public image, so the build has no source for it yet, and the check would stop every image from main. It joins the image build in the change that brings the art source (#1944).

@@ -26,7 +26,7 @@ import { PersonMark, PriorityWord } from './TrackerMarks';
 import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
 
 /* What waits for the person in this task. */
-type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void };
+type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void; viewerId?: string };
 /* Where the card leads in the tracker: a goal's own card, and the graph grown from this task. */
 type Leads = { onOpenGoal?: (id: string) => void; onGraph?: (root: { task: string }) => void };
 
@@ -49,6 +49,7 @@ function TaskWaitingSection({ waiting, org, onOpen, onChanged, inline }: { waiti
       <Requests
         requests={requests}
         inline={inline}
+        viewerId={waiting.viewerId}
         onChanged={() => {
           waiting.onRequestsChanged();
           onChanged();
@@ -156,6 +157,12 @@ export function DueDay({ due }: { due: { text: string; late: boolean } }) {
   return <span className={due.late ? 'tp-late' : undefined} dir="auto">{due.text}</span>;
 }
 
+/* Which turn a task in the queue waits for, in the card's facts; a task given out has no such line. */
+function QueueFact({ task }: { task: TaskLine }) {
+  const words = useT().tracker.card;
+  return task.queue ? <Fact name={words.queue}>{words.queueText(task.queue.ahead, task.queue.openTurn)}</Fact> : null;
+}
+
 /* Who answers for it and who does it, its pipeline and its due day with how long it is in its status, a name beside each. */
 function CardFacts({ task, status }: { task: TaskLine; status: ReturnType<typeof humanStatus> }) {
   const t = useT();
@@ -169,7 +176,9 @@ function CardFacts({ task, status }: { task: TaskLine; status: ReturnType<typeof
   return (
     <div role="group" aria-label={words.facts}>
       <dl className="tp-card-facts">
-        <Fact name={words.responsible}><Answers person={task.responsible} /></Fact>
+        <Fact name={words.askedBy}><Answers person={task.askedBy} /></Fact>
+        <Fact name={words.decides}><Answers person={task.responsible} /></Fact>
+        <QueueFact task={task} />
         <Fact name={words.executor}><bdi>{task.executor?.name ?? task.assignee?.name ?? t.tracker.nobody}</bdi></Fact>
         {pipeline && <Fact name={words.pipeline}>{stage ? words.pipelineStage(pipeline.name, stage.name) : pipeline.name}</Fact>}
         {due ? <Fact name={words.due}><DueDay due={due} />{inStatus && ` · ${inStatus}`}</Fact> : inStatus && <Fact name={words.time}>{inStatus}</Fact>}

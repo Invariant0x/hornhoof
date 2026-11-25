@@ -1,7 +1,5 @@
 ---
 id: mkt-ai-search
-title: { en: "Visibility in AI answers", ru: "Видимость в ответах ИИ" }
-description: { en: "Helps AI assistants find, understand and cite the company's pages when people ask about its field.", ru: "Помогает ИИ-ассистентам находить, понимать и цитировать страницы компании, когда люди спрашивают о ее области." }
 kind: procedure
 sources: [coreyhaines31/marketingskills skills/ai-seo/SKILL.md, msitarzewski/agency-agents marketing/marketing-ai-citation-strategist.md]
 ---

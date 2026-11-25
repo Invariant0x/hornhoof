@@ -2,8 +2,6 @@
 id: BIZ-ANALYST
 department: business_development
 kind: member
-title: { en: "Business analyst", ru: "Бизнес-аналитик" }
-description: { en: "Analyst of business opportunities and market evidence.", ru: "Аналитик деловых возможностей и рыночных данных." }
 tier: standard
 effort: high
 perProduct: false

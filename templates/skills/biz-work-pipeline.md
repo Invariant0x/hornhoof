@@ -1,7 +1,5 @@
 ---
 id: biz-work-pipeline
-title: { en: "Business development pipeline", ru: "Конвейер развития бизнеса" }
-description: { en: "Where business development checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check.", ru: "Где развитие бизнеса проверяют по штуке, пакетом, выборкой и кодом; читай, когда раздаешь работу или меняешь проверку." }
 kind: procedure
 sources: []
 ---

@@ -1,7 +1,5 @@
 ---
 id: fin-audit-support
-title: { en: "Audit support", ru: "Сопровождение аудита" }
-description: { en: "Prepares the evidence an outside auditor, investor or bank asks for and tracks every request.", ru: "Готовит доказательства, которые запрашивает внешний аудитор, инвестор или банк, и отслеживает каждый запрос." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins finance]
 ---

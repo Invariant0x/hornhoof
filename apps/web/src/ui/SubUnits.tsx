@@ -1,8 +1,9 @@
 import { useId, useState } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, useLanguage, useT, type Language } from '../i18n';
 import type { Department, Employee, Team } from '../types';
 import { employeeKind, WorkerMark } from './WorkerMark';
+import { say } from '@hornhoof/protocol';
 
 type EmployeeGroup = { key: string; title: string; members: Employee[] };
 
@@ -16,7 +17,7 @@ async function runAction(onFail: (err: unknown) => void, work: () => Promise<unk
 }
 
 /* Groups a department's employees for its list: each sub-unit under its own name first, then pipeline roles in order. */
-export function employeeGroups(d: Department, language: 'en' | 'ru', othersLabel: string): EmployeeGroup[] {
+export function employeeGroups(d: Department, language: Language, othersLabel: string): EmployeeGroup[] {
   const members = d.employees.filter(e => e.kind !== 'head');
   const teamIds = new Set(d.teams.map(t => t.id));
   const byTeam = d.teams
@@ -26,7 +27,7 @@ export function employeeGroups(d: Department, language: 'en' | 'ru', othersLabel
   const known = new Set(d.roles.filter(r => inPipe.some(e => e.roleId === r.id)).map(r => r.id));
   const byRole = d.roles
     .filter(r => known.has(r.id))
-    .map(r => ({ key: r.id, title: r.title[language], members: inPipe.filter(e => e.roleId === r.id) }));
+    .map(r => ({ key: r.id, title: say(r.title, language), members: inPipe.filter(e => e.roleId === r.id) }));
   const loose = inPipe.filter(e => !e.roleId || !known.has(e.roleId));
   return loose.length ? [...byTeam, ...byRole, { key: 'others', title: othersLabel, members: loose }] : [...byTeam, ...byRole];
 }

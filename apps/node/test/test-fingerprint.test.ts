@@ -355,8 +355,26 @@ describe('when the graph cannot tell', () => {
   });
 
   it('a computed import in another package makes it depend on that whole package too', async () => {
-    const files = { ...app, 'apps/a/src/loader.ts': 'export const load = (name: string) => import(`./pages/${name}.js`);\n', 'apps/a/src/pages/one.ts': 'export const one = 1;\n', 'apps/b/test/b.test.ts': "import { load } from '../../a/src/loader.js';\nimport { it } from 'vitest';\nit('b', () => load);\n" };
+    const files = { ...app, 'apps/a/src/loader.ts': 'export const load = (name: string) => import(`${name}.js`);\n', 'apps/a/src/pages/one.ts': 'export const one = 1;\n', 'apps/b/test/b.test.ts': "import { load } from '../../a/src/loader.js';\nimport { it } from 'vitest';\nit('b', () => load);\n" };
     expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/pages/one.ts': 'export const one = 2;\n' }, manifest(suites)))).toEqual(['b:apps/b/test/b.test.ts']);
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toContain('b:apps/b/test/b.test.ts');
+  });
+
+  /* A language file is loaded as import(`./${id}.js`): it can only load what its own folder holds. */
+  it('a computed import under a fixed folder depends on that folder only, not on its whole package', async () => {
+    const files = { ...app, 'apps/a/src/pages/loader.ts': 'export const load = (name: string) => import(`./${name}.js`);\n', 'apps/a/src/pages/one.ts': 'export const one = 1;\n', 'apps/b/test/b.test.ts': "import { load } from '../../a/src/pages/loader.js';\nimport { it } from 'vitest';\nit('b', () => load);\n" };
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/pages/one.ts': 'export const one = 2;\n' }, manifest(suites)))).toEqual(['b:apps/b/test/b.test.ts']);
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toEqual(['a:apps/a/test/other.test.ts']);
+    const deeper = { ...files, 'apps/a/src/pages/loader.ts': 'export const load = (name: string) => import(`../pages/${name}.js`);\n' };
+    expect(await changed(input(deeper, manifest(suites)), input({ ...deeper, 'apps/a/src/pages/one.ts': 'export const one = 2;\n' }, manifest(suites)))).toEqual(['b:apps/b/test/b.test.ts']);
+    expect(await changed(input(deeper, manifest(suites)), input({ ...deeper, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toEqual(['a:apps/a/test/other.test.ts']);
+  });
+
+  it('a computed import under a folder that holds nothing, or beside a bare computed one, still depends on the whole package', async () => {
+    const empty = { ...app, 'apps/a/src/loader.ts': 'export const load = (name: string) => import(`./nowhere/${name}.js`);\n', 'apps/b/test/b.test.ts': "import { load } from '../../a/src/loader.js';\nimport { it } from 'vitest';\nit('b', () => load);\n" };
+    expect(await changed(input(empty, manifest(suites)), input({ ...empty, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toContain('b:apps/b/test/b.test.ts');
+    const mixed = { ...empty, 'apps/a/src/pages/one.ts': 'export const one = 1;\n', 'apps/a/src/loader.ts': 'export const load = (name: string) => [import(`./pages/${name}.js`), import(name)];\n' };
+    expect(await changed(input(mixed, manifest(suites)), input({ ...mixed, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toContain('b:apps/b/test/b.test.ts');
   });
 
   it('a program in a language it does not read can lead anywhere in its package', async () => {

@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFile
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentEvent, NodeMessage } from '@hornhoof/protocol';
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
 import { agyProgram, agyTranscript } from '../src/providers/antigravity-terminal.js';
 import { claudeProgram } from '../src/providers/claude-terminal.js';
@@ -10,18 +10,38 @@ import { TurnWords } from '../src/terminal/program-restart.js';
 import { agySteps, LineTail } from '../src/terminal/transcripts.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
-import { onClock, until, untilOnClock } from './terminal-host-helpers.js';
 
-const FAKE_CLOCK = ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] as const;
-const fakeClock = () => vi.useFakeTimers({ toFake: [...FAKE_CLOCK] });
+const realSetTimeout = setTimeout;
+const realMoment = () => new Promise<void>(resolve => { realSetTimeout(resolve, 1); });
+/* Moves the fake clock until the work ends, at most limitTicks ticks of 50 ms. The code under test also waits on real file
+   reads, which land in real time and later on a loaded machine, so every tick leaves a real moment for them: before
+   bec48c75c the helpers moved the clock 60 to 200 ticks with no real moment, and on a loaded runner the reads landed after
+   the last tick, leaving the work waiting for a timer that no one moved any more. An Antigravity turn has no deadline of its
+   own and these tests have no time limit, so the tick bound ends the wait for work that never settles: the test then fails
+   by name instead of holding the run for ever. The bound counts ticks, not real time, so a slow machine makes the loop
+   take longer but never fails it. */
+async function untilSettled<T>(work: Promise<T>, limitTicks = 1200): Promise<T> {
+  let settled = false;
+  const mark = () => { settled = true; };
+  work.then(mark, mark);
+  for (let tick = 0; tick < limitTicks && !settled; tick++) {
+    await vi.advanceTimersByTimeAsync(50);
+    await realMoment();
+  }
+  expect(settled, `the work did not settle within ${limitTicks} ticks of the fake clock`).toBe(true);
+  return work;
+}
 
 const folders: string[] = [];
-const hosts: TerminalHost[] = [];
-const runs: { mock: { calls: unknown[][] } }[] = [];
+const stops: (() => Promise<void>)[] = [];
+const realTmux: { mock: { calls: unknown[][] } }[] = [];
 
+/* A Tmux that starts no process: every real tmux command goes through run, which here rejects, and afterEach checks that
+   nothing called it. A real tmux command answers in real time, later on a loaded machine, while these tests move only the
+   fake clock (#2054). */
 function standInTmux(home: string): Tmux {
   const tmux = new Tmux({ env: { HOME: home }, recordingsDir: join(home, 'recordings') });
-  runs.push(vi.spyOn(tmux, 'run').mockRejectedValue(new Error('Real tmux command must not run in unit tests.')));
+  realTmux.push(vi.spyOn(tmux, 'run').mockRejectedValue(new Error('A real tmux command must not run in these tests.')));
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
   vi.spyOn(tmux, 'alive').mockResolvedValue(false);
   vi.spyOn(tmux, 'screen').mockResolvedValue('');
@@ -37,9 +57,11 @@ function fixture(withOperator = false) {
   folders.push(home);
   const sent: NodeMessage[] = [];
   const events: AgentEvent[] = [];
-  const tmux = standInTmux(home);
-  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [], pollMs: 100, lookMs: 100, reportMs: 1000, ...(withOperator ? { operator: { dir: join(home, 'operator'), connected: () => true, send: () => true } } : {}) });
-  hosts.push(host);
+  const tmux = new Tmux({ env: { HOME: home } });
+  vi.spyOn(tmux, 'stopAll').mockResolvedValue();
+  vi.spyOn(tmux, 'run').mockResolvedValue('120 40');
+  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [], env: { VITEST_MAX_WORKERS: '2' }, pollMs: 100, lookMs: 100, reportMs: 1000, ...(withOperator ? { operator: { dir: join(home, 'operator'), connected: () => true, send: () => true } } : {}) });
+  stops.push(() => host.stop());
   const agent = host['agent']('agy');
   Object.assign(agent, { home, workDir: home, program: agyProgram, sessionId: 'session', busy: true, took: true, agyRead: agySteps() });
   agent.turn = { jobId: 'job', typed: false, seq: 0, words: new TurnWords(), onEvent: e => events.push(e) };
@@ -50,12 +72,11 @@ function fixture(withOperator = false) {
   agent.tail = new LineTail(file);
   return { host, agent, tmux, sent, events };
 }
-
 afterEach(async () => {
-  const checks = runs.splice(0);
+  const runs = realTmux.splice(0);
   try {
-    for (const host of hosts.splice(0)) await host.stop();
-    for (const run of checks) expect(run).not.toHaveBeenCalled();
+    for (const cleanup of stops.splice(0)) await cleanup();
+    for (const run of runs) expect(run, 'a real tmux command ran').not.toHaveBeenCalled();
   } finally {
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -63,10 +84,30 @@ afterEach(async () => {
   }
 });
 
+describe('the fake clock of these tests', () => {
+  it('keeps moving while work waits on real time and then on the fake clock, as a turn reading a transcript does', async () => {
+    vi.useFakeTimers();
+    const work = (async () => {
+      await new Promise<void>(resolve => { realSetTimeout(resolve, 150); });
+      await new Promise<void>(resolve => { setTimeout(resolve, 1000); });
+      return 'done';
+    })();
+    expect(await untilSettled(work)).toBe('done');
+  });
+
+  it('fails by name when the work never settles, as a turn whose end never comes, instead of waiting for ever', async () => {
+    vi.useFakeTimers();
+    const never = new Promise<never>(() => {});
+    const start = Date.now();
+    await expect(untilSettled(never, 5)).rejects.toThrow('the work did not settle within 5 ticks of the fake clock');
+    expect(Date.now() - start).toBe(250);
+  });
+});
+
 describe('Antigravity execution boundaries', () => {
   it('keeps an execution Stop open while the conversation is not fully idle', async () => {
     const c = fixture();
-    fakeClock();
+    vi.useFakeTimers();
     c.host['agyNews'](c.agent, { type: 'PLANNER_RESPONSE', step_index: 1, status: 'DONE', content: 'Using dev-security-review.' });
     await c.host['hook']('agy', 'stop', { fullyIdle: false, terminationReason: 'NO_TOOL_CALL', error: '' });
     await vi.advanceTimersByTimeAsync(4000);
@@ -86,7 +127,7 @@ describe('Antigravity execution boundaries', () => {
     const c = fixture();
     const busy = readFileSync(new URL('./fixtures/agy-tui/screen-busy.ansi', import.meta.url), 'utf8');
     const idle = readFileSync(new URL('./fixtures/agy-tui/screen-idle.ansi', import.meta.url), 'utf8');
-    fakeClock();
+    vi.useFakeTimers();
     c.agent.took = false;
     let ready = false;
     let ended = false;
@@ -115,7 +156,7 @@ describe('Antigravity execution boundaries', () => {
 
   it('keeps an already queued prompt alive beyond the receipt timeout without another Enter', async () => {
     const c = fixture();
-    fakeClock();
+    vi.useFakeTimers();
     c.agent.took = false;
     c.agent.typing = 'Queued review reminder';
     c.agent.turn!.observed = c.host['observeProgram'](c.agent, 'job');
@@ -138,7 +179,7 @@ describe('Antigravity execution boundaries', () => {
 
   it('keeps the next job waiting past its timeout while the previous agy turn is active', async () => {
     const c = fixture();
-    fakeClock();
+    vi.useFakeTimers();
     const busy = readFileSync(new URL('./fixtures/agy-tui/screen-busy.ansi', import.meta.url), 'utf8');
     vi.spyOn(c.tmux, 'screen').mockResolvedValue(busy);
     const job = { key: 'agy', program: agyProgram, bin: 'agy', home: c.agent.home, signedOut: /signed out/, input: { jobId: 'next-job', prompt: 'Next review', workDir: c.agent.home, sessionId: 'session', model: null, secret: null, instructions: null, tools: null, timeoutMs: 120_000 } };
@@ -157,7 +198,7 @@ describe('Antigravity execution boundaries', () => {
 
   it('uses the same waiting delivery with the program operator enabled', async () => {
     const c = fixture();
-    fakeClock();
+    vi.useFakeTimers();
     const busy = readFileSync(new URL('./fixtures/agy-tui/screen-busy.ansi', import.meta.url), 'utf8');
     const stop = new AbortController();
     vi.spyOn(c.tmux, 'screen').mockResolvedValue(busy);
@@ -177,7 +218,7 @@ describe('Antigravity execution boundaries', () => {
 
   it('waits for the final transcript after a non-idle execution and a later idle Stop', async () => {
     const c = fixture();
-    fakeClock();
+    vi.useFakeTimers();
     c.host['agyNews'](c.agent, { type: 'PLANNER_RESPONSE', step_index: 1, status: 'DONE', content: 'Using dev-security-review.' });
     await c.host['hook']('agy', 'stop', { fullyIdle: false });
     await c.host['hook']('agy', 'stop', { fullyIdle: true });
@@ -191,7 +232,7 @@ describe('Antigravity execution boundaries', () => {
 
   it('waits in the input lane and rechecks readiness before pasting', async () => {
     const c = fixture(true);
-    fakeClock();
+    vi.useFakeTimers();
     c.agent.took = false;
     let screen = readFileSync(new URL('./fixtures/agy-tui/screen-idle.ansi', import.meta.url), 'utf8');
     vi.spyOn(c.tmux, 'screen').mockImplementation(async () => screen);
@@ -247,7 +288,7 @@ describe('Antigravity execution boundaries', () => {
   it.each(['deadline', 'cancelled', 'ended'])("preserves the other programs' waiting rule: %s", async reason => {
     const c = fixture();
     c.agent.program = claudeProgram;
-    fakeClock();
+    vi.useFakeTimers();
     const stop = new AbortController();
     const job = { key: 'agy', program: claudeProgram, bin: 'claude', home: c.agent.home, signedOut: /signed out/, input: { jobId: 'next-job', prompt: 'Next review', workDir: c.agent.home, sessionId: 'session', model: null, secret: null, instructions: null, tools: null, timeoutMs: 300, signal: stop.signal } };
     let ended = false;
@@ -274,11 +315,11 @@ describe('Antigravity subagent conversations', () => {
     const idle = readFileSync(new URL('./fixtures/agy-tui/screen-idle.ansi', import.meta.url), 'utf8');
     const tmux = standInTmux(home);
     const host = new TerminalHost({
-      tmux, fs: options.fs, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], env: { VITEST_MAX_WORKERS: '2' },
+      tmux, ...(options.fs ? { fs: options.fs } : {}), hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], env: { VITEST_MAX_WORKERS: '2' },
       remember: sessionId => { remembered.push(sessionId); }, pollMs: 50, lookMs: 50, readyMs: 1000, toolsMs: 1000,
     });
-    hosts.push(host);
-    fakeClock();
+    stops.push(() => host.stop());
+    vi.useFakeTimers();
     let alive = false;
     let promptText = '';
     vi.spyOn(tmux, 'launch').mockImplementation(async (_name, opts) => {
@@ -329,30 +370,33 @@ describe('Antigravity subagent conversations', () => {
       }
     });
 
-    const res1 = await onClock(s.host.run(s.job('job-1', 'Run first turn with subagent', null)), { stepMs: 50 });
+    const res1 = await untilSettled(s.host.run(s.job('job-1', 'Run first turn with subagent', null)));
     expect(res1).toMatchObject({ ok: true, sessionId: 'main-conversation-1', result: 'Banner ready.' });
     expect(s.remembered).not.toContain('subagent-conversation-1');
     expect(s.launches[0]).not.toContain('--conversation');
 
     /* Simulate program exit so the next turn must relaunch Antigravity with the saved session id. */
     s.setAlive(false);
-    const res2 = await onClock(s.host.run(s.job('job-2', 'Run second turn after restart', res1.sessionId)), { stepMs: 50 });
+    const res2 = await untilSettled(s.host.run(s.job('job-2', 'Run second turn after restart', res1.sessionId)));
     expect(s.launches[1]).toEqual(expect.arrayContaining(['--conversation', 'main-conversation-1']));
     expect(res2).toMatchObject({ ok: true, sessionId: 'main-conversation-1', result: 'Resumed with tools.' });
   });
 
-  it('finishes starting and resuming on the virtual clock when setup and idle stop wait past 10 seconds under load', async () => {
-    let delayed = false;
-    let stopEntered = false;
-    let over = false;
-    onTestFinished(() => { over = true; });
+  /* In run 727 this file's subagent test hung for 35 minutes on a loaded runner: setup and the idle stop outlasted the
+     helper's 200 ticks, and the turn then waited on a fake timer nobody moved (#2054). Here both wait 11 s of the fake clock,
+     longer than those 200 ticks of 50 ms, and the turns still end. */
+  it('finishes starting and resuming on the fake clock when setup and the idle stop each wait past 10 seconds, as on a loaded machine', async () => {
+    const onFakeClock = (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms); });
+    let setupWaited = false;
+    let stopWaited = false;
+    let stopBegan!: () => void;
+    const stopping = new Promise<void>(resolve => { stopBegan = resolve; });
     const slowFs: AgentFs = {
       ...ownFs,
       async mkdir(dir: string) {
-        if (!delayed) {
-          delayed = true;
-          const startedAt = Date.now();
-          await until(() => over || Date.now() - startedAt >= 11_000);
+        if (!setupWaited) {
+          setupWaited = true;
+          await onFakeClock(11_000);
         }
         return ownFs.mkdir(dir);
       },
@@ -360,9 +404,10 @@ describe('Antigravity subagent conversations', () => {
     const s = subagentHost({
       fs: slowFs,
       async onStop() {
-        stopEntered = true;
-        const stoppedAt = Date.now();
-        await until(() => over || Date.now() - stoppedAt >= 11_000);
+        if (stopWaited) return;
+        stopWaited = true;
+        stopBegan();
+        await onFakeClock(11_000);
       },
     });
     vi.spyOn(s.tmux, 'keys').mockImplementation(async (_name, ...keys) => {
@@ -376,18 +421,19 @@ describe('Antigravity subagent conversations', () => {
       await s.host['hook']('designer', 'stop', { conversationId: mainId, fullyIdle: true, terminationReason: 'NO_TOOL_CALL', error: '' });
     });
 
-    const res1 = await onClock(s.host.run(s.job('job-load-1', 'Run first turn under load', null)), { stepMs: 50 });
+    const res1 = await untilSettled(s.host.run(s.job('job-load-1', 'Run first turn under load', null)));
     expect(res1).toMatchObject({ ok: true, sessionId: 'main-conversation-load', result: 'First loaded turn ready.' });
-    await untilOnClock(() => stopEntered, { stepMs: 50 });
+    expect(setupWaited).toBe(true);
+    await untilSettled(stopping);
 
-    const res2 = await onClock(s.host.run(s.job('job-load-2', 'Run second turn under load', res1.sessionId)), { stepMs: 50 });
+    const res2 = await untilSettled(s.host.run(s.job('job-load-2', 'Run second turn under load', res1.sessionId)));
     expect(s.launches[1]).toEqual(expect.arrayContaining(['--conversation', 'main-conversation-load']));
     expect(res2).toMatchObject({ ok: true, sessionId: 'main-conversation-load', result: 'Second loaded turn ready.' });
   });
 
   it('keeps a resumed main session and transcript intact when a subagent fires hooks', async () => {
     const c = fixture();
-    fakeClock();
+    vi.useFakeTimers();
     const file = agyTranscript(c.agent.home, 'session')!;
     await c.host['hook']('agy', 'invocation', { conversationId: 'child-subagent', invocationNum: 0, lastUserInput: 'Draw mockup' });
     await c.host['hook']('agy', 'invocation', { conversationId: 'child-subagent', invocationNum: 1, lastUserInput: 'Draw mockup' });
@@ -432,5 +478,196 @@ describe('Antigravity subagent conversations', () => {
     await c.host['hook']('agy', 'invocation', { conversationId: 'fresh-main', invocationNum: 1 });
     expect(c.agent.sessionId).toBe('fresh-main');
     expect(c.agent.busy).toBe(true);
+  });
+
+  it('closes a finished Antigravity turn whose last tool call had no end and whose Stop hook was lost, then types the next queued turn', async () => {
+    vi.useFakeTimers();
+    const home = mkdtempSync(join(tmpdir(), 'hh-agy-lost-stop-'));
+    folders.push(home);
+    const workDir = join(home, 'work');
+    mkdirSync(workDir);
+    const idle = readFileSync(new URL('./fixtures/agy-tui/screen-idle.ansi', import.meta.url), 'utf8');
+    const busy = readFileSync(new URL('./fixtures/agy-tui/screen-busy.ansi', import.meta.url), 'utf8');
+    const done = readFileSync(new URL('./fixtures/agy-tui/screen-done.ansi', import.meta.url), 'utf8');
+    const delivered: string[] = [];
+    const tmux = new Tmux({ env: { HOME: home } });
+    vi.spyOn(tmux, 'stopAll').mockResolvedValue();
+    vi.spyOn(tmux, 'stop').mockResolvedValue();
+    vi.spyOn(tmux, 'run').mockResolvedValue('120 40');
+    const host = new TerminalHost({
+      tmux,
+      hornhoof: 'http://127.0.0.1:9',
+      send: () => {},
+      secrets: () => [],
+      env: { VITEST_MAX_WORKERS: '2' },
+      pollMs: 50,
+      lookMs: 50,
+      readyMs: 1000,
+      toolsMs: 1000,
+    });
+    const stop = new AbortController();
+    const runs: Promise<unknown>[] = [];
+    stops.push(async () => {
+      stop.abort();
+      for (let i = 0; i < 140; i++) await vi.advanceTimersByTimeAsync(50);
+      await Promise.allSettled(runs);
+      await host.stop();
+    });
+    const settleRun = untilSettled;
+    let currentScreen = idle;
+    let promptText = '';
+    const entered: string[] = [];
+    const mainId = 'main-conversation-1';
+    const transcript = agyTranscript(home, mainId)!;
+    mkdirSync(join(transcript, '..'), { recursive: true });
+    writeFileSync(transcript, '');
+    vi.spyOn(tmux, 'launch').mockResolvedValue();
+    vi.spyOn(tmux, 'alive').mockResolvedValue(true);
+    vi.spyOn(tmux, 'screen').mockImplementation(async () => currentScreen);
+    vi.spyOn(tmux, 'programCursor').mockResolvedValue(null);
+    vi.spyOn(tmux, 'paste').mockImplementation(async (_name, text) => {
+      promptText = text;
+      delivered.push(text);
+    });
+    vi.spyOn(tmux, 'keys').mockImplementation(async (_name, ...keys) => {
+      if (!keys.includes('Enter')) return;
+      entered.push(promptText);
+      currentScreen = busy;
+      await host['hook']('worker', 'invocation', { conversationId: mainId, invocationNum: 0, lastUserInput: promptText });
+      if (promptText === 'First turn') {
+        appendFileSync(
+          transcript,
+          JSON.stringify({
+            type: 'PLANNER_RESPONSE',
+            step_index: 1,
+            status: 'DONE',
+            content: 'Recording progress.',
+            tool_calls: [{ name: 'call_mcp_tool', args: { ServerName: 'hornhoof', ToolName: 'track_work' } }],
+          }) + '\n',
+        );
+      } else {
+        appendFileSync(transcript, JSON.stringify({ type: 'PLANNER_RESPONSE', step_index: 2, status: 'DONE', content: 'Second turn done.' }) + '\n');
+        await host['hook']('worker', 'stop', { conversationId: mainId, fullyIdle: true, terminationReason: 'NO_TOOL_CALL', error: '' });
+      }
+    });
+    const job = (jobId: string, prompt: string, sessionId: string | null) => ({
+      key: 'worker',
+      program: agyProgram,
+      bin: 'agy',
+      home,
+      signedOut: /signed out/,
+      input: { jobId, prompt, workDir, sessionId, model: null, secret: null, instructions: null, tools: null, timeoutMs: 60_000, signal: stop.signal },
+    });
+
+    const first = host.run(job('turn-1', 'First turn', null));
+    const second = host.run(job('turn-2', 'Second turn', mainId));
+    runs.push(first, second);
+    for (let i = 0; i < 40 && entered.length === 0; i++) await vi.advanceTimersByTimeAsync(50);
+    expect(entered).toEqual(['First turn']);
+    for (let i = 0; i < 20 && host['agent']('worker').calls.size === 0; i++) await vi.advanceTimersByTimeAsync(50);
+    expect(host['agent']('worker').calls.size).toBe(1);
+
+    /* Tool end and Stop hook are both lost; Antigravity finishes and shows its completed idle prompt. */
+    currentScreen = done;
+    for (let i = 0; i < 140 && entered.length < 2; i++) await vi.advanceTimersByTimeAsync(50);
+    expect(entered).toEqual(['First turn', 'Second turn']);
+    expect(delivered).toEqual(['First turn', 'Second turn']);
+    expect(await settleRun(first)).toMatchObject({ ok: true, sessionId: mainId, result: 'Recording progress.' });
+    expect(await settleRun(second)).toMatchObject({ ok: true, sessionId: mainId, result: 'Second turn done.' });
+    expect(host['agent']('worker').calls.size).toBe(0);
+  });
+
+  it('clears a stale tool state when the input line is idle and empty with no job and delivers the queued turn by itself', async () => {
+    vi.useFakeTimers();
+    const c = fixture(true);
+    const stop = new AbortController();
+    let running: Promise<unknown> | null = null;
+    stops.unshift(async () => {
+      stop.abort();
+      if (running) {
+        for (let i = 0; i < 140; i++) await vi.advanceTimersByTimeAsync(50);
+        await Promise.allSettled([running]);
+      }
+    });
+    const done = readFileSync(new URL('./fixtures/agy-tui/screen-done.ansi', import.meta.url), 'utf8');
+    const delivered: string[] = [];
+    c.agent.instance = 'instance-1';
+    c.agent.hash = null;
+    c.agent.turn = null;
+    c.agent.busy = true;
+    c.agent.took = true;
+    c.agent.calls.set('1:0', { name: 'call_mcp_tool', at: 1000 });
+    vi.spyOn(c.tmux, 'alive').mockResolvedValue(true);
+    vi.spyOn(c.tmux, 'stop').mockResolvedValue();
+    vi.spyOn(c.tmux, 'screen').mockResolvedValue(done);
+    vi.spyOn(c.tmux, 'launch').mockResolvedValue();
+    vi.spyOn(c.tmux, 'programCursor').mockResolvedValue(null);
+    vi.spyOn(c.tmux, 'paste').mockImplementation(async (_name, text) => {
+      delivered.push(text);
+    });
+    vi.spyOn(c.tmux, 'keys').mockImplementation(async (_name, ...keys) => {
+      if (!keys.includes('Enter')) return;
+      await c.host['hook']('agy', 'invocation', { conversationId: 'session', invocationNum: 0, lastUserInput: delivered.at(-1) });
+      appendFileSync(
+        agyTranscript(c.agent.home, 'session')!,
+        JSON.stringify({ type: 'PLANNER_RESPONSE', step_index: 9, status: 'DONE', content: 'Delivered.' }) + '\n',
+      );
+      await c.host['hook']('agy', 'stop', { conversationId: 'session', fullyIdle: true, terminationReason: 'NO_TOOL_CALL', error: '' });
+    });
+
+    expect(await c.host['programFacts']('agy')).toMatchObject({
+      jobId: null,
+      working: true,
+      tool: 'call_mcp_tool',
+      input: 'empty',
+    });
+    expect(await c.host['programFacts']('agy')).toMatchObject({
+      jobId: null,
+      working: false,
+      tool: null,
+      input: 'empty',
+    });
+
+    /* Re-arm the frozen state without calling programFacts first so waitForAgyTurn clears it on its own. */
+    c.agent.busy = true;
+    c.agent.calls.set('1:0', { name: 'call_mcp_tool', at: 1000 });
+    const run = c.host.run({
+      key: 'agy',
+      program: agyProgram,
+      bin: 'agy',
+      home: c.agent.home,
+      signedOut: /signed out/,
+      input: { jobId: 'queued-turn', prompt: 'Resume queued work', workDir: c.agent.home, sessionId: 'session', model: null, secret: null, instructions: null, tools: null, timeoutMs: 60_000, signal: stop.signal },
+    });
+    running = run;
+    for (let i = 0; i < 60 && delivered.length === 0; i++) await vi.advanceTimersByTimeAsync(50);
+    expect(delivered).toEqual(['Resume queued work']);
+    expect(await untilSettled(run)).toMatchObject({ ok: true, result: 'Delivered.' });
+    expect(c.agent.calls.size).toBe(0);
+  });
+
+  it('clears pending tool calls on cancel and lets restart recover a turn waiting behind job=null', async () => {
+    vi.useFakeTimers();
+    const c = fixture();
+    const busy = readFileSync(new URL('./fixtures/agy-tui/screen-busy.ansi', import.meta.url), 'utf8');
+    vi.spyOn(c.tmux, 'alive').mockResolvedValue(true);
+    vi.spyOn(c.tmux, 'screen').mockResolvedValue(busy);
+    vi.spyOn(c.tmux, 'keys').mockResolvedValue();
+    const stop = vi.spyOn(c.tmux, 'stop').mockResolvedValue();
+    c.agent.calls.set('1:0', { name: 'call_mcp_tool', at: 1000 });
+    await c.host.cancel('job');
+    expect(c.agent.calls.size).toBe(0);
+    expect(c.agent.busy).toBe(false);
+
+    /* A turn waiting behind an unbound busy state (job=null) can be restarted to clear the freeze. */
+    c.agent.turn = null;
+    c.agent.busy = true;
+    c.agent.calls.set('2:0', { name: 'call_mcp_tool', at: 2000 });
+    c.agent.sinceRun = new Set(['waiting-job']);
+    c.agent.queuedTurns = 1;
+    expect(await c.host.restart('agy', 'waiting-job', 'Continue.')).toEqual({ ok: true, reason: null });
+    expect(stop).toHaveBeenCalledWith('a-agy');
+    expect(c.agent.calls.size).toBe(0);
+    expect(c.agent.busy).toBe(false);
   });
 });

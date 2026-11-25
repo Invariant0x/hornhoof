@@ -1,7 +1,5 @@
 ---
 id: home-work-pipeline
-title: { en: "Home pipeline", ru: "Конвейер дома" }
-description: { en: "Where the home departments check item by item, in a batch, by sample and by code; read it when laying out work or changing a check.", ru: "Где домашние отделы проверяют по штуке, пакетом, выборкой и кодом; читай, когда раздаешь работу или меняешь проверку." }
 kind: procedure
 sources: []
 ---

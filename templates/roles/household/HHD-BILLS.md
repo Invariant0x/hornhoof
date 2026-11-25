@@ -2,8 +2,6 @@
 id: HHD-BILLS
 department: household
 kind: member
-title: { en: "Bills helper", ru: "Помощник по счетам" }
-description: { en: "Assistant for household bills and payment records.", ru: "Помощник по домашним счетам и записям о платежах." }
 tier: standard
 effort: medium
 perProduct: false

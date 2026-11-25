@@ -15,6 +15,7 @@ import { alreadyAlerted, screenReader } from './silent.js';
 import { logTurnFact } from './turn-log.js';
 import { lastTurnSigns } from './turn-signs.js';
 import { afterJob } from './wake.js';
+import { saying } from '../../locales/index.js';
 
 type Job = typeof jobs.$inferSelect;
 
@@ -122,23 +123,33 @@ function completionProof(view: ProgramView): string {
   return view.completion ? `completion:${view.completion}` : `screen:${view.cells}`;
 }
 
-/* Query the running job's exact node, not the newest queued job's placement. A failed look, a new instance, work or a draft
-   breaks the observation. Fresh looks are required throughout: a disconnected node cannot accrue idle time. */
-async function idleOnScreen(ctx: Ctx, job: Job, node: NodeIdentity, now: number): Promise<boolean> {
+function readableView(view: ProgramView): boolean {
+  return view.result === 'ok' && Boolean(view.instance) && Boolean(view.snapshot);
+}
+
+/* A look of this very turn's program at its empty prompt, with nothing in work. */
+function viewShowsIdle(job: Job, view: ProgramView | null): view is ProgramView {
+  return view !== null && readableView(view) && view.jobId === job.id && emptyView(view);
+}
+
+function idleOnView(ctx: Ctx, job: Job, view: ProgramView, now: number): boolean {
   const known = idleViews.get(ctx) ?? new Map<string, IdleView>();
   idleViews.set(ctx, known);
-  const view = await requestProgramView(ctx, { agentId: job.agentId!, node });
-  if (!view || view.result !== 'ok' || view.jobId !== job.id || !view.instance || !view.snapshot || !emptyView(view)) {
-    known.delete(job.id);
-    return false;
-  }
   const old = known.get(job.id);
   const signAt = agentProgramState(ctx, job).program?.signAt ?? 0;
-  const proof = completionProof(view);
-  const current = { instance: view.instance, proof, signAt, since: now, at: now };
+  const current = { instance: view.instance!, proof: completionProof(view), signAt, since: now, at: now };
   if (continuousView(old, current)) current.since = old!.since;
   known.set(job.id, current);
   return now - current.since >= IDLE_END_MS;
+}
+
+/* Query the running job's exact node, not the newest queued job's placement. A failed look, a new instance, work or a draft
+   breaks the observation. Fresh looks are required throughout: a disconnected node cannot accrue idle time. */
+async function idleOnScreen(ctx: Ctx, job: Job, node: NodeIdentity, now: number): Promise<boolean> {
+  const view = await requestProgramView(ctx, { agentId: job.agentId!, node });
+  if (viewShowsIdle(job, view)) return idleOnView(ctx, job, view, now);
+  idleViews.get(ctx)?.delete(job.id);
+  return false;
 }
 
 async function recoverScreenTurn(ctx: Ctx, job: Job, node: NodeIdentity, now: Date): Promise<void> {
@@ -201,9 +212,25 @@ async function tellOperations(ctx: Ctx, job: Job, waiting: Job, busy: ReadonlySe
     agentId: to.id,
     prompt: text,
     createdBy: null,
-    message: { personId: null, text, silentJob: caseId, silentReason: 'program_stalled', notification: { source: 'program_alarm', tasks: [], detail: { en: `${agent.name}: queue stands still`, ru: `${agent.name}: очередь стоит` } } },
+    message: { personId: null, text, silentJob: caseId, silentReason: 'program_stalled', notification: { source: 'program_alarm', tasks: [], detail: saying(words => words.notices.queueStill(agent.name)) } },
   });
   await logTurnFact(ctx, job, `${to.name} was told the queue stands still behind this turn.`, { stalledQueue: caseId, to: to.id });
+}
+
+async function closeOrAlertIdle(ctx: Ctx, job: Job, node: NodeIdentity, waiting: Job, busy: ReadonlySet<string>, now: Date): Promise<void> {
+  idleViews.get(ctx)?.delete(job.id);
+  const last = closesOf(ctx).get(job.agentId!);
+  if (last === undefined || now.getTime() - last > RECLOSE_MS) await closeIdleTurn(ctx, job, node, now);
+  else await tellOperations(ctx, job, waiting, busy, now);
+}
+
+async function advanceTurnQueue(ctx: Ctx, job: Job, node: NodeIdentity, busy: ReadonlySet<string>, now: Date): Promise<void> {
+  const idle = idleFor(ctx, job, now.getTime());
+  if (idle === null) return recoverScreenTurn(ctx, job, node, now);
+  if (idle < IDLE_END_MS) return;
+  const waiting = await waitingBehind(ctx, job.agentId!, now.getTime() - IDLE_END_MS);
+  if (!waiting) return recoverScreenTurn(ctx, job, node, now);
+  await closeOrAlertIdle(ctx, job, node, waiting, busy, now);
 }
 
 /* A turn its node still runs whose program stands idle at its prompt while the agent's messages wait behind it is over: its
@@ -214,22 +241,7 @@ export async function moveStalledQueues(ctx: Ctx, now: Date): Promise<void> {
   forgetIdleViews(ctx, turns);
   const busy = new Set(turns.flatMap(t => (t.job.agentId ? [t.job.agentId] : [])));
   for (const { job, plan } of turns) {
-    const idle = idleFor(ctx, job, now.getTime());
     const node = identityOf({ kind: plan }, job.nodeId, job.builtinMachine, ownBuiltin(ctx.config));
-    if (!job.agentId || !node) continue;
-    if (idle === null) {
-      await recoverScreenTurn(ctx, job, node, now);
-      continue;
-    }
-    if (idle < IDLE_END_MS) continue;
-    const waiting = await waitingBehind(ctx, job.agentId, now.getTime() - IDLE_END_MS);
-    if (!waiting) {
-      await recoverScreenTurn(ctx, job, node, now);
-      continue;
-    }
-    idleViews.get(ctx)?.delete(job.id);
-    const last = closesOf(ctx).get(job.agentId);
-    if (last === undefined || now.getTime() - last > RECLOSE_MS) await closeIdleTurn(ctx, job, node, now);
-    else await tellOperations(ctx, job, waiting, busy, now);
+    if (job.agentId && node) await advanceTurnQueue(ctx, job, node, busy, now);
   }
 }

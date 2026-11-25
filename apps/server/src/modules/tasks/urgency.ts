@@ -9,6 +9,7 @@ import { ApiError } from '../../errors.js';
 import { CLOSED, loadTask, refuse, type Actor, type Moved, type Task, type Tx } from './state.js';
 import { note, published } from './events.js';
 import { freePeers, type Work } from './role-peers.js';
+import { jumpQueue } from './slots.js';
 
 /* Whether work is urgent is data: the CEO or a department's owner says so through the orchestrator or a route, and nothing
    is read from its words. Work under a task is as urgent as it is. A team may take urgent work only, and who is in it says
@@ -91,8 +92,8 @@ export async function setUrgent(ctx: Pick<Ctx, 'db' | 'bus'>, actor: Actor, task
       UPDATE tasks SET urgent = ${urgent}, updated_at = now() WHERE id IN (SELECT id FROM tree)`);
     const [changed] = await tx.select().from(tasks).where(eq(tasks.id, task.id));
     await note(tx, changed!, { kind: 'updated', actor, data: { fields: ['urgent'], urgent } });
-    return changed!;
+    return urgent ? jumpQueue(tx, changed!) : { task: changed!, wakes: [] };
   });
-  published(ctx, row);
-  return { task: row, wakes: [] };
+  published(ctx, row.task);
+  return row;
 }

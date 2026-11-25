@@ -4,10 +4,11 @@ import { companies, departments, tasks, turns } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { repoAt } from '../departments/repository.js';
+import { withRepoCompany } from '../testruns/github-limit.js';
 import { CLOSED, type Tx } from './engine.js';
 import { keepSnapshot } from './pipeline-report.js';
 import { releasesWork } from './turn-department.js';
-import { branchHolds } from './turn-integration.js';
+import { branchHolds, BranchProofUnavailable, type BranchProofReader } from './turn-integration.js';
 
 /* A turn ends on the tag of its release (releases.ts). One that holds nothing for a release could never end that way: no
    result was accepted into it, every task of its department is done or cancelled, and its branch holds nothing main lacks,
@@ -16,7 +17,7 @@ import { branchHolds } from './turn-integration.js';
    result already, moved by hand, and only a release recorded before main moved releases it. Nothing opens a turn in its
    place: the next result accepted into the department opens one, and a department without a repository never gets one. */
 
-type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readBranches' | 'readMerged' | 'readCompare' | 'log'>>;
+type Reader = BranchProofReader & Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readBranches' | 'log' | 'files'>>;
 type Turn = typeof turns.$inferSelect;
 type Department = typeof departments.$inferSelect;
 
@@ -31,6 +32,7 @@ export async function closeIdleTurns(ctx: Reader): Promise<void> {
     try {
       await closeIfIdle(ctx, turn, department);
     } catch (err) {
+      if (err instanceof BranchProofUnavailable) continue;
       ctx.log?.error({ error: loggable(err), companyId: turn.companyId, turn: turn.number }, 'Closing a turn that holds nothing for a release failed.');
     }
   }
@@ -47,7 +49,7 @@ async function closeIfIdle(ctx: Reader, turn: Turn, department: Department): Pro
     const [open] = await tx.select(idOnly(turns)).from(turns).where(and(eq(turns.id, turn.id), eq(turns.status, 'open')));
     if (!open || (await holdsWork(tx, turn, places))) return null;
     const [done] = await tx.update(turns).set({ status: 'closed', closedAt: new Date(), closedBecause: because }).where(eq(turns.id, turn.id)).returning();
-    await keepSnapshot(tx, done!, ctx.log);
+    await keepSnapshot(tx, done!, ctx.log, ctx.files);
     return done!;
   });
   if (!closed) return;
@@ -81,10 +83,11 @@ async function nothingToMerge(ctx: Reader, turn: Turn, department: Department): 
   if (!ctx.config || !ctx.readBranches) return null;
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [department.id]);
   if (!found) return null;
-  const read = await ctx.readBranches(found.repo, 5_000).catch(() => null);
+  const repo = withRepoCompany(found.repo, department.companyId);
+  const read = await ctx.readBranches(repo, 5_000).catch(() => null);
   if (!read || 'problem' in read) return null;
-  const branch = `turn-${turn.number}`, head = read.heads[branch], main = read.heads[found.repo.branch];
+  const branch = `turn-${turn.number}`, head = read.heads[branch], main = read.heads[repo.branch];
   if (!head) return `${ENDED} ${branch} is not in the repository, so it had nothing to release.`;
-  if (!main || !(await branchHolds(ctx, found.repo, main, head))) return null;
-  return `${ENDED} ${found.repo.branch} holds everything ${branch} holds, so it had nothing to release.`;
+  if (!main || !(await branchHolds(ctx, repo, main, head))) return null;
+  return `${ENDED} ${repo.branch} holds everything ${branch} holds, so it had nothing to release.`;
 }

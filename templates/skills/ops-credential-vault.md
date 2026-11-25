@@ -1,7 +1,5 @@
 ---
 id: ops-credential-vault
-title: { en: "Keep credentials safe", ru: "Хранение доступов" }
-description: { en: "Puts every password, key and token into the company's secret store and gives agents access by entry name only.", ru: "Кладет все пароли, ключи и токены в хранилище секретов компании и дает агентам доступ только по имени записи." }
 kind: procedure
 sources: [msitarzewski/agency-agents security/security-secrets-credential-engineer.md, wshobson/agents plugins/cicd-automation/skills/secrets-management/SKILL.md]
 ---

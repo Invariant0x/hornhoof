@@ -2,8 +2,6 @@
 id: VID-HEAD
 department: video_production
 kind: head
-title: { en: "Director and head of video production", ru: "Режиссер и руководитель производства видео" }
-description: { en: "Takes orders, sets the budget and directs the story, performances, look and final cut.", ru: "Принимает заказы, определяет бюджет, ведет историю, работу над персонажами, стиль и финальный монтаж." }
 tier: deep
 effort: high
 perProduct: false

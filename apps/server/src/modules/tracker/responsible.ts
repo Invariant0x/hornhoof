@@ -47,6 +47,19 @@ export async function requireAnswersFor(ctx: Pick<Ctx, 'db'>, companyId: string,
   if (!(await answersFor(ctx, companyId, personId, spot))) throw refuse(400, 'responsible_invalid', 'The responsible person must be an active person of the company who reaches this place.');
 }
 
+/* Whether a person may be named as the one who asked for work: an active person of the company, no assistant. Where they asked
+   from does not matter: a request is theirs wherever it lands. */
+export async function requireAsker(ctx: Pick<Ctx, 'db'>, companyId: string, personId: string): Promise<string> {
+  const [person] = await ctx.db.select({ id: people.id, isAgent: people.isAgent, status: people.status }).from(people).where(and(eq(people.id, personId), eq(people.companyId, companyId)));
+  if (!person || person.isAgent || person.status !== 'active') throw refuse(400, 'asked_by_invalid', 'The person who asked must be an active person of the company.');
+  return person.id;
+}
+
+/* Who asked for a new task: whoever asked for the task above it, else the person named, if any. */
+export async function askerOf(ctx: Pick<Ctx, 'db'>, companyId: string, parent: { askedByPersonId: string | null } | null, named: string | null | undefined): Promise<string | null> {
+  return parent?.askedByPersonId ?? (named ? requireAsker(ctx, companyId, named) : null);
+}
+
 /* Whether this person may give work and set the goals and pipelines of a place, by the rule the routes keep, so a screen
    offers only what they take. */
 export async function mayPlan(ctx: Pick<Ctx, 'db'>, me: Person): Promise<(departmentId: string | null) => Promise<boolean>> {

@@ -1,7 +1,5 @@
 ---
 id: dev-implement
-title: { en: "Implementing a task", ru: "Выполнение задачи" }
-description: { en: "Takes a brief from start to a proved, committed result in small increments.", ru: "Доводит задание от начала до проверенного и закоммиченного результата небольшими шагами." }
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/implementer-prompt.md, addyosmani/agent-skills skills/incremental-implementation/SKILL.md, addyosmani/agent-skills skills/source-driven-development/SKILL.md]
 ---
@@ -17,6 +15,6 @@ You can implement an assigned software change from its brief to a proved result.
 
 When the project has an author check, run it in your own workspace on your exact commit before you submit, and read its actual result before claiming readiness. Submitting starts no test run, so submission alone is not a passed check.
 
-External Review and Security engineers work only in echelon tasks. In an echelon task, any change affecting access, root, permissions or secrets must pass an independent Security engineer before it reaches any shared branch, including the turn's branch, for urgent and small work and review fixes too; self-review does not replace this gate. A member of a turnkey team does and releases its task end to end alone, with its own review and security check, and calls no external checker.
+Security reads the whole turn branch once, after Review and before Tests, and fixes what it finds there; nothing goes to main without that pass; the hotfix lane's fix gets its own Security read before its patch release.
 
 Do not publish, change production data or broaden access without the appropriate explicit approval. If the same attempts fail without a new hypothesis, report the evidence and missing condition rather than continuing to guess.

@@ -86,26 +86,26 @@ const PLACE = { company: 'Acme', department: 'Development', product: 'Mascot' };
 const assignmentBlock = (body: string) => `<!-- hh:assignment -->\n## Assignment\n\n${body}\n<!-- /hh:assignment -->`;
 const INTEGRATION_ABILITIES = ['dev-gates', 'dev-task-flow', 'dev-lead', 'dev-work-pipeline', 'dev-ci-release', 'dev-implement', 'dev-worktrees'] as const;
 
-/* The one Security rule, by the CEO's order of 14.11: external Review and Security engineers work only in echelon tasks,
-   where a sensitive change passes an independent Security engineer before any shared branch, urgent and small work and
-   review fixes too; a member of a turnkey team does and releases its task end to end alone and calls no external checker. */
+/* The one Security rule, as the CEO approved it on 24.11 for the batch pipeline: Security reads the whole turn branch once, after
+   Review and before Tests, and fixes what it finds there; nothing reaches main without that pass; the hotfix lane's fix has its
+   own read before its patch release. The older rule (a pass for every task before any shared branch, and a turnkey member alone)
+   is nowhere. */
 const SECURITY_RULE =
-  "External Review and Security engineers work only in echelon tasks. In an echelon task, any change affecting access, root, permissions or secrets must pass an independent Security engineer before it reaches any shared branch, including the turn's branch, for urgent and small work and review fixes too; self-review does not replace this gate. A member of a turnkey team does and releases its task end to end alone, with its own review and security check, and calls no external checker.";
+  "Security reads the whole turn branch once, after Review and before Tests, and fixes what it finds there; nothing goes to main without that pass; the hotfix lane's fix gets its own Security read before its patch release.";
 
 /* Check the delivered policy's obligations, rather than pinning its wording. */
 function preMergeSecurityProblems(text: string): string[] {
   const clauses = text.split(/[.!?\n]/);
-  const riskRule = clauses.find(s => ['access', 'root', 'permissions', 'secrets'].every(word => new RegExp(`\\b${word}\\b`, 'i').test(s))) ?? '';
+  const rule = clauses.find(s => /\bSecurity reads\b/i.test(s)) ?? '';
   const checks: [string, boolean][] = [
-    ['independent-reviewer', /\bindependent Security engineer\b/i.test(riskRule) && /\b(?:must|requires?)\b[^.!?]*\bpass\b/i.test(riskRule)],
-    ['before-shared-branch', /\bpass\b[^.!?]*\bbefore\b[^.!?]*\bshared\b[^.!?]*\bbranch\b/i.test(riskRule) && /\bturn(?:'s)? branch\b/i.test(riskRule)],
-    ['echelon-task', /\bin an echelon task\b/i.test(riskRule)],
-    ['urgent-small', ['urgent', 'small'].every(word => new RegExp(`\\b${word}\\b`, 'i').test(riskRule))],
-    ['review-fixes', /\breview fixes\b/i.test(riskRule)],
-    ['self-review-not-a-gate', clauses.some(s => /\b(?:self-review|own review)\b[^.!?]*\b(?:does not|cannot|never) replace\b[^.!?]*\bgate\b/i.test(s))],
-    ['external-only-in-echelons', clauses.some(s => /\bexternal Review and Security engineers work only in echelon tasks\b/i.test(s))],
-    ['turnkey-alone', clauses.some(s => /\bmember of a turnkey team\b[^.!?]*\bend to end alone\b[^.!?]*\bno external checker\b/i.test(s))],
+    ['whole-turn-branch-once', /\bSecurity reads the whole turn branch once\b/i.test(rule)],
+    ['after-review-before-tests', /\bafter Review and before Tests\b/i.test(rule)],
+    ['fixes-what-it-finds', /\bfixes what it finds there\b/i.test(rule)],
+    ['nothing-to-main-without-the-pass', clauses.some(s => /\bnothing goes to main without that pass\b/i.test(s)) || /\bnothing goes to main without that pass\b/i.test(text)],
+    ['hotfix-own-read', /\bhotfix lane's fix gets its own Security read before its patch release\b/i.test(text)],
     ['no-merge-first-bypass', !/\b(?:urgent|small|named)\b[^.!?\n]*\b(?:merge first|skip Security)\b/i.test(text)],
+    ['no-old-gate', !/\bbefore it reaches any shared branch\b/i.test(text)],
+    ['no-turnkey-alone', !/\bmember of a turnkey team does and releases its task end to end alone\b/i.test(text)],
     ['no-old-scope', !/\bapplies to urgent work, small tasks, direct named orders\b/i.test(text)],
   ];
   return checks.filter(([, holds]) => !holds).map(([id]) => id);
@@ -119,11 +119,11 @@ describe('independent Security before integration', () => {
   };
 
   /* That the old scope is nowhere is a rule of the product policy, templates-policy.test.ts. */
-  it('writes the Security rule whole in every integration ability: external checkers only in echelon tasks, a member of a turnkey team alone', () => {
+  it('writes the Security rule whole in every integration ability: one read of the whole turn branch, after Review and before Tests', () => {
     for (const id of INTEGRATION_ABILITIES) expect(shipped.skills.get(id)!.body, id).toContain(SECURITY_RULE);
   });
 
-  it.each(['DEV-ENG', 'DEV-HEAD'])('gives %s the independent pre-merge gate of echelon tasks with no urgent or small bypass', roleKey => {
+  it.each(['DEV-ENG', 'DEV-HEAD'])('gives %s the one Security read of the turn branch with no urgent or small bypass', roleKey => {
     const packet = delivered(roleKey);
     const gate = packet.skills.find(s => s.name === 'dev-gates');
     expect(gate, roleKey).toBeDefined();
@@ -151,17 +151,15 @@ describe('independent Security before integration', () => {
     const rule = shipped.skills.get(id)!.body;
     expect(preMergeSecurityProblems(rule)).toEqual([]);
     const mutations: [string, string][] = [
-      [rule.replace(/before (it reaches|entering)/i, 'after $1'), 'before-shared-branch'],
-      [rule.replace(/independent Security engineer/gi, 'author'), 'independent-reviewer'],
-      [rule.replace(/\burgent\b/gi, 'ordinary'), 'urgent-small'],
-      [rule.replace(/\bsmall\b/gi, 'large'), 'urgent-small'],
-      [rule.replace(/In an echelon task/g, 'In any task'), 'echelon-task'],
-      [rule.replace(/only in echelon tasks/g, 'in every task'), 'external-only-in-echelons'],
-      [rule.replace(/end to end alone/g, 'with a checker'), 'turnkey-alone'],
-      [rule.replace(/review fixes/gi, 'ordinary fixes'), 'review-fixes'],
-      [rule.replace(/does not replace/gi, 'replaces'), 'self-review-not-a-gate'],
+      [rule.replace('Security reads the whole turn branch once', 'Security reads the task branch each time'), 'whole-turn-branch-once'],
+      [rule.replace('after Review and before Tests', 'before Review'), 'after-review-before-tests'],
+      [rule.replace('fixes what it finds there', 'only reports what it finds'), 'fixes-what-it-finds'],
+      [rule.replace('nothing goes to main without that pass', 'main may go first'), 'nothing-to-main-without-the-pass'],
+      [rule.replace("gets its own Security read before its patch release", 'ships its patch release at once'), 'hotfix-own-read'],
       [`${rule}\nUrgent tasks may merge first and get Security afterward.`, 'no-merge-first-bypass'],
       [`${rule}\nSmall tasks may skip Security.`, 'no-merge-first-bypass'],
+      [`${rule}\nA change reaches any shared branch only after it passes Security: it must pass before it reaches any shared branch.`, 'no-old-gate'],
+      [`${rule}\nA member of a turnkey team does and releases its task end to end alone and calls no external checker.`, 'no-turnkey-alone'],
       [`${rule}\nThis applies to urgent work, small tasks, direct named orders and review fixes.`, 'no-old-scope'],
     ];
     for (const [changed, failure] of mutations) {
@@ -737,12 +735,13 @@ describe('one run of every test per release', () => {
     }
   });
 
-  it('tells every development role that every test runs together once per release', () => {
+  it("tells every development role that a release relies on the repository's CI and uses no run_tests", () => {
     for (const roleId of ['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-TEST'] as const) {
       const whole = wholeOf(renderRole(roleId));
       expect(whole, roleId).not.toMatch(/from code and checks to merge and release|code, checks, your own review and security check, tests, merge and release/i);
       expect(whole, roleId).not.toMatch(/use\s+`?"?run_tests`?"?\s+(?:for\s+one\s+)?(?:only\s+)?when\s+your\s+(?:own\s+)?workspace\s+cannot\s+run\s+it|\bstrictly once\b/i);
-      expect(whole, roleId).toMatch(/Check what you touched with local tests of the files it reaches; every test runs together once per release, on the turn's branch or a release branch before main, or on main\./);
+      expect(whole, roleId).toMatch(/Check what you touched with local tests of the files it reaches\. A task's own run holds only its files and their tests, its browser files in Chromium only\. A release does not use run_tests: it relies on the repository's own CI for its exact commit/);
+      expect(whole, roleId).not.toMatch(/once per release|whole run of the release|record run/i);
     }
   });
 });

@@ -1,7 +1,5 @@
 ---
 id: hh-one-shot-calls
-title: { en: "One-shot calls", ru: "Разовые вызовы" }
-description: { en: "When to hand work to short runs of your plan's program that each answer once, and when to do it yourself.", ru: "Когда отдать работу коротким запускам программы вашего тарифа, каждый из которых отвечает один раз, а когда сделать ее самому." }
 kind: procedure
 ---
 You can split work that needs no conversation into one-shot calls and get every answer back on the task.
