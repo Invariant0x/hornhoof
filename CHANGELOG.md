@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [0.44.3] - 2026-11-25
+
+### Fixed
+
+- A leader whose database server gives every session a commit setting other than on, as a `postgresql.auto.conf` with `synchronous_commit = 'local'` in it does, no longer refuses every write of the app while it says it leads: the app asks for `on` itself in each session it opens, and the keeper looks at what a session that asks for nothing gets, sets it on in the server's file and reloads, says what it found, and does not report a lead while a setting it cannot change, as one the server was started with, is left as it was.
+
 ## [0.44.2] - 2026-11-25
 
 ### Fixed
