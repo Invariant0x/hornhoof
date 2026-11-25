@@ -7,6 +7,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [0.44.1] - 2026-11-25
 
+### Fixed
+
+- The line of what happened at the foot of a department and the orchestrator's line on the map stand on one row, with the dot, the time and the words, and end in an ellipsis where the words are wider, their whole text in the line's title; the button that unfolded a long line is gone
+
 ### Changed
 
 - Files leave the database: every file of a task, a message, a run or a person's picture goes into the company's file store on the server's disk (`FILES_DIR`, the `files` volume), sealed and named by its sha256, and the database keeps only what describes it, so copies of the database and backups no longer grow with files. After the update the server copies the files of 0.43 into the store while it serves, checks each one by its hash, and clears their bytes from the database only after the CEO, or the orchestrator for him, says yes to the reconciliation it writes (`GET /api/files/move`, `POST /api/files/move/approve` with its digest); then it drops the old column and runs `VACUUM FULL`. A server in production does not start without `FILES_DIR`. `hh-fetch` downloads a file it has already only when Hornhoof has other bytes.
