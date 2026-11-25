@@ -1347,7 +1347,8 @@ describe('the maker of a copy', () => {
     expect(s.kept()).toMatchObject({ phase: 'drop', parked: { why: 'slow' }, old: { attempt: 1 } });
     await maker.tick({ ...ORDER, weak: 'slow' });
     expect(s.kept()).toMatchObject({ phase: 'parked' });
-    expect(maker.mode()).toBe('read');
+    /* Parked, the old copy no longer changes: its app reads nothing until the copy is asked for again. */
+    expect(maker.mode()).toBe('off');
   });
 
   it('leaves a copy that is whole and follows alone: no cut, no attempt, no wait', async () => {
