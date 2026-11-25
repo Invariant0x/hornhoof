@@ -91,6 +91,18 @@ describe('Measures', () => {
     expect(Math.abs(uptimeS - Math.floor(uptime()))).toBeLessThanOrEqual(2);
   });
 
+  it('says the free and whole room of the disk FILES_DIR lies on, and nothing of it with none or where it is gone', () => {
+    const files = tempFolder();
+    const said = new Measures({ dir: tempFolder(), filesDir: files }).snapshot();
+    expect(said.filesDiskFree).toBeGreaterThan(0);
+    expect(said.filesDiskTotal).toBeGreaterThanOrEqual(said.filesDiskFree!);
+    expect([Number.isSafeInteger(said.filesDiskFree), Number.isSafeInteger(said.filesDiskTotal)]).toEqual([true, true]);
+    expect(Object.keys(new Measures({ dir: tempFolder() }).snapshot())).not.toContain('filesDiskFree');
+    rmSync(files, { recursive: true, force: true });
+    const gone = new Measures({ dir: tempFolder(), filesDir: files }).snapshot();
+    expect([gone.filesDiskFree, gone.filesDiskTotal]).toEqual([undefined, undefined]);
+  });
+
   it('takes no sample while the machine makes its copy of the company\'s data', async () => {
     /* Pouring the copy in slows the disk down by itself: what the disk does then says nothing of the disk. */
     const dir = tempFolder();

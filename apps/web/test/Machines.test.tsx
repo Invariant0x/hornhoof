@@ -507,6 +507,46 @@ describe('Machines', () => {
     expect(within(other).queryByText(/company backups/)).not.toBeInTheDocument();
   });
 
+  it("sets the room a machine gives the company's files, and shows what they take there and what its disk has free", async () => {
+    const store = { id: 'm1', limitBytes: null, areaBytes: 10 * GIB, usedBytes: 2 * GIB, diskFree: 40 * GIB };
+    const withStore = MACHINES.map(machine => ({ ...machine, fileStore: machine.id === 'm1' ? store : null }));
+    const calls = mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: withStore, builtin: BUILTIN }], 'PATCH /api/machines/m1': [200, { lendsTests: true, keepsBackups: false, fileStoreLimitBytes: 20 * GIB }] });
+    const user = userEvent.setup();
+    render(<Machines me={ME} />);
+    const mine = await openCard('dev-laptop');
+    const room = within(mine).getByRole('combobox', { name: "Room for the company's files on dev-laptop" });
+    expect(room).toHaveValue('default');
+    expect(within(room).getAllByRole('option').map(option => option.textContent).slice(0, 3)).toEqual(['Default, 10 GB', 'None', '5 GB']);
+    expect(fact(mine, 'They take')).toBe('2 of 10 GB');
+    expect(fact(mine, 'Free on its disk')).toBe('40 GB');
+    await user.selectOptions(room, String(20 * GIB));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/machines/m1', body: { fileStoreLimitBytes: 20 * GIB } }));
+    /* The list is read again, for what the setting gives. */
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'GET' && c.path === '/api/machines').length).toBe(2));
+    /* A machine without a keeper keeps none of them, and says nothing of them. */
+    expect(within(card('build-box')).queryByText('Company files')).not.toBeInTheDocument();
+  });
+
+  it("shows the server's own room for the company's files on the built-in card, for the CEO alone to set", async () => {
+    const own = { id: 'own-row', limitBytes: 0, areaBytes: 0, usedBytes: 0, diskFree: null };
+    const calls = lists({ 'PATCH /api/machines/own-row': [200, {}] }, { ...BUILTIN, fileStore: own });
+    const user = userEvent.setup();
+    const { unmount } = render(<Machines me={ME} />);
+    const server = await openCard('Built-in node');
+    const room = within(server).getByRole('combobox', { name: "Room for the company's files on Built-in node" });
+    expect(room).toHaveValue('0');
+    expect(within(server).queryByText('Free on its disk')).not.toBeInTheDocument();
+    await user.selectOptions(room, 'default');
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/machines/own-row', body: { fileStoreLimitBytes: null } }));
+    unmount();
+    /* Someone who sees the whole company but is not the CEO reads it. */
+    lists({}, { ...BUILTIN, fileStore: own });
+    render(<Machines me={{ ...ME, person: { ...ME.person, id: 'p9', isOwner: false } }} />);
+    const read = await openCard('Built-in node');
+    expect(within(read).queryByRole('combobox', { name: /company's files/ })).not.toBeInTheDocument();
+    expect(fact(read, 'Room for them')).toBe('None');
+  });
+
   it("shows whether another person's machine keeps backups, without the switch", async () => {
     const withCore = MACHINES.map(machine => ({ ...machine, keepsBackups: machine.id === 'm2', heldBackups: machine.id === 'm2' ? 1 : 0 }));
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: withCore, builtin: null }] });

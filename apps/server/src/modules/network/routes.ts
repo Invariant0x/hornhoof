@@ -37,6 +37,10 @@ const ReportBody = z.object({
   uptimeS: z.number().int().min(0).optional(),
   fsyncP99Ms: z.number().min(0).nullable().optional(),
   diskFree: z.number().int().min(0).optional(),
+  /* What the company's files take in its store, and the free and whole room of the disk FILES_DIR lies on. */
+  fileStoreUsedBytes: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+  filesDiskFree: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+  filesDiskTotal: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
   /* The memory and the processors Docker gives the machine. */
   memory: z.number().int().min(0).optional(),
   cores: z.number().int().min(1).max(4096).optional(),

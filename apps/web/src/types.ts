@@ -965,6 +965,8 @@ export type MachineView = {
      omit them. */
   keepsBackups?: boolean | null;
   heldBackups?: number | null;
+  /* The area of its disk the company's files may take; null without a keeper. Older servers omit it. */
+  fileStore?: FileStoreArea | null;
   /* Its part in holding the company's data, for those who see the whole company. Older servers omit it. */
   data?: DataView | null;
 };
@@ -1059,7 +1061,12 @@ export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'co
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
 /* webPort: where the company opens on the server's own machine. refusedBy: the machines on the server's network whose
    connections it did not take. Older servers omit both. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; replicas?: MachineReplicas | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
+/* The area a machine gives the company's files: the row it is set on, which for the computer the server runs on is the
+   server's own; its owner's number, 0 for none or null for the default; what that gives; what the files take there; and
+   what the disk they lie on has free, null before its keeper said. */
+export type FileStoreArea = { id: string; limitBytes: number | null; areaBytes: number; usedBytes: number; diskFree: number | null };
+
+export type BuiltinView = { online: boolean; load: NodeLoad | null; replicas?: MachineReplicas | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null; fileStore?: FileStoreArea | null };
 
 export type JobView = {
   id: string;
