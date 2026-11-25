@@ -201,6 +201,15 @@ export function agyStreamSession(requested: string | null) {
 }
 
 const AGY_LIMITS_WAIT_MS = 15_000;
+
+/* A one-shot call with no limit of its own ends after this, so none hangs for good: judges' calls of 70 and 94 KB once
+   waited 26 and 89 minutes until they were stopped by hand (#2069). */
+export const AGY_CALL_LIMIT_MS = 30 * 60_000;
+const callLimitMs = (timeoutMs: number) => timeoutMs || AGY_CALL_LIMIT_MS;
+
+/* The node stopped the program at its limit, or agy cut the turn short at the same limit itself. */
+const agyTimedOut = (done: { timedOut: boolean }, result: Record<string, unknown> | null) => done.timedOut || result?.finished_reason === 'print_timeout';
+
 const AGY_WINDOWS: Record<string, string> = {
   '5h': 'five_hour',
   '1d': 'one_day',
@@ -521,7 +530,10 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
     run: runAgy,
 
     /* Print mode is agy's one call: a new conversation that answers once and exits. */
-    oneCall: input => runAgy({ ...input, sessionId: null }),
+    oneCall: input => {
+      const timeoutMs = callLimitMs(input.timeoutMs);
+      return runAgy({ ...input, sessionId: null, timeoutMs }, `${Math.ceil(timeoutMs / 1000)}s`);
+    },
 
     async secrets() {
       return tokenFiles(home).flatMap(file => {
@@ -537,8 +549,11 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
     },
   };
 
-  async function runAgy(input: RunInput): Promise<RunResult> {
-    const args = [`--print=${input.prompt}`, '--output-format', 'stream-json', '--print-timeout', '0s', '--dangerously-skip-permissions'];
+  /* The prompt goes on standard input, where agy reads it when no --print flag names one: in an argument, a prompt over
+     about 64 KB made agy hang for good (#2069). A turn waits for its program as long as it takes; a one-shot call tells
+     agy its limit. */
+  async function runAgy(input: RunInput, limit = '0s'): Promise<RunResult> {
+    const args = ['--output-format', 'stream-json', '--print-timeout', limit, '--dangerously-skip-permissions'];
     if (input.sessionId) args.push('--conversation', input.sessionId);
     if (input.model) args.push('--model', input.model);
     if (input.effort) args.push('--effort', input.effort);
@@ -564,6 +579,7 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
       cwd: input.workDir,
       timeoutMs: input.timeoutMs,
       signal: input.signal,
+      input: input.prompt,
       onLine(line) {
         const ev = objectLine(line);
         if (!ev) return;
@@ -583,7 +599,7 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
     const ended = withProgramExit(done.output, done);
     /* The result tells what the whole turn used. */
     const tokens = agyTokens(final?.usage);
-    if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null, tokens };
+    if (agyTimedOut(done, final)) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null, tokens };
     if (done.code === 0 && final?.status === 'SUCCESS') return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null, tokens };
     const said = typeof final?.error === 'string' ? final.error : '';
     return { ok: false, sessionId, result: answer, ...ended, error: SIGNED_OUT.test(`${said}\n${done.output}`) ? 'not_logged_in' : 'agent_failed', limits: null, tokens };

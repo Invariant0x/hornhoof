@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from 'react';
+import { sayIf } from '@hornhoof/protocol';
 import { useLanguage, useT, type Language } from '../i18n';
 import type { Department, DepartmentTree, TreeAgent } from '../types';
 import { ProviderMark } from '../ui/icons';
@@ -73,7 +74,7 @@ function LaneTask({ row, onOpenTask }: { row: Pick<TreeRow, 'line' | 'activity'>
 }
 
 function LaneRole({ employee, language }: { employee: Department['employees'][number] | undefined; language: Language }) {
-  const role = employee?.title?.[language];
+  const role = sayIf(employee?.title, language);
   return role && role !== employee?.name ? <p className="say">{role}</p> : null;
 }
 

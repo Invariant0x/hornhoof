@@ -85,7 +85,7 @@ describe('Residents face where they walk on screen (#1983)', () => {
     }
   });
 
-  /* Ivan, 23.11: a big carried item (a block on the left shoulder, a staff, a jar) must not jump to the other hand when a
+  /* Order v3 4.4, 23.11: a big carried item (a block on the left shoulder, a staff, a jar) must not jump to the other hand when a
      resident turns, so a sheet may draw all 8 directions; a drawn row always wins over a mirrored one. */
   it('shows every drawn direction of an 8-row sheet as drawn, never mirrored', () => {
     const all = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
@@ -144,7 +144,7 @@ describe('Residents face where they walk on screen (#1983)', () => {
   });
 });
 
-/* #1983, Ivan: the feet never slide. In one walk cycle (frames / fps seconds) a resident covers exactly the stride its
+/* #1983: the feet never slide. In one walk cycle (frames / fps seconds) a resident covers exactly the stride its
    sheet draws: `stride` master px of the E row, or the default measured on the pilot sheets. */
 describe('Residents cover one drawn stride per walk cycle (#1983)', () => {
   const { live, synced } = city();
@@ -223,7 +223,7 @@ describe('Residents cover one drawn stride per walk cycle (#1983)', () => {
     for (const [dc, dr] of GRID_STEPS) expect(oneCycle({}, dc, dr).tiles, `step (${dc}, ${dr})`).toBeCloseTo(east, 3);
   });
 
-  /* Ivan: one idle at a house. A standing sheet (idle) has no stride, so a resident drawn from it stands still instead
+  /* One idle at a house. A standing sheet (idle) has no stride, so a resident drawn from it stands still instead
      of sliding round its house; a placeholder keeps strolling (the test above). */
   it('keeps an idle resident drawn from a standing sheet in place at its house, its sheet still running', () => {
     const sim = createResidentSimulation(EGYPT_WORLD_PACK, synced.city, live);

@@ -39,10 +39,11 @@ export const companyFull = (inCompany: number, limit: number) =>
 
 export const companyRoom = (used: number, limit: number): UploadRoom => ({ bytes: limit - used, full: () => companyFull(used, limit) });
 
-/* What the store keeps for the company: each content its kept rows name once, however many rows name it, and a row from
-   before the store, which names none, by its own size. */
-const companyUse = (companyId: string) => sql<string>`(SELECT coalesce(sum(one.size), 0) FROM (SELECT max(a.size) AS size FROM attachments a
-  WHERE a.company_id = ${companyId} AND (a.task_id IS NOT NULL OR a.person_id IS NOT NULL OR a.name IS NOT NULL) GROUP BY coalesce(a.sha256, a.id::text)) one)`;
+/* What the company keeps: each kept row by its own size, however many rows name the same content. A room counted by
+   content would grow by less when the same bytes come again, and so tell whoever sends a file whether one of those very
+   bytes is kept somewhere in the company, as its hash, which nobody but the file's readers sees, would. */
+const companyUse = (companyId: string) => sql<string>`(SELECT coalesce(sum(a.size), 0) FROM attachments a
+  WHERE a.company_id = ${companyId} AND (a.task_id IS NOT NULL OR a.person_id IS NOT NULL OR a.name IS NOT NULL))`;
 
 /* What the company keeps at most: TASK_FILES_MB, 2 GB unless set. */
 const companyLimit = (ctx: { config: Pick<Ctx['config'], 'taskFilesBytes'> }): number => ctx.config.taskFilesBytes;

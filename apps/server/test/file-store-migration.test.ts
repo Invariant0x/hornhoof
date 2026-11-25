@@ -396,6 +396,38 @@ describe('the bytes of the moved files', () => {
     expect(await moveOldFiles(ctx)).toEqual({ moved: 0, cleared: 1, finished: true, roomBack: { before: expect.any(Number), after: expect.any(Number) } });
     expect((await fileBytes(ctx, changing!.id)).equals(changed)).toBe(true);
   });
+
+  it('are cleared only where the store of this machine keeps them whole, as on a machine that leads after another moved them', async () => {
+    const filesDir = folder();
+    const [small, big]: Old[] = [{ id: randomUUID(), bytes: randomBytes(3000) }, { id: randomUUID(), bytes: randomBytes(5000), disk: true }];
+    const { db } = await upgraded([small!, big!], filesDir);
+    const config = { secret: Buffer.from(TEST_SECRET, 'base64'), filesDir } as Config;
+    const ctx = { db, config, files: new Files(config) };
+    const { ready } = await moveOldFiles(ctx);
+    expect(ready).toMatchObject({ digest: digestOf([small!, big!]), files: 2 });
+    await approveMove(db, ready!.digest, 'person:ceo');
+
+    /* Another machine leads before this one cleared a byte, with a FILES_DIR of its own: the database names both files,
+       and its store keeps neither. Nothing is cleared there, and the big file stays on the disk of this one. */
+    const otherConfig = { ...config, filesDir: folder() } as Config;
+    const other = { db, config: otherConfig, files: new Files(otherConfig) };
+    expect(await moveOldFiles(other)).toEqual({ moved: 0, finished: false });
+    expect([await withBytes(db), await nameOf(db, small!.id), await nameOf(db, big!.id), existsSync(join(filesDir, big!.id))]).toEqual([2, null, sha(big!.bytes), true]);
+    /* The small one is read from Postgres there, and moves into that store, to wait for a yes of its own. */
+    expect((await fileBytes(other, small!.id)).equals(small!.bytes)).toBe(true);
+    expect(await moveOldFiles(other)).toMatchObject({ moved: 1, finished: false, ready: { digest: digestOf([small!]), files: 1 } });
+    expect(await withBytes(db)).toBe(2);
+
+    /* This machine leads again, and its copy of the big file has a byte changed, as a fault of the disk may leave it: the
+       file on its disk stays, and is what is read. */
+    const copy = ctx.files.store().path(sha(big!.bytes));
+    const sealed = readFileSync(copy);
+    sealed[sealed.length - 1] ^= 1;
+    writeFileSync(copy, sealed);
+    expect(await moveOldFiles(ctx)).toEqual({ moved: 0, finished: false });
+    expect([await nameOf(db, big!.id), existsSync(join(filesDir, big!.id))]).toEqual([null, true]);
+    expect((await fileBytes(ctx, big!.id)).equals(big!.bytes)).toBe(true);
+  });
 });
 
 describe('the store key', () => {

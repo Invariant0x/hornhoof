@@ -27,7 +27,7 @@ export type PackBase = Readonly<{
 }>;
 
 /* Every language of the registry that has a file for the pack, which `load` brings by the language's id; English must have
-   one. A pack's file names its own folder in `load`: (id) => import(`./locales/<pack>/${id}.js`). */
+   one. A pack's file names its own folder in `load`, as ./locales/<pack>/<id>.js. */
 export async function packWords(pack: string, load: (language: string) => Promise<{ default: PackWords }>): Promise<Record<string, PackWords>> {
   const words: Record<string, PackWords> = {};
   for (const { id } of LOCALES) {

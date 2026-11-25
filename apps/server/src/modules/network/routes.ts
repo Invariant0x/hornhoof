@@ -8,7 +8,8 @@ import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { REPORT_MAX } from '../backups/types.js';
 import { holdsData } from '../copies/holds.js';
-import { noteGaveUp, noteReplicaBytes, noteSaving } from '../copies/measured.js';
+import { gaveUpOf, noteGaveUp, noteReplicaBytes, noteSaving } from '../copies/measured.js';
+import { copyRetryTaken } from '../copies/retry.js';
 import { notifySchemaChange, schemaNoticeChanged } from '../copies/schema-failures.js';
 import { copyOrder } from '../copies/slots.js';
 import { isPrivate } from '../keeper/addresses.js';
@@ -74,7 +75,7 @@ const ReportBody = z.object({
       /* What saving waits on and since when, while state is saving. */
       saving: z.object({ waiting: z.enum(SAVING_WAITS), since: z.iso.datetime() }).optional(),
       /* A copy its keeper gave up for good: since when, and after how many attempts in a row, while state is stopped. */
-      gaveUp: z.object({ since: z.iso.datetime(), attempts: z.number().int().min(1).max(999) }).optional(),
+      gaveUp: z.object({ since: z.iso.datetime(), attempts: z.number().int().min(0).max(999), why: z.enum(['failed', 'slow', 'late']).default('failed') }).optional(),
     })
     .optional(),
   replicaBytes: z.number().int().min(0).optional().catch(undefined),
@@ -122,16 +123,22 @@ function copyColumns(copy: NonNullable<z.infer<typeof ReportBody>['copy']>, copy
   };
 }
 
-function noteCopySide(ctx: Ctx, machineId: string, copy: NonNullable<z.infer<typeof ReportBody>['copy']>): void {
+/* Whether what the screens show of a copy given up changed with this report. */
+function noteCopySide(ctx: Ctx, machineId: string, copy: NonNullable<z.infer<typeof ReportBody>['copy']>): boolean {
   ctx.leftSlots.say(machineId, copy.left);
   noteSaving(ctx, machineId, copy.state === 'saving' ? (copy.saving ?? null) : null);
+  const before = gaveUpOf(ctx, machineId);
   noteGaveUp(ctx, machineId, copy.state === 'stopped' ? (copy.gaveUp ?? null) : null);
+  if (!(copy.state === 'stopped' && copy.gaveUp)) copyRetryTaken(ctx, machineId);
+  const after = gaveUpOf(ctx, machineId);
+  return before?.since !== after?.since || before?.why !== after?.why;
 }
 
 function clearMachineSide(ctx: Ctx, machineId: string): void {
   noteReplicaBytes(ctx, machineId, null);
   noteSaving(ctx, machineId, null);
   noteGaveUp(ctx, machineId, null);
+  copyRetryTaken(ctx, machineId);
 }
 
 /* networkId: the id the machine's keeper runs under, which the slot a new leader made for its copy is named by. */
@@ -270,7 +277,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
       const pinned = pin === undefined ? {} : { ownerPin: pin };
       /* Only a machine the server gave the data says anything of a copy; and never the one that leads. */
       const copied = copy === undefined || who.own || row?.role !== 'data' ? {} : copyColumns(copy, row.copyName);
-      if ('copyState' in copied) noteCopySide(ctx, machine.id, copy!);
+      const sideChanged = 'copyState' in copied ? noteCopySide(ctx, machine.id, copy!) : false;
       /* A machine that owed what it held and holds nothing now owes nothing, and its row says nothing of a copy but
          its name: the next copy on that machine starts at the attempt above it, so no name is used twice. */
       const left = wiped && !who.own && row?.role !== 'data' && row?.uploadState ? { uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyOld: null, copyOldLed: null, copySchemaSince: null, copySchemaAttempt: null } : {};
@@ -290,7 +297,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
       return {
         installed: Boolean(row && after && installs(row, now) && !installs(after, now)),
         looked: pin !== undefined && pin !== row?.ownerPin,
-        schemaChanged: schemaNoticeChanged(row, after, ctx.clock()),
+        schemaChanged: schemaNoticeChanged(row, after, ctx.clock()) || sideChanged,
         companyId: row?.companyId,
         measured: !who.own && (row?.role === 'data' || Boolean(row?.uploadState)),
         wiped: 'uploadState' in left,

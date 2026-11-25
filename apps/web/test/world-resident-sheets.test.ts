@@ -90,7 +90,7 @@ describe('Resident sheets drawn only in the directions they need (#1975)', () =>
         [`${at}build.png`]: { ...sheet(6, ['NE']), h: 256 * 5 },
         [`${at}sleep.png`]: sheet(4, ['SE', 'SE']),
         [`${at}pray.png`]: sheet(4, ['SSW' as 'SW']),
-        /* The west directions may be drawn too (#1983, Ivan 23.11: a big carried item keeps its hand). */
+        /* The west directions may be drawn too (#1983, 23.11: a big carried item keeps its hand). */
         [`${at}sad_sit.png`]: sheet(4, ['SE', 'SW']),
       }),
     );
@@ -194,11 +194,11 @@ describe('Builders face a front wall (#1975)', () => {
   });
 });
 
-/* Ivan, 23.11 (order v3 4.4): a mirrored row moves a held item to the other hand or shoulder, which shows at once. A
+/* Order v3 4.4, 23.11: a mirrored row moves a held item to the other hand or shoulder, which shows at once. A
    resident walking the grid faces NE, SE, SW or NW on screen, so a carry and the walk of a look with a large item draw
    those four, and that look's idle SE and SW; the rest keep their drawn rows and a mirror. The tier 1 mason set accepted
    before the rule keeps its 5-row carry with a named warning. */
-describe('Held items keep their hand: sheets drawn in the directions of 4.4 (#1983, Ivan 23.11)', () => {
+describe('Held items keep their hand: sheets drawn in the directions of 4.4 (#1983, 23.11)', () => {
   const EIGHT = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
   const WALKED = ['NE', 'SE', 'SW', 'NW'];
   const errorsOf = (files: Record<string, ArtIndexEntry>) => validateArtIndex(EGYPT_WORLD_PACK, index(files)).errors;

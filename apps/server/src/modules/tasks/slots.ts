@@ -4,6 +4,7 @@ import { agents, departments, tasks, turns } from '../../db/schema.js';
 import { note, published } from './events.js';
 import { keepWakes } from './outbox.js';
 import { CLOSED, type Task, type Tx, type Wake } from './state.js';
+import { releasesWork } from './turn-department.js';
 
 /* A development department runs its turn in slots, one per developer and five at most: a slot holds one task, and one small
    addition of the same product may join it. A new top-level task that finds every slot busy waits in the department's queue
@@ -38,10 +39,11 @@ export function slotsUsed(pieces: Piece[]): number {
   return [...byProduct.values()].reduce((sum, c) => sum + Math.max(c.big, c.small), 0);
 }
 
-/* How many slots the department holds now: its cap, at most the developers it has, and one at least. None: no slots. */
+/* How many slots the department holds now: its cap, at most the developers it has, and one at least. None: no slots, as for a
+   department that keeps no repository, which never gets a turn to take its queue in. */
 export async function slotCapacity(db: Db_, departmentId: string): Promise<number | null> {
-  const [department] = await db.select({ cap: departments.slotCap }).from(departments).where(eq(departments.id, departmentId));
-  if (department?.cap == null) return null;
+  const [department] = await db.select({ cap: departments.slotCap, parentId: departments.parentId, repoUrl: departments.repoUrl }).from(departments).where(eq(departments.id, departmentId));
+  if (department?.cap == null || !releasesWork(department)) return null;
   const members = await db
     .select({ id: agents.id, role: agents.roleKey })
     .from(agents)
