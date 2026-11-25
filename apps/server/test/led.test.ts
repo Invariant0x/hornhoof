@@ -193,6 +193,46 @@ describe('saving the database of a machine that led', () => {
     expect([s.it.done(), readLed(s.dir)?.failed]).toEqual([true, null]);
   });
 
+  it('asks the updater again when its request went with no dump and no line, ten minutes after it', async () => {
+    const s = await saver();
+    await s.it.tick();
+    const { id } = readLed(s.dir)!;
+    /* The updater took the request and left neither a dump nor a failure, as where not even the failure could be written. */
+    rmSync(join(s.controlDir, 'dump.json'));
+    s.said.now = new Date(s.said.now.getTime() + LED_RETRY_MS - 1000);
+    await s.it.tick();
+    expect(s.request()).toBeNull();
+    s.said.now = new Date(s.said.now.getTime() + 1000);
+    await s.it.tick();
+    expect(s.request()).toEqual({ id, database: 'hornhoof', reason: 'fork' });
+    /* Asked once more: the looks that follow wait for it. */
+    await s.it.tick();
+    expect(readLed(s.dir)!.id).toBe(id);
+    s.updater();
+    await s.it.tick();
+    expect([s.it.done(), readLed(s.dir)?.failed]).toEqual([true, null]);
+  });
+
+  it('asks again when the dump it could not seal was cleared by the updater, which keeps none in the clear for long', async () => {
+    const s = await saver();
+    /* The leader gives no view of whom to seal to, so the dump lies there unsealed. */
+    s.said.view = null;
+    await s.it.tick();
+    const { id } = readLed(s.dir)!;
+    s.updater();
+    await s.it.tick();
+    expect([readLed(s.dir)!.sealed, existsSync(join(s.controlDir, 'dumps', `${id}.sql.gz`))]).toEqual([false, true]);
+    /* A day on, the updater cleared it. */
+    for (const end of ['sql.gz', 'json']) rmSync(join(s.controlDir, 'dumps', `${id}.${end}`));
+    s.said.now = new Date(s.said.now.getTime() + 24 * 3_600_000);
+    await s.it.tick();
+    expect(s.request()).toEqual({ id, database: 'hornhoof', reason: 'fork' });
+    s.said.view = { company: COMPANY, recipients: [], recovery: null, last: null, holders: {}, wanted: [], order: null, fork: null } as MakerView;
+    s.updater();
+    await s.it.tick();
+    expect([s.it.done(), s.puts.length]).toEqual([true, 1]);
+  });
+
   it("keeps a live .part safe from a racing cleaner and a retry, and never wipes a data machine's bundles", async () => {
     const s = await saver();
     await s.it.tick();
