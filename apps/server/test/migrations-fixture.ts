@@ -7,15 +7,15 @@ import type { MigrationConfig } from 'drizzle-orm/migrator';
 import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
 import { migrate as migrateDrizzle } from 'drizzle-orm/pglite/migrator';
 import { afterAll, onTestFinished } from 'vitest';
-import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
+import { MIGRATIONS, migrateInOrder } from '../src/db/client.js';
 import { freshPglite } from './helpers-db.js';
 import { migrationsCut } from './migrations-before.js';
 
 /* What the migration tests share. They are split by migration number into files that run side by side. */
 
+/* As the app migrates: what a merged branch left below drizzle's newest record first, then drizzle's run, then the rest. */
 export async function migrate(db: PgliteDatabase, config: MigrationConfig): Promise<void> {
-  await migrateDrizzle(db, config);
-  await applyMissingMigrations(db, config);
+  await migrateInOrder(db, config, migrateDrizzle);
 }
 
 /* A fresh install, migrated once for the file by the first test that needs one: each test opens a copy of its own. */
