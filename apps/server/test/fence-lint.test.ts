@@ -12,6 +12,11 @@ const POOL_OWNERS = ['src/db/client.ts', 'src/db/agent-sql.ts', 'src/modules/kee
    confirmed already, on a machine that has no copy of its own to wait for; so does the one an old leader joins the new
    one with. */
 const LOOSE_COMMIT_ALLOWED = ['src/modules/keeper/lease-store.ts', 'src/modules/keeper/copy.ts', 'src/modules/keeper/promote.ts'];
+/* net.assert_lease lets a commit through only under synchronous_commit on, and what a session gets of the server is
+   whatever its postgresql.auto.conf says: one with local in it refused every write of the app. So each owner of a pool
+   that writes under the fence turns it on itself, the keeper's own session alone loosens it, and the merge's source only reads. */
+const COMMIT_ON_ITSELF = ['src/db/client.ts', 'src/db/agent-sql.ts'];
+const COMMIT_NOT_ON = ['src/modules/keeper/lease-store.ts', 'src/modules/merge/source.ts'];
 
 type Rule = { name: string; matches: (line: string) => boolean; allowedIn?: string[]; sample: string };
 
@@ -89,6 +94,11 @@ describe('the lint of the fences', () => {
 
   it('takes turning synchronous_commit on, and what follows it, for no loose commit', () => {
     expect(brokenBy('src/db/agent-sql.ts', "SET LOCAL synchronous_commit = on; SET LOCAL statement_timeout = 0; SELECT net.assert_lease('2 s', NULL)")).toBeUndefined();
+  });
+
+  it('has each pool that writes under the fence turn synchronous_commit on itself, and none left out', () => {
+    for (const file of COMMIT_ON_ITSELF) expect(readFileSync(join(SERVER, file), 'utf8'), file).toMatch(/synchronous_commit(=| = )on\b/);
+    expect([...COMMIT_ON_ITSELF, ...COMMIT_NOT_ON].sort()).toEqual([...POOL_OWNERS].sort());
   });
 
   it('takes an app that says whether it is fenced', () => {
