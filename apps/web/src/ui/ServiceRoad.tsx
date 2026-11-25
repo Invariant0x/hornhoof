@@ -111,6 +111,15 @@ export function ServiceStrip() {
   );
 }
 
+/* A notice of the road that stands while its reason does, and goes by itself once the reason ends or the screen is gone. */
+export function useServiceNotice(id: string, on: boolean, line: string): void {
+  useEffect(() => {
+    if (!on) return;
+    service.notify(id, line);
+    return () => service.clear(id);
+  }, [id, on, line]);
+}
+
 /* In the place of a page area that has nothing cached to show while a state stands: the logo, the ring and the same line, in
    place. No window of its own and nothing to press. live: false where a second area of the screen shows it too, so the
    screen has one status. */

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connection } from '../src/connection';
 import { LanguageProvider } from '../src/i18n';
 import { SERVICE_LINES, service } from '../src/service-state';
-import { ServiceLoader, ServiceStrip, ServiceWindow } from '../src/ui/ServiceRoad';
+import { ServiceLoader, ServiceStrip, ServiceWindow, useServiceNotice } from '../src/ui/ServiceRoad';
 
 /* The service road, drawn (#2098, #2099, Design #2100): window, then strip, then gone; the loader in a page area's own place.
    The look is Design's; these tests hold what it must keep: one message at a time, the window and the strip never together,
@@ -164,6 +164,26 @@ describe('the window and the strip', () => {
     road();
     act(() => service.notify('app', 'Hornhoof does not answer'));
     expect(screen.getByRole('dialog').querySelector('.svc-line')).not.toHaveAttribute('lang');
+  });
+});
+
+describe('a notice a screen holds while its reason stands', () => {
+  function Holds({ on }: { on: boolean }) {
+    useServiceNotice('held', on, 'Something is wrong here');
+    return null;
+  }
+
+  it('is said while the reason stands, and goes with the reason and with the screen', () => {
+    const { rerender, unmount } = render(<LanguageProvider><ServiceWindow /><Holds on={false} /></LanguageProvider>);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    rerender(<LanguageProvider><ServiceWindow /><Holds on /></LanguageProvider>);
+    expect(screen.getByRole('dialog', { name: 'Something is wrong here' })).toBeInTheDocument();
+    rerender(<LanguageProvider><ServiceWindow /><Holds on={false} /></LanguageProvider>);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    rerender(<LanguageProvider><ServiceWindow /><Holds on /></LanguageProvider>);
+    expect(service.snapshot()?.message.line).toBe('Something is wrong here');
+    unmount();
+    expect(service.snapshot()).toBeNull();
   });
 });
 

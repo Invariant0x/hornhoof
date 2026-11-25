@@ -11,7 +11,7 @@ import { Login } from './screens/Login';
 import { Setup } from './screens/Setup';
 import { Shell } from './screens/Shell';
 import type { Me } from './types';
-import { ServiceLoader, ServiceStrip, ServiceWindow, useServiceView } from './ui/ServiceRoad';
+import { ServiceLoader, ServiceStrip, ServiceWindow, useServiceNotice, useServiceView } from './ui/ServiceRoad';
 import { VersionMark } from './ui/VersionMark';
 import { parseRoute } from './routes';
 
@@ -120,12 +120,7 @@ function Screens() {
   useAskAgain(screen, decide);
 
   /* A load that failed with an answer of the server's own is a notice of the road, until the page asks again and it works. */
-  const failedLoad = screen.kind === 'error';
-  useEffect(() => {
-    if (!failedLoad) return;
-    service.notify('app', t.app.notResponding);
-    return () => service.clear('app');
-  }, [failedLoad, t]);
+  useServiceNotice('app', screen.kind === 'error', t.app.notResponding);
 
   const home = useCallback(
     (welcome = false) => {

@@ -67,12 +67,16 @@ type Seen = { failed: unknown; waiting: boolean; timed: boolean };
 /* How many times Retry asked, and whether the last wait began with it. */
 type Asked = { round: number; byRetry: boolean };
 
+/* The failure of a part that its screen says: none for a quiet part, which another part says, nor for the server being away,
+   which the service road says. */
+const sayable = (p: LoadPart): unknown => (p.quiet || p.failure === undefined || isAway(p.failure) ? null : p.failure);
+
 /* Where the parts that have not come are: the first failure to say, if any, then whether they are still coming, and whether
    the limit counts. A failure from before the last Retry no longer counts, as the part is asked again. A part that waits for
    the server to be back, which is no failure to say, or a quiet part, which another part of the screen says, is still coming,
    and no limit counts while it waits. */
 function seen(missing: LoadPart[], before: Set<unknown>): Seen {
-  const failures = missing.map(p => (p.quiet || p.failure === undefined || isAway(p.failure) ? null : p.failure));
+  const failures = missing.map(sayable);
   const failed = failures.find(f => f && !before.has(f)) ?? null;
   const saidElsewhere = missing.some((p, i) => p.quiet || (p.failure && !failures[i]));
   const waiting = missing.length > 0 && !failed;
