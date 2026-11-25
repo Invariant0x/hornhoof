@@ -281,7 +281,7 @@ describe('the keeper of a machine that keeps a copy', () => {
     expect(view.machines.find(row => row.id === f.machine)?.replicas).toMatchObject({ bytes: 4096 });
   });
 
-  it('measures nothing of its disk while it makes its copy', async () => {
+  it('reports nothing of its disk while it makes its copy', async () => {
     /* Pouring the copy in is what keeps the disk busy then: a probe would only measure that. */
     const c = await company();
     const f = await follower(c, { worker: { sampleMs: 1 } });
@@ -292,7 +292,8 @@ describe('the keeper of a machine that keeps a copy', () => {
       const { reportAt } = await c.rowOf(f.machine);
       await until(async () => (await c.rowOf(f.machine)).reportAt!.getTime() > reportAt!.getTime());
     }
-    expect(existsSync(join(f.config.dir, 'fsync-probe'))).toBe(false);
+    /* It still times its disk, for what a lease would go by, but reports none of it. */
+    expect(existsSync(join(f.config.dir, 'fsync-probe'))).toBe(true);
     expect(await c.rowOf(f.machine)).toMatchObject({ copyState: 'making', fsyncP99Ms: null });
   });
 

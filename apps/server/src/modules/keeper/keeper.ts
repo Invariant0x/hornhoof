@@ -435,7 +435,7 @@ export class Keeper {
       sync: this.sync ?? undefined,
       onEnd: () => this.leaseEnded(),
       hold: () => this.hander?.holds() ?? false,
-      fsyncP99: () => this.identity?.fsyncP99() ?? null,
+      fsyncP99: () => this.identity?.leaseFsyncP99() ?? null,
       sole: () => this.sole(),
       proofs: this.leaseProofs && this.reentry
         ? {
@@ -703,6 +703,12 @@ export class Keeper {
       this.takingTimer = setInterval(() => void takeOver(), this.opts.takingEveryMs ?? TAKING_EVERY_MS);
     }
     return { front, linkHttp, linkTls };
+  }
+
+  /* Whether a backup of this machine's database keeps its disk busy now, when what the disk is timed at is left out of
+     the machine's report. */
+  backupsBusy(): boolean {
+    return this.backups?.dumping() ?? false;
   }
 
   async stop(): Promise<void> {
