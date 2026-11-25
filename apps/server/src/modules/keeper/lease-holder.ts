@@ -1,5 +1,5 @@
 import type { LeaseKind, LeaseSync, Term } from '../../db/net.js';
-import type { LeaseStore } from './lease-store.js';
+import type { CommitSetting, LeaseStore } from './lease-store.js';
 import { lateTickMs, LEASE_MS, leaseValid, nextLeaseStep, type Clocks, type Held, type LeaseStep } from './lease.js';
 import type { Mode } from './state.js';
 import { reasonOf as messageOf } from './machine-keys.js';
@@ -41,6 +41,8 @@ const isDiskFull = (err: unknown): boolean => {
 };
 
 const PRUNE_EVERY_MS = 60_000;
+/* A setting that did not hold after the keeper set it is set again no sooner than this. */
+const COMMIT_RETRY_MS = 60_000;
 const ENDED = 'the sessions of the app and the agents were ended, and Hornhoof only reads here until it takes a new term';
 const clocksNow = (): Clocks => ({ wall: Date.now(), mono: performance.now() });
 
@@ -56,6 +58,10 @@ export class LeaseHolder {
   /* What the last look at the fences found. Null until the first look: nothing is known to hold yet. */
   private problems: string[] | null = null;
   private prunedAt: number | null = null;
+  /* What the last look found of the setting a session gets without asking: a line while it is not on, none while it is. */
+  private commitProblems: string[] = [];
+  /* When the keeper last set it on, by the monotonic clock. */
+  private commitSetAt: number | null = null;
   private othersHold = false;
   /* The last write of the lease failed for a full disk. */
   private diskFull = false;
@@ -69,7 +75,7 @@ export class LeaseHolder {
 
   mode(): Mode {
     if (this.maintenance) return 'maintenance';
-    return this.held?.kind === 'normal' && leaseValid(this.held, this.now()) && this.problems?.length === 0 && this.flag() !== null ? 'lead' : 'read';
+    return this.held?.kind === 'normal' && leaseValid(this.held, this.now()) && this.problems?.length === 0 && this.commitProblems.length === 0 && this.flag() !== null ? 'lead' : 'read';
   }
 
   /* The flag a lease stands under now. Alone is untrue while another machine is listed as holding the data, and then
@@ -144,12 +150,41 @@ export class LeaseHolder {
     this.sayOnce('alone', others ? "Another machine holds the company's data, so this machine does not lead alone." : '');
   }
 
-  /* Looks at every fence. A look that fails keeps what the last one found. */
+  /* Looks at every fence, and at the setting a session commits under, which a fence needs to be on. A look that fails keeps
+     what the last one found. */
   async look(): Promise<void> {
-    const found = await this.opts.lease?.problems().catch(() => undefined);
-    if (found === undefined) return;
+    const { lease } = this.opts;
+    const found = await lease?.problems().catch(() => undefined);
+    if (lease === null || lease === undefined || found === undefined) return;
+    await this.lookAtCommit(lease);
+    const all = [...found, ...this.commitProblems];
     this.problems = found;
-    this.sayOnce('fences', found.length ? `Hornhoof does not lead here until this is fixed: ${found.join('; ')}.` : '');
+    this.sayOnce('fences', all.length ? `Hornhoof does not lead here until this is fixed: ${all.join('; ')}.` : '');
+  }
+
+  /* net.assert_lease lets a commit through only under on. The app and the agents ask for it themselves, and a session left
+     to the server gets what its file says, so a file that says anything else is put right, with the finding said, as often
+     as once a minute; what the keeper cannot change, as a setting the server was started with, is a fence that does not
+     hold. A look that fails keeps what the last one found. */
+  private async lookAtCommit(lease: LeaseStore): Promise<void> {
+    const seen = await lease.commitSetting().catch(() => undefined);
+    if (seen === undefined) return;
+    if (seen.setting !== 'on' && (await this.putCommitRight(lease, seen))) {
+      this.commitProblems = [];
+      return;
+    }
+    this.commitProblems = seen.setting === 'on' ? [] : [`synchronous_commit is "${seen.setting}" for a session that sets none (the ${seen.source}), and the fence lets a commit through only under "on"`];
+    if (seen.setting === 'on') this.sayOnce('commit', '');
+  }
+
+  /* Whether the setting stands on after the keeper set it, which it does only when a file gave the other and only once a minute. */
+  private async putCommitRight(lease: LeaseStore, seen: CommitSetting): Promise<boolean> {
+    const now = this.now().mono;
+    if (seen.source !== 'configuration file' || (this.commitSetAt !== null && now - this.commitSetAt < COMMIT_RETRY_MS)) return false;
+    this.commitSetAt = now;
+    if (!(await lease.commitOn().then(() => true, () => false))) return false;
+    this.sayOnce('commit', `A session that sets no commit setting got "${seen.setting}" here, from the ${seen.source}, and the fence lets a commit through only under "on": the keeper set it on and reloaded.`);
+    return (await lease.commitSetting().catch(() => undefined))?.setting === 'on';
   }
 
   /* A lease is taken and renewed only under a flag, and renewed only while the sync controller lets it: without either

@@ -8,7 +8,7 @@
     "url": "git+https://github.com/invariant0x/hornhoof.git",
     "directory": "apps/web"
   },
-  "version": "0.44.2",
+  "version": "0.44.3",
   "private": true,
   "type": "module",
   "scripts": {
