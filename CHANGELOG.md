@@ -11,6 +11,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - A machine's copy of the company's data no longer tries again without end over a link that keeps cutting it: a subscription stopped by an error and enabled again 30 times in one attempt ends that attempt even when some tables got through, one that takes no table through and grows by less than 8 MiB in two hours ends too, the attempts given up in a row count until the copy has been whole for an hour, a whole copy that breaks soon after is counted too, each wait is twice as long as the one before, and after the fourth attempt given up in a row the keeper parks the copy: its slots on the company server are dropped so the log they held is released, nothing more is made until it is asked for, and the machine's card says it was given up, since when and after how many attempts.
 - A former server machine whose database is being saved before its copy is remade no longer gets stuck in "Saving" when a backup-holder sweep runs during sealing: the keeper keeps one shared record of temporary bundle files in flight, puts the sealed archive in place before its header and clears any leftover header without an archive, skips the save when the current server's copy has already applied the former server's last write, and shows on the machine card what the save is waiting on and since when.
+- A checking stage follows its owner when the owner's plan or model changes, by hand, through a fallback plan and back, or because a plan leaves the company: the owner keeps the stage when every rule that chose it still holds, and otherwise the stage waits with its reason and the department head is told, instead of every later result being refused with "The checking assignment changed".
+- A short one-shot Antigravity call no longer hangs on a long prompt: agy reads its prompt on stdin, and a one-shot call ends at its time limit.
+- A check started from inside a check that already holds the machine's check slot runs in that slot instead of waiting behind its own parent in the queue.
 
 ### Added
 
@@ -19,6 +22,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Two languages made for tests, a text 40% longer than English and the same text mirrored, are checked on the main screens at phone and desktop widths for cut text and sideways scroll. They never reach a person.
 - A development department runs its turn in slots, one task for each of up to five developers: a task that finds them all busy waits in a queue that the task card and the Turns and releases screen show, the next turn takes the queue in, and urgent work goes past it.
 - A task records who asked for it besides who decides it, and the list "Mine" holds what a person asked for and what waits for their decision; new task trees keep three levels, a reason for each sub-task and at most five under a task.
+- A repository can declare the test services its checks need in `.hornhoof/warm-services.json`: the node keeps each one warm, one set per machine, gives every check that needs it its own piece with its check slot and drops the piece afterwards, sweeps pieces whose run died, and starts a check that needs none at once. Hornhoof's own tests use it for one PGlite template per machine, read in place by every run, and one warm PostgreSQL 17 for the real-Postgres specs.
 
 ### Changed
 
