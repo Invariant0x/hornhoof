@@ -18,7 +18,9 @@ import { hostFound, ownAddresses } from './addresses.js';
 import type { HeldCertificate } from './certificate.js';
 import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFront } from './doors.js';
 import { MachineIdentity, type Published } from './identity.js';
-import { PEER_PATHS } from '../../net/peer-server.js';
+import { PEER_PATHS, type PeerFiles } from '../../net/peer-server.js';
+import { LeaderFiles } from './leader-files.js';
+import { filesFor } from '../files/files.js';
 import { PeerLink, type PeerPorts } from './peer-link.js';
 import type { PeerServices } from '../link/peer-client.js';
 import { Beats, type Beat } from './beats.js';
@@ -637,15 +639,17 @@ export class Keeper {
       this.giveWord();
     };
     const leaseTimers = (): void => {
+      const look = oneAtATime(() => this.holder.look().then(() => this.readNeeded()));
       this.timer = setInterval(() => void tick(), everyMs);
-      this.fencesTimer = setInterval(() => void this.holder.look().then(() => this.readNeeded()), linkEveryMs);
+      this.fencesTimer = setInterval(() => void look(), linkEveryMs);
       if (this.opts.proofs) {
         this.proofsTimer = setInterval(() => this.prove(), this.opts.proofs.everyMs ?? PROVE_EVERY_MS);
         this.proofsTimer.unref();
       }
     };
     const afterLead = (): void => {
-      this.guardTimer = setInterval(() => void this.holder.guard(), this.opts.guardEveryMs ?? GUARD_EVERY_MS);
+      const guard = oneAtATime(() => this.holder.guard());
+      this.guardTimer = setInterval(() => void guard(), this.opts.guardEveryMs ?? GUARD_EVERY_MS);
       this.guardTimer.unref();
       if (this.opts.sync?.slots) {
         this.slotsTimer = setInterval(() => void this.keepSlots(), this.opts.sync.slots.everyMs ?? SLOTS_EVERY_MS);
@@ -758,6 +762,7 @@ export class Keeper {
       helloMore: () => this.helloMore(),
       /* A machine that led gives what its database held to the keeper that leads now. */
       leds: { put: async (peer, id, body) => (this.backups ? this.backups.takeLed(peer, id, body) : 404) },
+      files: this.peerFiles(),
       log,
     });
     await this.peers.start().catch((err: Error) => log(`The peer link could not start: ${err.message}`));
@@ -889,6 +894,19 @@ export class Keeper {
   }
 
   /* What the peer link serves of backups, also before the keeper of backups is there: nothing yet. */
+  /* The leading keeper gives the files of its store to the machines that hold them, and takes back one its app asked
+     for; while it does not lead, or without a database, neither. */
+  private peerFiles(): PeerFiles | undefined {
+    const { db } = this.opts;
+    const dir = this.opts.config.filesDir;
+    if (!db || !dir) return undefined;
+    const files = new LeaderFiles(db, join(dir, 'store'), this.opts.config.machineId ?? null, () => filesFor(this.opts.config).key(db));
+    return {
+      get: async (peer, sha256, backup) => (this.mode() === 'lead' ? files.give(peer.machine, sha256, backup) : { status: 403 }),
+      put: async (peer, sha256, body, backup) => (this.mode() === 'lead' ? files.take(peer.machine, sha256, body, backup) : 403),
+    };
+  }
+
   private peerBackups(): PeerBackups {
     return {
       get: (peer, id) => this.backups?.peer().get(peer, id) ?? { status: 404 },
@@ -917,6 +935,7 @@ export class Keeper {
     /* Where a lease takes proofs, the link's client stops with the lease and stays stopped until the way back in. */
     this.entryTunnel = false;
     if (!this.sole() && (this.sync?.listed() ?? 0) > 0) this.linkPausedUntil = performance.now() + (this.opts.sync?.linkPauseMs ?? LINK_PAUSE_MS);
+    this.giveWord();
   }
 
   /* The link's settings for its frpc: none while the frpc is to stay stopped, so the tunnel keeper ends it, and the

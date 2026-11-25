@@ -53,7 +53,9 @@ export function partFileRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (Number(made?.n ?? 0) >= MAX_RUN_FILES) throw new ApiError(409, 'conflict', `A part puts at most ${MAX_RUN_FILES} files on its task.`, 'attachment_invalid');
       await checkRoom(ctx, run.companyId, task, bytes.length);
       const file = madeName(run, part.part, name);
-      await db.insert(attachments).values({ companyId: run.companyId, jobId: run.jobId, agentId: run.agentId, taskId: run.taskId, name: file, mediaType: 'application/octet-stream', bytes, size: bytes.length });
+      const kept = await ctx.files.putBytes(db, bytes);
+      await db.insert(attachments).values({ companyId: run.companyId, jobId: run.jobId, agentId: run.agentId, taskId: run.taskId, testRunId: run.id, name: file, mediaType: 'application/octet-stream', sha256: kept.sha256, size: kept.size });
+      await ctx.files.settled(db, kept.sha256);
       reply.code(201);
       return { name: file };
     });

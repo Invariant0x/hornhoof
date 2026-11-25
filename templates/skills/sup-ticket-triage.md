@@ -1,7 +1,5 @@
 ---
 id: sup-ticket-triage
-title: { en: "Ticket triage", ru: "Разбор обращений" }
-description: { en: "Sorts each new ticket by type, urgency and route, and spots what must go up at once.", ru: "Сортирует каждое новое обращение по типу, срочности и маршруту и замечает то, что нужно сразу передать выше." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins customer-support]
 ---

@@ -2,7 +2,8 @@
    and kept as decoded pixels for the chunk baker and the plant layer. A file that fails to load leaves its slot on
    the procedural look; a pack without art loads nothing. Needs a browser (fetch and createImageBitmap). */
 
-import type { PlantPassport, WorldPackManifest } from './manifest';
+import { worldArtFiles } from './art-files';
+import type { PlantPassport, TerrainArtSpec, WorldPackManifest } from './manifest';
 import { parsePlantPassport } from './plants';
 
 /* Straight (not premultiplied) RGBA pixels. */
@@ -25,6 +26,9 @@ export type LoadedTerrainArt = Readonly<{
   shoreEdge: ArtPixels | null;
   liquid: Readonly<{ bed: ArtPixels; ripples: ArtPixels; surface: ArtPixels | null; baseColor: string }> | null;
   pathStrip: ArtPixels | null;
+  /* The city's street strips by tier (terrainArt.roads), baked into the ground (street-field.ts); a tier without one
+     keeps its street tiles drawn by the city. */
+  roads?: Readonly<Partial<Record<'trail' | 'dirt' | 'brick' | 'stone', ArtPixels>>>;
   /* Plant kind id -> its loaded variants, in the order the pack lists them. */
   plants: ReadonlyMap<string, readonly PlantArtImage[]>;
 }>;
@@ -51,11 +55,27 @@ function canvasOf(width: number, height: number): HTMLCanvasElement {
   return c;
 }
 
-async function loadCanvas(url: string): Promise<HTMLCanvasElement | null> {
+/* One painted file's bytes: through the pack's art files (kept in the browser by content hash), else the network. */
+type ReadFile = (path: string) => Promise<Blob | null>;
+
+function fileReader(pack: WorldPackManifest, base: string): ReadFile {
+  const files = worldArtFiles(pack);
+  if (files) return path => files.blob(path);
+  return async path => {
+    try {
+      const res = await fetch(base + path);
+      return res.ok ? await res.blob() : null;
+    } catch {
+      return null;
+    }
+  };
+}
+
+async function loadCanvas(read: ReadFile, path: string): Promise<HTMLCanvasElement | null> {
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const bmp = await createImageBitmap(await res.blob(), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+    const blob = await read(path);
+    if (!blob) return null;
+    const bmp = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
     const canvas = canvasOf(bmp.width, bmp.height);
     canvas.getContext('2d', { willReadFrequently: true })?.drawImage(bmp, 0, 0);
     bmp.close();
@@ -72,15 +92,15 @@ function pixelsOf(canvas: HTMLCanvasElement): ArtPixels | null {
   return { data: img.data, width: canvas.width, height: canvas.height };
 }
 
-async function loadPixels(url: string): Promise<ArtPixels | null> {
-  const canvas = await loadCanvas(url);
+async function loadPixels(read: ReadFile, path: string): Promise<ArtPixels | null> {
+  const canvas = await loadCanvas(read, path);
   return canvas ? pixelsOf(canvas) : null;
 }
 
-async function loadJson(url: string): Promise<unknown> {
+async function loadJson(read: ReadFile, path: string): Promise<unknown> {
   try {
-    const res = await fetch(url);
-    return res.ok ? await res.json() : null;
+    const blob = await read(path);
+    return blob ? JSON.parse(await blob.text()) : null;
   } catch {
     return null;
   }
@@ -92,11 +112,11 @@ function squareTexture(p: ArtPixels | null): ArtPixels | null {
   return p;
 }
 
-async function loadPlant(base: string, image: string, windMask: string | undefined, passport: string | undefined): Promise<PlantArtImage | null> {
+async function loadPlant(read: ReadFile, image: string, windMask: string | undefined, passport: string | undefined): Promise<PlantArtImage | null> {
   const [canvas, mask, json] = await Promise.all([
-    loadCanvas(base + image),
-    windMask ? loadPixels(base + windMask) : Promise.resolve(null),
-    passport ? loadJson(base + passport) : Promise.resolve(null),
+    loadCanvas(read, image),
+    windMask ? loadPixels(read, windMask) : Promise.resolve(null),
+    passport ? loadJson(read, passport) : Promise.resolve(null),
   ]);
   if (!canvas) return null;
   const pixels = pixelsOf(canvas);
@@ -128,26 +148,41 @@ export function loadTerrainArt(pack: WorldPackManifest): Promise<LoadedTerrainAr
   return job;
 }
 
+type StreetStripPixels = Partial<Record<'trail' | 'dirt' | 'brick' | 'stone', ArtPixels>>;
+
+/* The street strips the pack names, by tier; a strip that fails to load is left out. */
+export async function loadRoadStrips(
+  spec: Pick<TerrainArtSpec, 'roads'> | undefined,
+  load: (path: string) => Promise<ArtPixels | null>,
+): Promise<StreetStripPixels> {
+  const loadedStrips = await Promise.all(Object.entries(spec?.roads ?? {}).map(async ([tier, file]) => [tier, file ? await load(file) : null] as const));
+  const roads: StreetStripPixels = {};
+  for (const [tier, px] of loadedStrips) if (px) roads[tier as keyof StreetStripPixels] = px;
+  return roads;
+}
+
 async function loadAll(pack: WorldPackManifest): Promise<LoadedTerrainArt | null> {
   const base = pack.art?.baseUrl;
   const spec = pack.terrainArt;
   const plantKinds = (pack.plants ?? []).filter(k => (k.art?.length ?? 0) > 0);
   if (!base || (!spec && plantKinds.length === 0) || typeof fetch !== 'function' || typeof createImageBitmap !== 'function') return null;
 
-  const groundJobs = Object.entries(spec?.ground ?? {}).map(async ([id, file]) => [id, squareTexture(await loadPixels(base + file))] as const);
-  const edgeJobs = Object.entries(spec?.edges ?? {}).map(async ([pair, file]) => [pair, await loadPixels(base + file)] as const);
-  const plantJobs = plantKinds.map(async k => [k.id, (await Promise.all(k.art!.map(a => loadPlant(base, a.image, a.windMask, a.passport)))).filter((x): x is PlantArtImage => x !== null)] as const);
+  const read = fileReader(pack, base);
+  const groundJobs = Object.entries(spec?.ground ?? {}).map(async ([id, file]) => [id, squareTexture(await loadPixels(read, file))] as const);
+  const edgeJobs = Object.entries(spec?.edges ?? {}).map(async ([pair, file]) => [pair, await loadPixels(read, file)] as const);
+  const plantJobs = plantKinds.map(async k => [k.id, (await Promise.all(k.art!.map(a => loadPlant(read, a.image, a.windMask, a.passport)))).filter((x): x is PlantArtImage => x !== null)] as const);
   const liq = spec?.liquid;
-  const [ground, edges, plants, defaultEdge, shoreEdge, bed, ripples, surface, pathStrip] = await Promise.all([
+  const [ground, edges, plants, defaultEdge, shoreEdge, bed, ripples, surface, pathStrip, roadStrips] = await Promise.all([
     Promise.all(groundJobs),
     Promise.all(edgeJobs),
     Promise.all(plantJobs),
-    spec?.defaultEdge ? loadPixels(base + spec.defaultEdge) : Promise.resolve(null),
-    spec?.shoreEdge ? loadPixels(base + spec.shoreEdge) : Promise.resolve(null),
-    liq ? loadPixels(base + liq.bed) : Promise.resolve(null),
-    liq ? loadPixels(base + liq.ripples) : Promise.resolve(null),
-    liq?.surface ? loadPixels(base + liq.surface) : Promise.resolve(null),
-    spec?.pathStrip ? loadPixels(base + spec.pathStrip) : Promise.resolve(null),
+    spec?.defaultEdge ? loadPixels(read, spec.defaultEdge) : Promise.resolve(null),
+    spec?.shoreEdge ? loadPixels(read, spec.shoreEdge) : Promise.resolve(null),
+    liq ? loadPixels(read, liq.bed) : Promise.resolve(null),
+    liq ? loadPixels(read, liq.ripples) : Promise.resolve(null),
+    liq?.surface ? loadPixels(read, liq.surface) : Promise.resolve(null),
+    spec?.pathStrip ? loadPixels(read, spec.pathStrip) : Promise.resolve(null),
+    loadRoadStrips(spec, path => loadPixels(read, path)),
   ]);
 
   const groundMap = new Map<string, ArtPixels>();
@@ -166,6 +201,7 @@ async function loadAll(pack: WorldPackManifest): Promise<LoadedTerrainArt | null
     shoreEdge,
     liquid: liq && bed && ripples ? { bed, ripples, surface: squareTexture(surface), baseColor: liq.baseColor } : null,
     pathStrip,
+    roads: roadStrips,
     plants: plantMap,
   };
   loaded.set(pack, art);

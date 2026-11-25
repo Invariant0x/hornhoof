@@ -178,6 +178,7 @@ export function registerDepartmentControlTools(server: McpServer, ctx: Ctx, app:
         "name, model ('' for Default), effort (a level its model takes, null for its role's level fitted to its model), subscription (null for none), " +
         'team (sub-unit id in your department, or null for the pipeline), skills { id: on/off }, base (its personal assignment, null to clear it), skillText { id: text or null }, ' +
         'on (false switches it off: it ends the turn it runs and takes no task turns until it is on again), and timer { minutes, order, forWork? } (null for none). ' +
+        'A new model or subscription takes its active checking stages along, or leaves each one it no longer qualifies for waiting, with the reason, for you to give again. ' +
         'What that person may not change on the card is refused here too.',
       inputSchema: { employee: Id('employee'), ...AgentPatch.shape },
     },

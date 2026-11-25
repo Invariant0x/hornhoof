@@ -1,7 +1,5 @@
 ---
 id: sal-crm-hygiene
-title: { en: "CRM hygiene", ru: "Порядок в CRM" }
-description: { en: "Finds missing, stale and duplicate records in the CRM and proposes the fixes.", ru: "Находит неполные, устаревшие и повторяющиеся записи в CRM и предлагает исправления." }
 kind: checklist
 sources: [anthropics/knowledge-work-plugins sales/skills/crm-hygiene-check/SKILL.md]
 ---

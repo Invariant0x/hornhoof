@@ -11,17 +11,18 @@ import type {
   TerrainNoiseToolkit,
   TerrainRecipeSpec,
 } from '../../world/manifest';
+import { text } from '../../world/pack-text';
 
 export const EGYPT_TILE_KINDS: readonly TerrainKindSpec[] = [
-  { id: 'river', label: { en: 'River', ru: 'Река' }, color: '#2678A6', materialId: 'bank', buildable: false, walkable: false, liquid: true },
-  { id: 'bank', label: { en: 'Riverbank', ru: 'Берег' }, color: '#D4BA86', materialId: 'bank', buildable: false, walkable: true },
-  { id: 'fertile', label: { en: 'Fertile strip', ru: 'Зеленая полоса' }, color: '#5E8E46', materialId: 'grass', buildable: true, walkable: true },
-  { id: 'plain', label: { en: 'Flat sand plain', ru: 'Ровная земля' }, color: '#D8C294', materialId: 'sand', buildable: true, walkable: true },
-  { id: 'dune', label: { en: 'Dunes', ru: 'Барханы' }, color: '#CFA666', materialId: 'dune', buildable: false, walkable: true },
-  { id: 'ridge', label: { en: 'Cliffs & ridges', ru: 'Скалы и гряды' }, color: '#94816A', materialId: 'rock', buildable: false, walkable: false },
-  { id: 'quarry', label: { en: 'Quarries', ru: 'Каменоломни' }, color: '#B7AA93', materialId: 'quarry', buildable: false, walkable: true },
-  { id: 'oasis_water', label: { en: 'Oasis pool', ru: 'Вода оазиса' }, color: '#339EB2', materialId: 'bank', buildable: false, walkable: false, liquid: true },
-  { id: 'oasis_grove', label: { en: 'Oasis grove', ru: 'Оазис' }, color: '#457D43', materialId: 'grass', buildable: false, walkable: true },
+  { id: 'river', label: text('River'), color: '#2678A6', materialId: 'bank', buildable: false, walkable: false, liquid: true },
+  { id: 'bank', label: text('Riverbank'), color: '#D4BA86', materialId: 'bank', buildable: false, walkable: true },
+  { id: 'fertile', label: text('Fertile strip'), color: '#5E8E46', materialId: 'grass', buildable: true, walkable: true },
+  { id: 'plain', label: text('Flat sand plain'), color: '#D8C294', materialId: 'sand', buildable: true, walkable: true },
+  { id: 'dune', label: text('Dunes'), color: '#CFA666', materialId: 'dune', buildable: false, walkable: true },
+  { id: 'ridge', label: text('Cliffs & ridges'), color: '#94816A', materialId: 'rock', buildable: false, walkable: false },
+  { id: 'quarry', label: text('Quarries'), color: '#B7AA93', materialId: 'quarry', buildable: false, walkable: true },
+  { id: 'oasis_water', label: text('Oasis pool'), color: '#339EB2', materialId: 'bank', buildable: false, walkable: false, liquid: true },
+  { id: 'oasis_grove', label: text('Oasis grove'), color: '#457D43', materialId: 'grass', buildable: false, walkable: true },
 ];
 
 export const EGYPT_MATERIAL_IDS = [
@@ -261,7 +262,7 @@ function sampleOasisDistances(
 
 export const EGYPT_TERRAIN_RECIPE: TerrainRecipeSpec = {
   id: 'egypt-river-valley',
-  name: { en: 'Ancient Egypt (River Valley)', ru: 'Древний Египет (речная долина)' },
+  name: text('Ancient Egypt (River Valley)'),
   tileKinds: EGYPT_TILE_KINDS,
   materialIds: EGYPT_MATERIAL_IDS,
   minBuildableRatio: 0.55,

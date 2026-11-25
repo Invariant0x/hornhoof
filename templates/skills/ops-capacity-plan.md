@@ -1,7 +1,5 @@
 ---
 id: ops-capacity-plan
-title: { en: "Capacity plan", ru: "План мощностей" }
-description: { en: "Tracks nodes and subscriptions against the work planned and warns before they run out.", ru: "Сверяет узлы и подписки с планами работы и заранее предупреждает, когда их перестанет хватать." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins operations/skills/capacity-plan/SKILL.md]
 ---

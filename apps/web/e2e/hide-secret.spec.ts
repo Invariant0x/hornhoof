@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { LANGUAGES, type Language, type Messages } from '../src/i18n';
+import { LANGUAGES, type ShippedLanguage, type Messages } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { BUILTIN_SKINS } from '../src/skins/registry';
@@ -7,7 +7,7 @@ import { openTaskAction, detail, serveApi, TASKS } from './api';
 import { captureWith } from './capture';
 
 const capture = captureWith('hide-secret', undefined);
-const messages: Record<Language, Messages> = { en, ru };
+const messages: Record<ShippedLanguage, Messages> = { en, ru };
 const lengths = LANGUAGES.map(({ id }) => ({ id, size: Object.values(messages[id].tasks.hideSecret).join('').length }));
 lengths.sort((a, b) => a.size - b.size);
 const locales = [...new Set([lengths[0]!.id, lengths.at(-1)!.id])];

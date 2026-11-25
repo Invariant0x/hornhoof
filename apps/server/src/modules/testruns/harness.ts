@@ -178,7 +178,7 @@ async function noteProblem(ctx: Ctx, department: Department, problem: HarnessPro
 async function tellProblem(ctx: Ctx, companyId: string, notice: ProblemNotice | null): Promise<void> {
   if (!notice) return;
   const { to, name, text } = notice;
-  await enqueueTurn(ctx, { companyId, agentId: to, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'machine', tasks: [], detail: { en: name, ru: name } } } });
+  await enqueueTurn(ctx, { companyId, agentId: to, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'machine', tasks: [], detail: { en: name } } } });
 }
 
 /* The one who builds a unit is the only one who may send it. */

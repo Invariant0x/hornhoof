@@ -20,8 +20,10 @@ export const MIGRATE_NAME = 'hornhoof-migrate';
 export const KEEPER_NAME = 'hornhoof-keeper';
 
 /* The app's transactions end when they run 5 s before their commit, and a commit hears only of warnings. A superuser session
-   is fenced only when it says so, and the app says so when it runs with a keeper. */
-const APP_SETTINGS = '-c transaction_timeout=5s -c client_min_messages=warning';
+   is fenced only when it says so, and the app says so when it runs with a keeper. The fence lets a commit through only
+   under synchronous_commit on, which the app asks for itself: a session left to the server's own setting got whatever the
+   server's file said, and a file with local in it refused every write of the app. */
+const APP_SETTINGS = '-c transaction_timeout=5s -c client_min_messages=warning -c synchronous_commit=on';
 const appSettings = (fenced: boolean | undefined): string => (fenced ? `${APP_SETTINGS} -c ${FENCED}=on` : APP_SETTINGS);
 
 type PoolOptions = { statementTimeoutMs?: number; fenced?: boolean };

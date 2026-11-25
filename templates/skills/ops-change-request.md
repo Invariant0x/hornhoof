@@ -1,7 +1,5 @@
 ---
 id: ops-change-request
-title: { en: "Change request", ru: "Запрос на изменение" }
-description: { en: "Plans, approves and checks a change to shared machines, tools or access before and after it is made.", ru: "Планирует, согласует и проверяет изменение общих машин, инструментов или доступов до и после его выполнения." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins operations/skills/change-request/SKILL.md]
 ---

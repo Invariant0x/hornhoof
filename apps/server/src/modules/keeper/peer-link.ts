@@ -77,6 +77,8 @@ type PeerLinkOptions = {
   switches?: PeerSwitches;
   /* What takes the bundle a machine that led sealed of its own database. */
   leds?: PeerServerOptions['leds'];
+  /* The company's sealed files, which the machines that hold them take from the leading keeper. */
+  files?: PeerServerOptions['files'];
   /* What the hello says besides who this machine is: its term, the copy its commits wait for, and a move under way. */
   helloMore?: () => Record<string, unknown>;
   log: (line: string) => void;
@@ -278,6 +280,7 @@ export class PeerLink {
       uploads: this.opts.uploads,
       switches: this.opts.switches,
       leds: this.opts.leds,
+      files: this.opts.files,
       log: this.opts.log,
     });
     this.server = server;

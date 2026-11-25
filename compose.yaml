@@ -62,12 +62,17 @@ services:
       # Where a machine that takes the server over asks who answers at the company's public name: that name itself when
       # empty. Only a test sets it, to an address that stands in for hornhoof.org.
       HORNHOOF_LINK_PROBE: ${HORNHOOF_LINK_PROBE:-}
+      # The folder of the file store's volume.
+      FILES_DIR: /files
     volumes:
       - control:/control
       # The machine's own key, which never leaves this volume.
       - keeper:/keeper
       # The updater takes computer requests and access only from this keeper-owned volume.
       - computer:/keeper/computer-control
+      # The company's file store, which the keeper shares with the app on a machine with the data and keeps alone on one
+      # picked to hold the files.
+      - files:/files
     depends_on:
       db:
         condition: service_healthy

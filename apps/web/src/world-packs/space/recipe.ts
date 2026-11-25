@@ -11,16 +11,17 @@ import type {
   TerrainNoiseToolkit,
   TerrainRecipeSpec,
 } from '../../world/manifest';
+import { text } from '../../world/pack-text';
 
 export const SPACE_TILE_KINDS: readonly TerrainKindSpec[] = [
-  { id: 'open_space', label: { en: 'Open space', ru: 'Открытый космос' }, color: '#0B1026', materialId: 'void_edge', buildable: false, walkable: false, liquid: true },
-  { id: 'outer_hull', label: { en: 'Outer hull', ru: 'Внешняя обшивка' }, color: '#5A6372', materialId: 'hull_plate', buildable: false, walkable: true },
-  { id: 'deck', label: { en: 'Deck', ru: 'Палуба' }, color: '#8C95A3', materialId: 'deck_plate', buildable: true, walkable: true },
-  { id: 'corridor', label: { en: 'Corridor', ru: 'Коридор' }, color: '#A9B3C2', materialId: 'grating', buildable: true, walkable: true },
-  { id: 'command_deck', label: { en: 'Command deck', ru: 'Командная палуба' }, color: '#C9D3E0', materialId: 'command_floor', buildable: true, walkable: true },
-  { id: 'garden_bay', label: { en: 'Garden bay', ru: 'Оранжерея' }, color: '#3E8F6A', materialId: 'garden', buildable: false, walkable: true },
-  { id: 'cargo_bay', label: { en: 'Cargo bay', ru: 'Грузовой отсек' }, color: '#B8834A', materialId: 'cargo_floor', buildable: true, walkable: true },
-  { id: 'frame', label: { en: 'Open frame (new modules go here)', ru: 'Открытый каркас (сюда встают новые модули)' }, color: '#3A404C', materialId: 'frame_truss', buildable: false, walkable: false, excavatable: true },
+  { id: 'open_space', label: text('Open space'), color: '#0B1026', materialId: 'void_edge', buildable: false, walkable: false, liquid: true },
+  { id: 'outer_hull', label: text('Outer hull'), color: '#5A6372', materialId: 'hull_plate', buildable: false, walkable: true },
+  { id: 'deck', label: text('Deck'), color: '#8C95A3', materialId: 'deck_plate', buildable: true, walkable: true },
+  { id: 'corridor', label: text('Corridor'), color: '#A9B3C2', materialId: 'grating', buildable: true, walkable: true },
+  { id: 'command_deck', label: text('Command deck'), color: '#C9D3E0', materialId: 'command_floor', buildable: true, walkable: true },
+  { id: 'garden_bay', label: text('Garden bay'), color: '#3E8F6A', materialId: 'garden', buildable: false, walkable: true },
+  { id: 'cargo_bay', label: text('Cargo bay'), color: '#B8834A', materialId: 'cargo_floor', buildable: true, walkable: true },
+  { id: 'frame', label: text('Open frame (new modules go here)'), color: '#3A404C', materialId: 'frame_truss', buildable: false, walkable: false, excavatable: true },
 ];
 
 export const SPACE_MATERIAL_IDS = [
@@ -80,7 +81,7 @@ function corridorDistance(p: StationParams, gx: number, gy: number): number {
 
 export const SPACE_TERRAIN_RECIPE: TerrainRecipeSpec = {
   id: 'space-station',
-  name: { en: 'Orbital station', ru: 'Орбитальная станция' },
+  name: text('Orbital station'),
   tileKinds: SPACE_TILE_KINDS,
   materialIds: SPACE_MATERIAL_IDS,
   minBuildableRatio: 0.38,

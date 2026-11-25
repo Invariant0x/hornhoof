@@ -1,5 +1,5 @@
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -55,6 +55,11 @@ async function stand(over: { fetchWaitMs?: number } = {}) {
     return { id, out, ...made };
   };
   type Sealed = Awaited<ReturnType<typeof seal>>;
+  const keep = (bundle: Sealed, inStore = stores.own) =>
+    inStore.seal(bundle.id, part => {
+      copyFileSync(bundle.out, part);
+      return Promise.resolve({ head: bundle.head, manifest: bundle.manifest });
+    });
   const orderFor = (bundle: Sealed, more: Partial<RestoreOrder> = {}): RestoreOrder => ({
     attempt: randomUUID(), id: bundle.id, dumpedAt: DUMPED, source: 'store', identity: null,
     expect: { sha256: bundle.manifest.sha256, size: bundle.manifest.size, signer: bundle.manifest.signer }, company: COMPANY, authorityPem: authority.certPem, carry: true, ...more,
@@ -78,14 +83,14 @@ async function stand(over: { fetchWaitMs?: number } = {}) {
   /* What lies in restore/, but the folder of what holders sent. */
   const left = () => (existsSync(join(controlDir, 'restore')) ? readdirSync(join(controlDir, 'restore')).filter(name => name !== 'incoming').sort() : []);
   const asked = () => JSON.parse(readFileSync(join(controlDir, 'restore.json'), 'utf8')) as Record<string, unknown>;
-  return { authority, own, recovery, controlDir, stores, dump, seal, orderFor, runner, lines, said, steps, status, ended, left, asked };
+  return { authority, own, recovery, controlDir, stores, dump, seal, keep, orderFor, runner, lines, said, steps, status, ended, left, asked };
 }
 
 describe("the keeper's part of a restore", () => {
   it('opens a bundle into the control folder', async () => {
     const s = await stand();
     const bundle = await s.seal();
-    s.stores.own.put(bundle.head, bundle.manifest, bundle.out);
+    await s.keep(bundle);
     const order = s.orderFor(bundle);
     const runner = s.runner();
     runner.take(order);
@@ -111,7 +116,7 @@ describe("the keeper's part of a restore", () => {
   it('opens with the recovery file it was handed, and only with it', async () => {
     const s = await stand();
     const bundle = await s.seal([], s.recovery.recipient);
-    s.stores.own.put(bundle.head, bundle.manifest, bundle.out);
+    await s.keep(bundle);
     const without = s.orderFor(bundle);
     const runner = s.runner();
     runner.take(without);
@@ -128,7 +133,7 @@ describe("the keeper's part of a restore", () => {
   it('keeps the recovery identity in memory only', async () => {
     const s = await stand();
     const bundle = await s.seal([], s.recovery.recipient);
-    s.stores.own.put(bundle.head, bundle.manifest, bundle.out);
+    await s.keep(bundle);
     const runner = s.runner();
     /* Once with a key that opens nothing, once with the right one. */
     const wrong = (await ageKey()).identity;
@@ -156,7 +161,7 @@ describe("the keeper's part of a restore", () => {
   it('refuses a bundle that does not match the record', async () => {
     const s = await stand();
     const [bundle, other] = [await s.seal(), await s.seal()];
-    s.stores.own.put(bundle.head, bundle.manifest, bundle.out);
+    await s.keep(bundle);
     const runner = s.runner();
     const wrongHash = s.orderFor(bundle, { expect: { sha256: other.manifest.sha256, size: bundle.manifest.size, signer: bundle.manifest.signer } });
     const strangers = await makeAuthority(randomUUID());
@@ -195,13 +200,13 @@ describe("the keeper's part of a restore", () => {
     const late = s.orderFor(bundle);
     runner.take(late);
     await until(() => s.status()?.attempt === late.attempt);
-    s.stores.own.put(bundle.head, bundle.manifest, bundle.out);
+    await s.keep(bundle);
     await until(() => existsSync(join(s.controlDir, 'restore.json')));
     expect(s.asked().attempt).toBe(late.attempt);
 
     const sent = await stand();
     const incoming = await sent.seal();
-    sent.stores.incoming.put(incoming.head, incoming.manifest, incoming.out);
+    await sent.keep(incoming, sent.stores.incoming);
     const fromIncoming = sent.orderFor(incoming, { source: 'incoming', expect: null });
     sent.runner().take(fromIncoming);
     await until(() => existsSync(join(sent.controlDir, 'restore.json')));
@@ -211,7 +216,7 @@ describe("the keeper's part of a restore", () => {
   it('needs room to open', async () => {
     const s = await stand();
     const bundle = await s.seal();
-    s.stores.own.put(bundle.head, bundle.manifest, bundle.out);
+    await s.keep(bundle);
     s.said.free = Math.floor(2.9 * bundle.manifest.size);
     const order = s.orderFor(bundle);
     s.runner().take(order);
@@ -233,7 +238,7 @@ describe("the keeper's part of a restore", () => {
     expect(s.status()).toMatchObject({ attempt: order.attempt, state: 'failed', step: 'fetch', line: CALLED_OFF });
     expect([s.left(), existsSync(join(s.controlDir, 'restore.json'))]).toEqual([[], false]);
     /* The bundle comes after all, and nothing follows the order the app let go. */
-    s.stores.own.put(bundle.head, bundle.manifest, bundle.out);
+    await s.keep(bundle);
     await new Promise(resolve => setTimeout(resolve, 60));
     expect(existsSync(join(s.controlDir, 'restore.json'))).toBe(false);
     /* Another order takes the place of one that still waits. */

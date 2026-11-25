@@ -6,8 +6,9 @@ import { hideCredentials } from '@hornhoof/protocol/redaction';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, machines, nodes, planCredentials, subscriptions, turnTokens, type NodeStatus } from '../../db/schema.js';
+import { companies, agents, jobs, machines, nodes, planCredentials, subscriptions, turnTokens, type NodeStatus } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
+import { openTaskNumbers } from '../tasks/open-numbers.js';
 import { tokenRow } from '../subscriptions/tokens.js';
 import { said } from '../conversation/live.js';
 import { keepLeftInput } from '../conversation/left-input.js';
@@ -407,6 +408,14 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
          the programs that waited. */
       await pumpTests(ctx);
       for (const agentId of programsLive(ctx, id, live)) await pump(ctx, agentId);
+      return;
+    }
+    case 'tasks.read': {
+      const companyId =
+        id.kind === 'node'
+          ? (await db.select(only(nodes, 'companyId')).from(nodes).where(and(eq(nodes.id, id.nodeId), liveNode)))[0]?.companyId
+          : (await db.select(idOnly(companies)).from(companies).limit(1))[0]?.id;
+      ctx.hub.send(id, { type: 'tasks.open', tasks: companyId ? await openTaskNumbers(db, companyId) : null });
       return;
     }
 

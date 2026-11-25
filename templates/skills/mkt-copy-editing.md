@@ -1,7 +1,5 @@
 ---
 id: mkt-copy-editing
-title: { en: "Copy editing", ru: "Редактура" }
-description: { en: "Tightens a draft and removes vague, padded and machine-sounding phrases.", ru: "Сокращает черновик и убирает расплывчатые, лишние и машинные фразы." }
 kind: checklist
 sources: [coreyhaines31/marketingskills, wshobson/agents plugins/avoid-ai-writing/skills/avoid-ai-writing/SKILL.md]
 ---

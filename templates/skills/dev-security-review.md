@@ -1,7 +1,5 @@
 ---
 id: dev-security-review
-title: { en: "Security review", ru: "Ревью безопасности" }
-description: { en: "Checks that a change protects data, access and secrets, with a fix for each weak spot found, whether the change is your own or someone else's.", ru: "Проверяет, что изменение защищает данные, доступы и секреты, и предлагает исправление для каждого слабого места, свое это изменение или чужое." }
 kind: procedure
 sources: [affaan-m/ECC agents/security-reviewer.md, addyosmani/agent-skills skills/security-and-hardening/SKILL.md, garrytan/gstack review/specialists/security.md, affaan-m/ECC skills/agent-security-hardening/SKILL.md]
 ---

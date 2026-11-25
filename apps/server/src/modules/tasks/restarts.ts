@@ -12,6 +12,7 @@ import { when } from './silent.js';
 import { logTurnFact } from './turn-log.js';
 import { published } from './events.js';
 import { repeatedTurn, type TaskWake } from './wake-state.js';
+import { saying } from '../../locales/index.js';
 
 /* Why a node restarted, in words for the agents and the task's log. */
 const CAUSES: Record<RestartCause, string> = {
@@ -104,7 +105,7 @@ async function callOperations(ctx: Ctx, ended: Ended): Promise<void> {
   const to = await operationsOnCall(ctx, job.companyId);
   if (to) {
     const text = callText(ctx, ended, before, to);
-    await enqueueTurn(ctx, { companyId: job.companyId, agentId: to.id, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'machine', tasks: [{ id: task.id, number: task.number }], detail: { en: `turn ${job.id}`, ru: `ход ${job.id}` } } } });
+    await enqueueTurn(ctx, { companyId: job.companyId, agentId: to.id, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'machine', tasks: [{ id: task.id, number: task.number }], detail: saying(words => words.notices.turn(job.id)) } } });
   }
   const called = to ? `Hornhoof does not run it a third time and called ${to.name} of Operations to look at the node.` : 'Hornhoof does not run it a third time, and nobody in Operations is on to look at the node.';
   await logCut(ctx, task, agent, cut, `${agent.name}'s turn ${job.id} on #${task.number}, the retry of turn ${before.job}, ${cutOff(cut)}. ${called}`, {
@@ -148,7 +149,7 @@ async function callOperationsOutsideTask(ctx: Ctx, job: Job): Promise<void> {
   const [agent] = await ctx.db.select(only(agents, 'name')).from(agents).where(eq(agents.id, job.agentId!));
   if (!to || to.id === job.agentId) return;
   const text = `Hornhoof: the node under ${agent?.name ?? 'an agent'}'s turns restarted twice in a row, so Hornhoof does not run the turn a third time. First turn ${job.retryOf}, then its retry, turn ${job.id}. Find out why the node restarts and set it right.`;
-  await enqueueTurn(ctx, { companyId: job.companyId, agentId: to.id, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'machine', tasks: [], detail: { en: `turn ${job.id}`, ru: `ход ${job.id}` } } } });
+  await enqueueTurn(ctx, { companyId: job.companyId, agentId: to.id, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'machine', tasks: [], detail: saying(words => words.notices.turn(job.id)) } } });
 }
 
 /* A line in the task's log; it moves nothing. */

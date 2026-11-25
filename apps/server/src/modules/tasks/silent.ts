@@ -209,7 +209,7 @@ export async function alreadyAlerted(ctx: Ctx, jobId: string): Promise<boolean> 
   const [row] = await ctx.db
     .select(idOnly(agentEvents))
     .from(agentEvents)
-    .where(and(eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'silentJob' = ${jobId}`))
+    .where(and(eq(agentEvents.kind, 'message'), sql`${agentEvents.data} ? 'silentJob'`, sql`${agentEvents.data}->>'silentJob' = ${jobId}`))
     .limit(1);
   if (row) seen.add(jobId);
   return Boolean(row);
@@ -325,7 +325,7 @@ async function dispatchAlarm(ctx: Ctx, s: SilentTurn, to: Agent, now: Date, case
   const text = await silentAlarmText(ctx, s, now);
   const task = s.task ? { id: s.task.id, number: s.task.number } : undefined;
   const detail = `${s.agent.name}: ${s.alarm.reason}`;
-  const alarmId = await enqueueProgramAlarm(ctx, to, { caseId, text, ...(task ? { task } : {}), reason: s.alarm.reason, detail: { en: detail, ru: detail } });
+  const alarmId = await enqueueProgramAlarm(ctx, to, { caseId, text, ...(task ? { task } : {}), reason: s.alarm.reason, detail: { en: detail } });
   await logTurnFact(ctx, s.job, `${to.name} was told about the silent program: ${text}`, { silentCase: caseId, to: to.id });
   if (now.getTime() > Date.now()) {
     await ctx.db.update(jobs).set({ startedAt: now }).where(and(eq(jobs.id, alarmId), eq(jobs.status, 'running')));

@@ -5,14 +5,14 @@ import type { TrackerPlace } from '../routes';
 import { searchTasks } from '../task-search';
 import { placeName, useGoals, usePipelines, useTaskDepartments, useTasks, useWaitCards } from '../tasks';
 import { doerOf, filterTasks, graphPath, graphTree, mine, personWaited, pipelineTree, pruneGoals, shownDecisions, TRACKER_VIEWS, waitingOn, waitingOnPeople, waitsCount, withoutRequestWaits, workingNow, BOARD_STATUSES, boardStatus, type Crumb, type DecisionsOf, type GraphNode, type ShownDecisions, type WorkFilter } from '../tracker';
-import type { Decisions, Department, Me, Org, PersonRef, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard, WaitingRequest } from '../types';
+import type { Decisions, Department, GitHubLimitCard, Me, Org, PersonRef, Pipeline, PipelineStage, ProposalDecision, TaskDepartments, TaskDetail, TaskLine, WaitCard, WaitingRequest } from '../types';
 import { CEO_DECIDES, DecidedByNote } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
 import { DepartmentMark, PersonMark } from '../ui/TrackerMarks';
 import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
 import { Busy, Hold, LoadState, noneYet, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
-import { MachineAway } from '../ui/MachineAway';
+import { CopyGaveUps, CopySchemaFailures, MachineAway } from '../ui/MachineAway';
 import { MachineLow } from '../ui/MachineLow';
 import { MergeCard } from '../ui/MergeCard';
 import { namedReadOnly, Requests, wordsAnswer } from '../ui/Requests';
@@ -26,6 +26,23 @@ import { sinceSeconds, spanText, waitText } from '../ui/tracker-words';
 import { cardWords, WaitCards } from '../ui/WaitCards';
 import { WaitingQueue, type WaitQueueEntry } from '../ui/WaitingQueue';
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
+import { sayIf } from '@hornhoof/protocol';
+
+const failureCards = (decisions: Decisions | undefined): GitHubLimitCard[] => decisions?.githubLimits ?? [];
+
+function GitHubLimitCards({ limits }: { limits: readonly GitHubLimitCard[] }) {
+  const t = useT();
+  return (
+    <>
+      {limits.map(({ repository, resetAt }) => (
+        <section className="machine-away" key={repository} aria-label={t.tasks.githubLimit(repository)}>
+          <h3 dir="auto">{t.tasks.githubLimit(repository)}</h3>
+          <p>{resetAt === null ? t.tasks.githubLimitUnknown : t.tasks.githubLimitRetry(new Date(resetAt).toISOString().slice(11, 16))}</p>
+        </section>
+      ))}
+    </>
+  );
+}
 
 type Props = {
   me: Me;
@@ -105,6 +122,7 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   place: (p: TaskLine['department']) => string;
   /* Whose: the person looked at, whom the page's title names, or the viewer with none. */
   personId: string | null;
+  viewerId: string;
   queue: boolean;
   /* The tasks that wait for that person. */
   tasks: TaskLine[];
@@ -164,7 +182,7 @@ function ProposalCard({ card, org, onCorrect = nothing, onDone, waitsFor }: { ca
   return <StaffCard department={department} proposal={{ id: card.id, brief: card.brief, people: card.items, ...{ materialRevision: card.materialRevision, materialDigest: card.materialDigest } }} onCorrect={onCorrect} onDone={onDone} locked={locked} waitsFor={waitsFor} />;
 }
 
-type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place'> & {
+type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place' | 'viewerId'> & {
   shown: ShownDecisions;
   onFailure: (err: unknown) => void;
   /* Whom a decision waits for, by the person it is for, on lists of more people than one. */
@@ -172,12 +190,12 @@ type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' 
 };
 
 /* Each decision with the buttons it has elsewhere. */
-function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, onFailure, waitsFor }: Listed) {
+function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, viewerId, onFailure, waitsFor }: Listed) {
   const t = useT();
   const { requests, proposals, merges } = shown;
   return (
     <>
-      {requests.length > 0 && <Requests requests={requests} onChanged={onDecisionsChanged} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} waitsFor={waitsFor} />}
+      {requests.length > 0 && <Requests requests={requests} onChanged={onDecisionsChanged} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} waitsFor={waitsFor} viewerId={viewerId} />}
       {wordsAnswer(requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
       {proposals.map(c => (
         <ProposalCard key={c.id} card={c} org={org} onCorrect={onOpenOrchestrator} onDone={onDecisionsChanged} waitsFor={waitsFor?.(c.ownerPersonId)} />
@@ -213,7 +231,7 @@ function NamedQuestionRow({ request, person, onOpenTask }: { request: WaitingReq
 
 const queueDone = (done: () => void, refresh: () => void) => () => { done(); refresh(); };
 
-function QueueDeck({ shown, tasks, cards, recipient, onCardsSeen, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, onFailure }: Omit<Listed, 'waitsFor'> & {
+function QueueDeck({ shown, tasks, cards, recipient, onCardsSeen, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, viewerId, onFailure }: Omit<Listed, 'waitsFor'> & {
   tasks: TaskLine[];
   cards: WaitCard[];
   recipient: string;
@@ -226,7 +244,7 @@ function QueueDeck({ shown, tasks, cards, recipient, onCardsSeen, onDecisionsCha
       id: `request:${request.id}`, title: taskTitle(request.task), icon: requestIcon[request.kind],
       text: request.kind === 'stuck' ? t.tasks.stuckText(request.agent.name, request.task.number) : request.text,
       meta: <><bdi>{request.agent.name}</bdi><span aria-hidden="true">·</span><bdi dir="ltr">#{request.task.number}</bdi><span aria-hidden="true">·</span><bdi>{age(t, request.at)}</bdi></>,
-      show: (done: () => void, defer: () => void) => <Requests requests={[request]} onChanged={queueDone(done, onDecisionsChanged)} onDefer={defer} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} />,
+      show: (done: () => void, defer: () => void) => <Requests requests={[request]} onChanged={queueDone(done, onDecisionsChanged)} onDefer={defer} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} viewerId={viewerId} />,
     })),
     ...shown.proposals.map(card => ({
       id: `proposal:${card.id}`, title: card.department ? t.staff.title(card.department.name) : t.card.title, text: card.brief, icon: 'list' as const,
@@ -330,7 +348,7 @@ function WaitingForYou({ sources, live, decisionsFailure, ...rest }: Waiting) {
   );
 }
 
-type PeopleWaiting = Pick<Waiting, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place' | 'sources' | 'live'> & {
+type PeopleWaiting = Pick<Waiting, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place' | 'viewerId' | 'sources' | 'live'> & {
   allTasks: TaskLine[];
   /* The tasks that wait for any person. */
   tasks: TaskLine[];
@@ -548,6 +566,8 @@ function MakeHere({ org, places, department, pipeline, loose, making, setMaking,
 
 /* The machines short of disk space among what waits for people; a server from before sends none. */
 const lowMachines = (decisions: Decisions | null | undefined) => decisions?.machinesLow ?? [];
+const schemaFailures = (decisions: Decisions | null | undefined) => decisions?.copySchemaFailures ?? [];
+const gaveUpCopies = (decisions: Decisions | null | undefined) => decisions?.copyGaveUp ?? [];
 
 /* The tracker keeps the same task and goal cards across its views. */
 export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, onDecisionsChanged, selected, onOpenTask, onOpenGoal, onOpenAgent, onOpenOrchestrator, onHome }: Props) {
@@ -612,7 +632,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
     selected, onOpenTask, asksYou, questionAt, placeName: place_, now: id => workingIds.has(id),
     departmentTemplate: id => places?.departments.find(d => d.id === id)?.templateKey ?? org?.departments.find(d => d.id === id)?.templateKey,
     turnkeyOf: id => employees.get(id)?.turnkey,
-    stageOwner: (stage: PipelineStage) => org?.departments.flatMap(d => d.roles).find(r => r.id === stage.ownerRole)?.title[language] ?? stage.owner?.name,
+    stageOwner: (stage: PipelineStage) => sayIf(org?.departments.flatMap(d => d.roles).find(r => r.id === stage.ownerRole)?.title, language) ?? stage.owner?.name,
     programOf: id => {
       const employee = employees.get(id);
       if (employee?.provider) return programOf(employee.provider, employee.apiProtocol);
@@ -627,7 +647,10 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const waitsOnPeople = waitingOnPeople(otherWaits);
   const failures = all.filter(task => boardStatus(task) === 'failure');
   const machinesAway = decisions?.machinesAway ?? [];
+  const copySchemaFailures = schemaFailures(decisions);
+  const copyGaveUp = gaveUpCopies(decisions);
   const machinesLow = lowMachines(decisions);
+  const githubLimits = failureCards(decisions);
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
   /* The department where the person is: its work, or its goals. */
   const departmentId = section.kind === 'department' ? section.id : section.kind === 'goals' ? place.department : undefined;
@@ -712,6 +735,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       onOpenOrchestrator={onOpenOrchestrator}
       org={org}
       place={place_}
+      viewerId={me.person.id}
     />
   ) : (
     <WaitingForYou
@@ -719,6 +743,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       decisionsFailure={decisionsFailure}
       onDecisionsChanged={onDecisionsChanged}
       personId={decisionsOf}
+      viewerId={me.person.id}
       queue={section.kind === 'waits'}
       tasks={waitsOnWho}
       recipient={recipient}
@@ -767,7 +792,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
         counts={{
           waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf)), waitsOnWho, keptShown(kept, decisionsOf)),
           people: peopleCount(decisions, waitsOnPeople, company),
-          failures: failures.length + machinesAway.filter(machine => !machine.back).length + machinesLow.length,
+          failures: failures.length + machinesAway.filter(machine => !machine.back).length + copySchemaFailures.length + copyGaveUp.length + machinesLow.length + githubLimits.length,
           mine: own.tasks.length,
           working: working.length,
         }}
@@ -834,7 +859,15 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
                 {view === 'list' && <FilterChips chips={chips} onChange={setChips} tasks={chipTasks}
                   subtasks={showSubtasks} onSubtasks={() => setShowSubtasks(!showSubtasks)} />}
               </div>
-              {section.kind === 'failures' && <><MachineAway machines={machinesAway} /><MachineLow machines={machinesLow} /></>}
+              {section.kind === 'failures' && (
+                <>
+                  <MachineAway machines={machinesAway} />
+                  <CopySchemaFailures cards={copySchemaFailures} />
+                  <CopyGaveUps cards={copyGaveUp} />
+                  <MachineLow machines={machinesLow} />
+                  <GitHubLimitCards limits={githubLimits} />
+                </>
+              )}
               {makeHere}
               <HeldWork load={tasksLoad} view={view} list={`${sectionKey}|${view}|${JSON.stringify(chips)}`} shown={work.length}>
                 {view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} showSubtasks={showSubtasks} />

@@ -5,31 +5,31 @@ import { LanguageProvider } from '../src/i18n';
 import { Machines } from '../src/screens/Machines';
 import { MACHINES, ME, mockApi, SUBS } from './api-mock';
 
-const GIB = 1024 ** 3;
+const GB = 1_000_000_000;
 /* A made-up Mac's disk: 120 GB free of 460, Hornhoof's 113 GB by part, and Docker's own disk inside its virtual machine. The
    nodes' own folders, 19 GB of working copies, recordings and check temp files, are inside the 30 GB of volumes. */
 const DISK: DiskReport = {
-  total: 460 * GIB,
-  free: 120 * GIB,
-  threshold: 50 * GIB,
-  docker: { total: 200 * GIB, free: 85 * GIB, threshold: 20 * GIB },
-  parts: { images: 60 * GIB, containers: 3 * GIB, volumes: 30 * GIB, buildCache: 20 * GIB, workingCopies: 12 * GIB, recordings: 2 * GIB, checkTemp: 5 * GIB },
+  total: 460 * GB,
+  free: 120 * GB,
+  threshold: 50 * GB,
+  docker: { total: 200 * GB, free: 85 * GB, threshold: 20 * GB },
+  parts: { images: 60 * GB, containers: 3 * GB, volumes: 30 * GB, buildCache: 20 * GB, workingCopies: 12 * GB, recordings: 2 * GB, checkTemp: 5 * GB },
   low: null,
   cleaned: [],
 };
-const LOW: DiskReport = { ...DISK, free: 40 * GIB, low: { since: '2026-11-20T10:00:00.000Z' } };
+const LOW: DiskReport = { ...DISK, free: 40 * GB, low: { since: '2026-11-20T10:00:00.000Z' } };
 
 /* Two copies of company databases on the machine, inside Docker's volumes; the server names the one company it serves. */
-const REPLICAS: MachineReplicas = { count: 2, bytes: 14 * GIB, companies: [{ name: 'Acme Robotics', bytes: 14 * GIB }] };
+const REPLICAS: MachineReplicas = { count: 2, bytes: 14 * GB, companies: [{ name: 'Acme Robotics', bytes: 14 * GB }] };
 
 type Folders = { plan: string | null; bytes: number }[];
-const withDisk = (disk: DiskReport | undefined, replicas?: MachineReplicas, folders?: Folders) =>
+const withDisk = (disk: DiskReport | undefined, replicas?: MachineReplicas, folders?: Folders, copyNames?: Record<string, string>) =>
   mockApi({
     'GET /api/subscriptions': [200, { subscriptions: SUBS }],
-    'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, load: { ...MACHINES[0]!.load!, ...(disk ? { disk } : {}) }, ...(replicas ? { replicas } : {}), ...(folders ? { folders } : {}) }], builtin: null }],
+    'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, load: { ...MACHINES[0]!.load!, ...(disk ? { disk } : {}) }, ...(replicas ? { replicas } : {}), ...(folders ? { folders } : {}), ...(copyNames ? { copyNames } : {}) }], builtin: null }],
   });
 /* The working copies of the laptop's two plans' nodes, 12 GB together, and of its own node, which has none. */
-const FOLDERS: Folders = [{ plan: 's-codex', bytes: 8 * GIB }, { plan: 's-claude', bytes: 4 * GIB }, { plan: null, bytes: 0 }];
+const FOLDERS: Folders = [{ plan: 's-codex', bytes: 8 * GB }, { plan: 's-claude', bytes: 4 * GB }, { plan: null, bytes: 0 }];
 
 async function laptop() {
   await screen.findByRole('table');
@@ -109,12 +109,46 @@ describe("a machine's disk on its card", () => {
   });
 
   it("leaves out what the node could not measure, and Docker's own disk where Docker has none", async () => {
-    withDisk({ total: DISK.total, free: DISK.free, threshold: DISK.threshold, parts: { workingCopies: 12 * GIB }, low: null, cleaned: [] });
+    withDisk({ total: DISK.total, free: DISK.free, threshold: DISK.threshold, parts: { workingCopies: 12 * GB }, low: null, cleaned: [] });
     render(<Machines me={ME} />);
     const disk = partOf(await laptop(), 'Disk by part');
     expect(rows(disk)).toEqual(['Working copies12 GB']);
     expect(within(disk).getByText('Hornhoof in all: 12 GB of 460 GB')).toBeInTheDocument();
     expect(within(disk).queryByText(/^Docker's own disk/)).not.toBeInTheDocument();
+  });
+
+  it('lists the largest working copies with their employee and task on the machine card in English and Russian, in decimal GB', async () => {
+    const bruno = '00000000-0000-4000-8000-0000000000a1';
+    const stray = '00000000-0000-4000-8000-0000000000b2';
+    const withCopies = {
+      ...DISK,
+      copies: [
+        { agent: bruno, path: 'shop-204', task: 204, bytes: 21 * GB },
+        { agent: bruno, path: 'shop', task: null, bytes: 6.4 * GB },
+        { agent: stray, path: 'lab-91', task: 91, bytes: 1.5 * GB },
+      ],
+    } as DiskReport;
+    withDisk(withCopies, undefined, undefined, { [bruno]: 'Bruno' });
+    const view = render(<Machines me={ME} />);
+    const disk = partOf(await laptop(), 'Disk by part');
+    const copies = within(disk).getByRole('list', { name: 'Largest working copies' });
+    expect(within(copies).getAllByRole('listitem').map(row => row.textContent)).toEqual([
+      'Bruno, task #204 (shop-204)21 GB',
+      'Bruno (shop)6.4 GB',
+      `${stray}, task #91 (lab-91)1.5 GB`,
+    ]);
+    view.unmount();
+
+    localStorage.setItem('hh-lang', 'ru');
+    withDisk(withCopies, undefined, undefined, { [bruno]: 'Bruno' });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    const diskRu = partOf(await laptop(), 'Диск по частям');
+    const copiesRu = within(diskRu).getByRole('list', { name: 'Самые большие рабочие копии' });
+    expect(within(copiesRu).getAllByRole('listitem').map(row => row.textContent)).toEqual([
+      'Bruno, задача #204 (shop-204)21 ГБ',
+      'Bruno (shop)6,4 ГБ',
+      `${stray}, задача #91 (lab-91)1,5 ГБ`,
+    ]);
   });
 
   it('shows no such part for a node too old to say it', async () => {

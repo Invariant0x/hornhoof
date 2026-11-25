@@ -11,6 +11,7 @@ import { KEEPER_HOLD_MS, passThrough, serve, startingAnswer, type Refusal, type 
 import { TunnelKeeper, type Client } from '../link/tunnel.js';
 import { visitClientFor, VISIT_FIRST_PORT, type VisitSettings } from '../link/visit-client.js';
 import { keyPrint } from '../computer/owner-key.js';
+import type { BundleStore } from '../backups/store.js';
 import { certFacts } from '../network/authority.js';
 import { joinMessage } from '../network/join-proof.js';
 import type { DataMachine, WorkerLink } from '../network/join.js';
@@ -25,6 +26,7 @@ import { CertificateKeeper, type HeldCertificate } from './certificate.js';
 import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFront } from './doors.js';
 import { Following } from './following.js';
 import { HolderKeeper } from './holder.js';
+import { FileHolder } from './file-holder.js';
 import { switchAnswer, switchWord, type SwitchWord } from './switch-word.js';
 import { WIPE_FILE, WIPED_FILE } from './uploads.js';
 import { Hourly, jsonOf, machineKey, readJson, reasonOf, writePrivately, type MachineKey } from './machine-keys.js';
@@ -79,7 +81,10 @@ export type WorkerKeeperOptions = {
   /* How often the keeper asks for its machine's computer access; the carrier's own paces unless a test says otherwise. */
   computer?: Pick<ComputerCarrierOptions, 'openEveryMs' | 'closedEveryMs' | 'deafMs'>;
   /* How often the keeper asks which of the company's backups to hold, and tries again for its key for backups. */
+  bundles?: BundleStore;
   holderEveryMs?: number;
+  /* How often the keeper of the company's files looks; five seconds when left out. */
+  filesEveryMs?: number;
   backupKeyRetryMs?: number;
   /* What the keeper of a machine that keeps a copy changes in the worker's keeper it runs inside it. role: what it
      says it is; a worker's keeper alone takes the steps that make its machine a data machine. visitKind: which service
@@ -141,9 +146,10 @@ const Copy = z.object({
   slot: z.enum(['ok', 'lost', 'missing']).nullable(), leaderSize: z.number().nullable(), migrations: z.number().nullable(),
   old: z.enum(['waiting', 'merged', 'done']).nullable().default(null), upload: z.enum(['waiting', 'received', 'wipe']).nullable().default(null),
   lastAttempt: z.number().int().min(1).nullable().default(null),
-  /* The leader whose word this is and the slot it made for this machine to join; a server of the build before names
-     neither. */
+  /* The leader whose word this is, the slot it made for this machine to join, and how far it applied this machine's log;
+     a server of the build before names none of them. */
   leader: z.string().optional(), join: z.string().nullable().optional(),
+  applied: z.object({ term: z.number().int().min(0), lsn: z.string().regex(/^[0-9A-Fa-f]{1,8}\/[0-9A-Fa-f]{1,8}$/) }).nullable().optional(),
 });
 /* dataSecret: a server of the build before says none, which reads as none. hidden: one from before hidden names says
    nothing of it. */
@@ -239,6 +245,8 @@ export class WorkerKeeper {
   private reporting: Promise<void> | null = null;
   /* Keeps the company's backups this machine was picked to hold. */
   private readonly holder: HolderKeeper;
+  /* Keeps the company's files, where this machine has a store for them and the leading app names it to hold them. */
+  private readonly files: FileHolder | null;
   /* The public half of this machine's key for backups, once its folder keeps one. */
   private ageRecipient: string | null = null;
   /* What makes this machine a data machine once the server gives it the data; one step at a time. */
@@ -252,7 +260,7 @@ export class WorkerKeeper {
   private readonly stopping = new AbortController();
 
   constructor(private readonly opts: WorkerKeeperOptions) {
-    this.measures = new Measures({ dir: opts.config.dir, sampleMs: opts.sampleMs, internet: opts.internet, copying: opts.copying });
+    this.measures = new Measures({ dir: opts.config.dir, sampleMs: opts.sampleMs, internet: opts.internet, copying: opts.copying, filesDir: opts.config.filesDir });
     this.following = new Following({ dir: opts.config.dir, controlDir: opts.config.controlDir, commit: opts.config.commit, now: opts.now, log: opts.log });
     this.carrier = new ComputerCarrier({
       dir: opts.config.dir,
@@ -267,6 +275,7 @@ export class WorkerKeeper {
     this.door = new LeaderDoor({ connect: () => this.sessions.connectApp() });
     this.holder = new HolderKeeper({
       dir: opts.config.dir,
+      bundles: opts.bundles,
       link: {
         leader: () => this.leader(),
         request: async (method, path) => {
@@ -281,6 +290,22 @@ export class WorkerKeeper {
       everyMs: opts.holderEveryMs,
       survivor: { view: () => this.view, joinServer: opts.config.joinServer, fetch: opts.fetch, afterMs: opts.config.survivorMs },
     });
+    this.files = opts.config.filesDir
+      ? new FileHolder({
+          dir: join(opts.config.filesDir, 'store'),
+          link: {
+            leader: () => this.leader(),
+            request: async (method, path, body) => {
+              const res = await this.askLeader(method, path, body);
+              if (!res) throw new Error('no leader of the company is in reach');
+              return answerOf(res);
+            },
+            stream: (method, path, body, length) => this.sessions.stream(method, path, body, length),
+          },
+          log: opts.log,
+          everyMs: opts.filesEveryMs,
+        })
+      : null;
   }
 
   async start(): Promise<{ front: number }> {
@@ -312,6 +337,7 @@ export class WorkerKeeper {
     this.sessions.use(this.targets());
     this.carrier.start();
     this.holder.start();
+    this.files?.start();
     void this.takeAgeKey();
     this.every(this.opts.lookEveryMs ?? LOOK_EVERY_MS, () => this.look());
     this.every(this.opts.viewEveryMs ?? VIEW_EVERY_MS, () => void this.readView());
@@ -346,7 +372,7 @@ export class WorkerKeeper {
     if (this.ageTimer) clearTimeout(this.ageTimer);
     this.certificates?.stop();
     this.measures.stop();
-    await Promise.all([this.reporting, this.holder.stop(), this.carrier.stop(), this.tunnel?.stop(), this.sessions?.close(), this.door.stop(), this.front ? closeWithin(this.front, STOP_GRACE_MS) : null]);
+    await Promise.all([this.reporting, this.holder.stop(), this.files?.stop(), this.carrier.stop(), this.tunnel?.stop(), this.sessions?.close(), this.door.stop(), this.front ? closeWithin(this.front, STOP_GRACE_MS) : null]);
   }
 
   /* The machine's own key for backups, which the company seals to once this machine holds its data. A folder that
@@ -759,6 +785,8 @@ export class WorkerKeeper {
         update: this.following.update(),
         pin: this.pinPrint(),
         ...(this.opts.config.hostOs ? { os: this.opts.config.hostOs } : {}),
+        /* What the company's files take in its store, once counted. */
+        ...(this.files?.usedBytes() != null ? { fileStoreUsedBytes: this.files.usedBytes()! } : {}),
       };
       /* What only a build that knows copies takes: a machine that could not become a data machine says so as a copy
          that stopped, and a keeper that keeps a copy says how it does. */

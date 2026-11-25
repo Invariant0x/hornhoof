@@ -1,7 +1,5 @@
 ---
 id: mkt-work-pipeline
-title: { en: "Marketing pipeline", ru: "Конвейер маркетинга" }
-description: { en: "Where marketing checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check.", ru: "Где маркетинг проверяют по штуке, пакетом, выборкой и кодом; читай, когда раздаешь работу или меняешь проверку." }
 kind: procedure
 sources: []
 ---

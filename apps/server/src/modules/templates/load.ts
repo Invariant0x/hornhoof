@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { ROLE_EFFORTS, TEMPLATE_KEYS, type RoleEffort, type TemplateKey } from '@hornhoof/protocol';
+import { basename, join } from 'node:path';
+import { isLocaleId, ROLE_EFFORTS, SOURCE_LOCALE, TEMPLATE_KEYS, type RoleEffort, type TemplateKey, type Texts } from '@hornhoof/protocol';
 import { ECHELON_STAGES, type EchelonOneShot, type EchelonStage } from '@hornhoof/protocol/echelons';
 import { parse } from 'yaml';
 import { z } from 'zod';
@@ -9,12 +9,13 @@ import type { Checker } from '../../checker.js';
 
 /* Role and skill templates: the text every employee is hired with. Roles are short, procedures live in skills. */
 
-export type Lang = { en: string; ru: string };
+/* A name or a description in every language that has it, English always: they are written in the locale files, one per language. */
+export type Lang = Texts;
 export type SkillKind = 'core' | 'procedure' | 'checklist' | 'gate';
 export type Skill = { id: string; title: Lang; description: Lang; kind: SkillKind; body: string; hash: string; sources: string[]; grants: Grant[] };
 
-/* Tools a skill may grant: every agent's state, the failed turns and blocked tasks, restarting a program, putting what to improve under Improvements, writing to employees of other departments, keeping the department's goals, pipelines and task texts in the tracker, and settling tasks: reading whether a task's commit is released and closing the cases the server proves done. */
-export const GRANTS = ['agents', 'failures', 'message_employee', 'restart_program', 'improvements', 'tracker', 'settle'] as const;
+/* Tools a skill may grant: every agent's state, the list of turns suspected to hang, the failed turns and blocked tasks, restarting a program, putting what to improve under Improvements, writing to employees of other departments, keeping the department's goals, pipelines and task texts in the tracker, and settling tasks: reading whether a task's commit is released and closing the cases the server proves done. */
+export const GRANTS = ['agents', 'hangs', 'failures', 'message_employee', 'restart_program', 'improvements', 'tracker', 'settle'] as const;
 export type Grant = (typeof GRANTS)[number];
 export type RoleSkill = { id: string; on: boolean; locked: boolean };
 /* How often, in minutes, an employee may wake on its timer, and how long its order may be; a role's timer keeps to them too. */
@@ -62,7 +63,8 @@ export type TeamTemplate = { id: string; department: TemplateKey; title: Lang; d
    at a stage must carry. */
 /* oneShot: its owner runs the stage as one-shot calls, so many at once and a judge. */
 export type StageRoute = { department: TemplateKey; stages: { stage: EchelonStage; ability: string | null; oneShot?: EchelonOneShot }[] };
-export type CatalogStage = { name: string; ownerRole: string; brief?: string; echelon?: EchelonStage; oneShot?: EchelonOneShot; handoffTo?: TemplateKey[] };
+/* parent: the earlier stage this one hands over from, by name; none puts it under the stage before it, so a pipeline is a chain unless a stage names a parent and forks. */
+export type CatalogStage = { name: string; ownerRole: string; parent?: string; brief?: string; echelon?: EchelonStage; oneShot?: EchelonOneShot; handoffTo?: TemplateKey[] };
 export type CatalogPipeline = { key: string; name: string; why: string; stages: CatalogStage[] };
 export type PipelineCatalog = { department: TemplateKey; default: string; pipelines: CatalogPipeline[] };
 
@@ -81,12 +83,8 @@ export const MEMBER_SKILLS = ['hh-report-to-head', 'hh-task-flow'] as const;
 /* Every head has these too, locked on; what a department knows comes with its own skills. */
 export const HEAD_SKILLS = ['hh-lead-tasks', 'hh-head', 'hh-notebook', 'hh-break-down', 'hh-brief-members', 'hh-handle-reports', 'hh-fix-loop'] as const;
 
-/* Strict, so a value that YAML split on a comma fails instead of loading half. */
-const LangText = z.object({ en: z.string().trim().min(1), ru: z.string().trim().min(1) }).strict();
 const SkillHead = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]*$/),
-  title: LangText,
-  description: LangText,
   kind: z.enum(['core', 'procedure', 'checklist', 'gate']),
   sources: z.array(z.string().min(1)).default([]),
   /* Hornhoof tools an employee gets while this skill is on, beyond every employee's. */
@@ -96,8 +94,6 @@ const RoleHead = z.object({
   id: z.string().regex(/^[A-Z]{3}-[A-Z0-9]+$/),
   department: z.enum(TEMPLATE_KEYS),
   kind: z.enum(['head', 'member']),
-  title: LangText,
-  description: LangText,
   tier: z.enum(['top', 'deep', 'standard', 'fast']),
   effort: z.enum(ROLE_EFFORTS).optional(),
   perProduct: z.boolean().default(false),
@@ -143,17 +139,59 @@ function parsed<T>(schema: Checker<T>, file: string, head: unknown): T {
   return res.data;
 }
 
+/* What a person reads of each template, a locale file per language: locales/en.yaml is the source, locales/ru.yaml and the
+   rest translate it. A language is a file named by its id in the registry; a text it lacks reads in English. */
+const TextEntry = z.object({ title: z.string().trim().min(1), description: z.string().trim().min(1) }).strict();
+const TextsFile = z.object({ roles: z.record(z.string(), TextEntry).default({}), skills: z.record(z.string(), TextEntry).default({}), teams: z.record(z.string(), TextEntry).default({}) }).strict();
+export type TemplateKind = 'roles' | 'skills' | 'teams';
+type TextsOf = Record<TemplateKind, Map<string, { title: Record<string, string>; description: Record<string, string> }>>;
+
+function loadTexts(dir: string): TextsOf {
+  const texts: TextsOf = { roles: new Map(), skills: new Map(), teams: new Map() };
+  const folder = join(dir, 'locales');
+  const files = existsSync(folder) ? readdirSync(folder).filter(f => f.endsWith('.yaml')).sort() : [];
+  for (const f of files) {
+    const file = join(folder, f);
+    const language = basename(f, '.yaml');
+    if (!isLocaleId(language)) throw new Error(`${file} is a language the registry of languages does not list.`);
+    const given = parsed(TextsFile, file, parseFrontmatter(file, readFileSync(file, 'utf8')));
+    for (const kind of ['roles', 'skills', 'teams'] as const) {
+      for (const [id, entry] of Object.entries(given[kind])) {
+        const slot = texts[kind].get(id) ?? { title: {}, description: {} };
+        slot.title[language] = entry.title;
+        slot.description[language] = entry.description;
+        texts[kind].set(id, slot);
+      }
+    }
+  }
+  return texts;
+}
+
+/* A template's words in each language; English is required, as it is what every other language falls back to. */
+function wordsOf(texts: TextsOf, kind: TemplateKind, id: string, file: string): { title: Lang; description: Lang } {
+  const found = texts[kind].get(id);
+  if (!found?.title[SOURCE_LOCALE] || !found.description[SOURCE_LOCALE]) throw new Error(`${file}: ${id} has no ${SOURCE_LOCALE} name and description in templates/locales/${SOURCE_LOCALE}.yaml.`);
+  return { title: found.title as Lang, description: found.description as Lang };
+}
+
+/* A text of a locale file whose template does not exist is a typo, or a template removed that left its words behind. */
+function noOrphans(dir: string, texts: TextsOf, known: Record<TemplateKind, ReadonlyMap<string, unknown>>): void {
+  for (const kind of ['roles', 'skills', 'teams'] as const) {
+    for (const id of texts[kind].keys()) if (!known[kind].has(id)) throw new Error(`${join(dir, 'locales')} has words for the ${kind.slice(0, -1)} ${id}, which does not exist.`);
+  }
+}
+
 /* A department without a folder has no roster yet. */
 const markdown = (dir: string) => (existsSync(dir) ? readdirSync(dir).filter(f => f.endsWith('.md')).sort() : []);
 
-function loadSkills(dir: string): Map<string, Skill> {
+function loadSkills(dir: string, texts: TextsOf): Map<string, Skill> {
   const skills = new Map<string, Skill>();
   for (const f of markdown(join(dir, 'skills'))) {
     const file = join(dir, 'skills', f);
     const { head, body } = readParts(file);
     const s = parsed(SkillHead, file, head);
     if (`${s.id}.md` !== f) throw new Error(`${file} must be named ${s.id}.md.`);
-    skills.set(s.id, { ...s, body, hash: textHash(body) });
+    skills.set(s.id, { ...s, ...wordsOf(texts, 'skills', s.id, file), body, hash: textHash(body) });
   }
   return skills;
 }
@@ -178,7 +216,7 @@ function buildRoleSkills(file: string, r: z.infer<typeof RoleHead>, skills: Read
   return [...locked, ...listed.filter(s => !locked.some(l => l.id === s.id))];
 }
 
-function parseRoleFile(file: string, key: TemplateKey, skills: ReadonlyMap<string, Skill>): { role: Role; order: number } {
+function parseRoleFile(file: string, key: TemplateKey, skills: ReadonlyMap<string, Skill>, texts: TextsOf): { role: Role; order: number } {
   const { head, body } = readParts(file);
   const r = parsed(RoleHead, file, head);
   if (r.department !== key) throw new Error(`${file} is in ${key} but says ${r.department}.`);
@@ -188,8 +226,7 @@ function parseRoleFile(file: string, key: TemplateKey, skills: ReadonlyMap<strin
       id: r.id,
       department: r.department,
       kind: r.kind,
-      title: r.title,
-      description: r.description,
+      ...wordsOf(texts, 'roles', r.id, file),
       tier: r.tier,
       effort: r.effort,
       perProduct: r.perProduct,
@@ -206,12 +243,12 @@ function parseRoleFile(file: string, key: TemplateKey, skills: ReadonlyMap<strin
   };
 }
 
-function loadRoles(dir: string, skills: ReadonlyMap<string, Skill>): { roles: Map<string, Role>; order: Map<string, number> } {
+function loadRoles(dir: string, skills: ReadonlyMap<string, Skill>, texts: TextsOf): { roles: Map<string, Role>; order: Map<string, number> } {
   const roles = new Map<string, Role>();
   const order = new Map<string, number>();
   for (const key of TEMPLATE_KEYS) {
     for (const f of markdown(join(dir, 'roles', key))) {
-      const { role, order: pos } = parseRoleFile(join(dir, 'roles', key, f), key, skills);
+      const { role, order: pos } = parseRoleFile(join(dir, 'roles', key, f), key, skills, texts);
       order.set(role.id, pos);
       roles.set(role.id, role);
     }
@@ -223,8 +260,6 @@ const TeamHead = z
   .object({
     id: z.string().regex(/^[A-Z]{3}-[A-Z0-9]+$/),
     department: z.enum(TEMPLATE_KEYS),
-    title: z.object({ en: z.string().min(1), ru: z.string().min(1) }).strict(),
-    description: z.object({ en: z.string().min(1), ru: z.string().min(1) }).strict(),
     turnkey: z.boolean().default(false),
     urgentOnly: z.boolean().default(false),
     members: z.array(z.object({ role: z.string(), count: z.number().int().min(1).max(5).default(1) }).strict()).min(1).max(10),
@@ -233,7 +268,7 @@ const TeamHead = z
   .strict();
 
 /* A team's members are members of its own department, and its id is no role's. */
-function parseTeamFile(file: string, key: TemplateKey, roles: ReadonlyMap<string, Role>, skills: ReadonlyMap<string, Skill>): TeamTemplate {
+function parseTeamFile(file: string, key: TemplateKey, roles: ReadonlyMap<string, Role>, skills: ReadonlyMap<string, Skill>, texts: TextsOf): TeamTemplate {
   const team = parsed(TeamHead, file, readParts(file).head);
   if (team.department !== key) throw new Error(`${file} is in ${key} but says ${team.department}.`);
   if (roles.has(team.id)) throw new Error(`${file}: ${team.id} is the id of a role.`);
@@ -242,14 +277,14 @@ function parseTeamFile(file: string, key: TemplateKey, roles: ReadonlyMap<string
     if (!known || known.department !== key || known.kind !== 'member') throw new Error(`${file}: ${role} is not a member role of ${key}.`);
   }
   for (const id of team.skills) if (!skills.has(id)) throw new Error(`${file} names the skill ${id}, which does not exist.`);
-  return team;
+  return { ...team, ...wordsOf(texts, 'teams', team.id, file) };
 }
 
-function loadTeams(dir: string, roles: ReadonlyMap<string, Role>, skills: ReadonlyMap<string, Skill>): Map<string, TeamTemplate> {
+function loadTeams(dir: string, roles: ReadonlyMap<string, Role>, skills: ReadonlyMap<string, Skill>, texts: TextsOf): Map<string, TeamTemplate> {
   const teams = new Map<string, TeamTemplate>();
   for (const key of TEMPLATE_KEYS) {
     for (const f of markdown(join(dir, 'teams', key))) {
-      const team = parseTeamFile(join(dir, 'teams', key, f), key, roles, skills);
+      const team = parseTeamFile(join(dir, 'teams', key, f), key, roles, skills, texts);
       teams.set(team.id, team);
     }
   }
@@ -316,6 +351,7 @@ const CatalogHead = z.strictObject({
     stages: z.array(z.strictObject({
       name: z.string().trim().min(1),
       ownerRole: z.string(),
+      parent: z.string().trim().min(1).optional(),
       brief: z.string().trim().min(1).optional(),
       echelon: z.enum(ECHELON_STAGES).optional(),
       handoffTo: z.array(z.enum(TEMPLATE_KEYS)).optional(),
@@ -324,21 +360,26 @@ const CatalogHead = z.strictObject({
   })).min(1),
 });
 
+/* One stage of a ready pipeline: owned by a role of the department, a one-shot stage with the echelon it runs in, each echelon
+   once in a pipeline, and a parent that is a stage before it. */
+function checkCatalogStage(file: string, department: TemplateKey, pipeline: CatalogPipeline, step: CatalogStage, roles: ReadonlyMap<string, Role>, seen: { names: Set<string>; echelons: Set<EchelonStage> }): void {
+  if (step.parent !== undefined && !seen.names.has(step.parent)) throw new Error(`${file}: ${step.name} names ${step.parent} as its parent, which is no stage before it.`);
+  seen.names.add(step.name);
+  if (roles.get(step.ownerRole)?.department !== department) throw new Error(`${file}: ${step.ownerRole} is not a role of ${department}.`);
+  if (step.oneShot && !step.echelon) throw new Error(`${file}: ${step.name} needs an echelon for its one-shot calls.`);
+  if (!step.echelon) return;
+  if (seen.echelons.has(step.echelon)) throw new Error(`${file}: ${pipeline.key} maps ${step.echelon} twice.`);
+  seen.echelons.add(step.echelon);
+}
+
 function parseCatalogFile(file: string, roles: ReadonlyMap<string, Role>): PipelineCatalog {
   const catalog = parsed(CatalogHead, file, readParts(file).head);
   const keys = new Set(catalog.pipelines.map(p => p.key));
   if (keys.size !== catalog.pipelines.length || !keys.has(catalog.default)) throw new Error(`${file}: pipeline keys must be unique and include the default.`);
   for (const pipeline of catalog.pipelines) {
-    const names = new Set(pipeline.stages.map(stage => stage.name));
-    if (names.size !== pipeline.stages.length) throw new Error(`${file}: ${pipeline.key} repeats a stage name.`);
-    const mapped = new Set<EchelonStage>();
-    for (const step of pipeline.stages) {
-      if (roles.get(step.ownerRole)?.department !== catalog.department) throw new Error(`${file}: ${step.ownerRole} is not a role of ${catalog.department}.`);
-      if (step.oneShot && !step.echelon) throw new Error(`${file}: ${step.name} needs an echelon for its one-shot calls.`);
-      if (!step.echelon) continue;
-      if (mapped.has(step.echelon)) throw new Error(`${file}: ${pipeline.key} maps ${step.echelon} twice.`);
-      mapped.add(step.echelon);
-    }
+    if (new Set(pipeline.stages.map(stage => stage.name)).size !== pipeline.stages.length) throw new Error(`${file}: ${pipeline.key} repeats a stage name.`);
+    const seen = { names: new Set<string>(), echelons: new Set<EchelonStage>() };
+    for (const step of pipeline.stages) checkCatalogStage(file, catalog.department, pipeline, step, roles, seen);
   }
   return catalog;
 }
@@ -392,9 +433,12 @@ function templatesOf(roles: Map<string, Role>, skills: Map<string, Skill>, teams
 }
 
 export function loadTemplates(dir: string): Templates {
-  const skills = loadSkills(dir);
-  const { roles, order } = loadRoles(dir, skills);
-  return templatesOf(roles, skills, loadTeams(dir, roles, skills), loadRoutes(dir, skills), loadCatalogs(dir, roles), order);
+  const texts = loadTexts(dir);
+  const skills = loadSkills(dir, texts);
+  const { roles, order } = loadRoles(dir, skills, texts);
+  const teams = loadTeams(dir, roles, skills, texts);
+  noOrphans(dir, texts, { roles, skills, teams });
+  return templatesOf(roles, skills, teams, loadRoutes(dir, skills), loadCatalogs(dir, roles), order);
 }
 
 /* Loaded templates again without reading their files: what the copy's holder changes in its roles and skills the

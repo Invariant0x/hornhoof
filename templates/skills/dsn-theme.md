@@ -1,7 +1,5 @@
 ---
 id: dsn-theme
-title: { en: "Themes", ru: "Темы оформления" }
-description: { en: "Builds a new theme, such as dark mode or a client's brand, by changing token values only.", ru: "Создает новую тему, например темную или под бренд клиента, меняя только значения токенов." }
 kind: procedure
 sources: [anthropics/skills skills/theme-factory/SKILL.md]
 ---

@@ -1,7 +1,5 @@
 ---
 id: mkt-brand-voice
-title: { en: "Brand voice", ru: "Голос бренда" }
-description: { en: "Writes in the company's agreed voice and proposes additions where the voice guide falls short.", ru: "Пишет в согласованном голосе компании и предлагает дополнения там, где описания голоса не хватает." }
 kind: procedure
 sources: [affaan-m/ECC skills/brand-voice/SKILL.md]
 ---

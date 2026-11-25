@@ -37,3 +37,18 @@ it.each([['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]] as const)('preserve
   });
   expect(await checkCommand(['--wait', '--', 'recorded-tool'], {})).toBe(status);
 });
+
+it('gives the command the variables of its slot\'s pieces of warm services (#2091)', async () => {
+  const lease = '10000000-0000-4000-8000-000000000002';
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream({ start(controller) {
+    controller.enqueue(new TextEncoder().encode(JSON.stringify({ type: 'slot', lease, env: { FAKE_URL: 'fake://hh_0123456789ab' } }) + '\n'));
+  } }))));
+  let sent: { env: Record<string, string> } | undefined;
+  spawn.mockImplementation(() => {
+    const child = Object.assign(new EventEmitter(), { pid: 4242, kill: vi.fn(), send: vi.fn((message: { env: Record<string, string> }) => { sent = message; setImmediate(() => child.emit('exit', 0, null)); }), disconnect: vi.fn(), unref: vi.fn() });
+    queueMicrotask(() => child.emit('spawn'));
+    return child;
+  });
+  expect(await checkCommand(['--wait', '--', 'recorded-tool'], { HH_BRIDGE: 'http://example.test/hook/sample', KEPT: 'yes' })).toBe(0);
+  expect(sent?.env).toMatchObject({ KEPT: 'yes', HH_CHECK_SLOT: lease, FAKE_URL: 'fake://hh_0123456789ab' });
+});

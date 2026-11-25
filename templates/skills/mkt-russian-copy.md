@@ -1,7 +1,5 @@
 ---
 id: mkt-russian-copy
-title: { en: "Russian copy", ru: "Тексты на русском" }
-description: { en: "Writes marketing copy in natural Russian for the Russian-speaking market instead of translating word by word.", ru: "Пишет маркетинговые тексты на естественном русском для русскоязычного рынка, а не переводит слово в слово." }
 kind: procedure
 sources: []
 ---

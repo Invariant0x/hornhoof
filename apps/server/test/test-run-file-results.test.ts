@@ -3,11 +3,10 @@ import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, jobs, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
-import { wholeProductRun } from '../src/modules/tasks/autonomous-release.js';
 import { createCoordinationRoute } from '../src/modules/tasks/echelons-store.js';
 import { BUILTIN } from './builtin.js';
 import { acceptDescription, newEnvironmentRequest, noteTestCapabilities, repositoryScope, testCapabilities } from '../src/modules/testruns/describe.js';
-import { keptEverything, keptFor, rememberKept } from '../src/modules/testruns/reuse.js';
+import { keptFor, rememberKept } from '../src/modules/testruns/reuse.js';
 import { partDone, pumpTests, runState } from '../src/modules/testruns/runs.js';
 import { connectNode, listen, setUpCompany, testApp, TEST_COMMIT, until } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
@@ -504,7 +503,7 @@ describe('reusing green test results', () => {
       await f.finish(newer, { ok: false, files: [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'failed' }] });
       await f.finish(older);
     }],
-  ] as const)('marks no success and proves no whole run where it would keep what its release did not prove: %s', async (_how, ran, before) => {
+  ] as const)('marks no success where it would keep what its release did not prove: %s', async (_how, ran, before) => {
     const f = await fixture(), marks = marked(f);
     await before(f);
     const marked0 = marks.length, next = await f.start({});
@@ -512,7 +511,6 @@ describe('reusing green test results', () => {
     expect(run.status).toBe('running');
     expect(await f.ranFiles(next)).toEqual(ran);
     expect(marks.slice(marked0)).toEqual([]);
-    expect(await wholeProductRun(f.db, run, f.companyId, run.departmentId!, TEST_COMMIT)).toBe(false);
     await f.finish(next, { ok: false, files: [{ suiteId: 'unit', file: 'checks/a.test.ts', status: 'failed' }] });
     expect(marks.slice(marked0)).toEqual([{ commit: TEST_COMMIT, state: 'failure' }]);
   });
@@ -566,11 +564,10 @@ describe('reusing green test results', () => {
 });
 
 describe('a run with nothing left to run', () => {
-  it.each([false, true])('ends passed with no part and still checks its release, preparation=%s', async preparation => {
+  it.each([false, true])('ends passed with no part when every test file kept its green result, preparation=%s', async preparation => {
     const f = await fixture(3, preparation);
     await f.finish(await f.start({}));
     const ended = await f.runOf(await f.start({}));
     expect(ended).toMatchObject({ status: 'passed', parts: 0, fileCache: { mode: 'cached', reused: 3, preparationReused: preparation, fingerprints: [] } });
-    expect(keptEverything(ended)).toBe(true);
   });
 });

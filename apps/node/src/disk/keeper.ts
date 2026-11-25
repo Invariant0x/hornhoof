@@ -1,5 +1,5 @@
-import { DISK_CLEANED_MAX, DISK_IGNORED_MAX, DISK_KEPT_MAX, DiskReport } from '@hornhoof/protocol';
-import type { Cleaner, Stay } from './clean.js';
+import { DISK_CLEANED_MAX, DISK_COPIES_MAX, DISK_IGNORED_MAX, DISK_KEPT_MAX, DiskReport } from '@hornhoof/protocol';
+import type { Cleaner, ListedCopy, Stay } from './clean.js';
 import type { DockerDisk } from './docker.js';
 import { DiskCleaned, DiskLow, diskThreshold, type DiskSettings, type Removal } from './state.js';
 
@@ -28,6 +28,10 @@ const fit = (path: string) => (path.length > PATH_MAX ? `…${path.slice(-(PATH_
 function fitted(stay: Stay): Stay | null {
   if (stay.agent.length > AGENT_MAX) return null;
   return { ...stay, path: fit(stay.path), ...(stay.ignored ? { ignored: stay.ignored.slice(0, DISK_IGNORED_MAX).map(fit) } : {}) };
+}
+function fittedCopy(copy: ListedCopy): ListedCopy | null {
+  if (copy.agent.length > AGENT_MAX) return null;
+  return { ...copy, path: fit(copy.path) };
 }
 
 /* A node's care of its disk. Each pass first removes what of Hornhoof's share can come back, part by part, then measures the
@@ -86,11 +90,19 @@ export class DiskKeeper {
       }))
       .sort((a, b) => b.bytes - a.bytes)
       .slice(0, DISK_KEPT_MAX);
-    const report: DiskReport = { total: disk.total, free, threshold, parts, low, cleaned, kept };
+    const copies = cleaners
+      .flatMap(c => (c.copies?.() ?? []).flatMap(copy => {
+        const fit = fittedCopy(copy);
+        return fit ? [fit] : [];
+      }))
+      .sort((a, b) => b.bytes - a.bytes)
+      .slice(0, DISK_COPIES_MAX);
+    const report: DiskReport = { total: disk.total, free, threshold, parts, low, cleaned, kept, ...(copies.length ? { copies } : {}) };
     /* The server drops a report it cannot read whole, and with it low and what went: what stays goes first instead. */
     if (!DiskReport.safeParse(report).success) {
       log('The disk report could not carry what stays; it goes without it.');
       delete report.kept;
+      delete report.copies;
     }
     this.last = report;
     return this.last;
