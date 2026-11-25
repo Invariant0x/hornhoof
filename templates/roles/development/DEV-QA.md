@@ -2,8 +2,6 @@
 id: DEV-QA
 department: development
 kind: member
-title: { en: "QA lead", ru: "Руководитель приемки" }
-description: { en: "Acceptance specialist for product requirements and user experience.", ru: "Специалист по приемке продукта, требованиям и пользовательскому опыту." }
 tier: standard
 effort: high
 perProduct: false

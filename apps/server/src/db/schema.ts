@@ -1,7 +1,7 @@
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { WorldRelocationStored } from '@hornhoof/protocol/world';
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
-import type { QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
+import { LOCALE_IDS, type QuestionAudience, type QuestionClassificationSnapshot } from '@hornhoof/protocol';
 import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
@@ -9,12 +9,11 @@ import type { NamedTurn, UpdateCalledOff, UpdateRequest } from '../modules/updat
 import type { UncheckedItem } from '../modules/tasks/unchecked.js';
 import type { TaskPriority, UnitFingerprint } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
-import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigint, bigserial, boolean, check, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const companyId = () => uuid('company_id').notNull().references(() => companies.id);
-const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({ dataType: () => 'bytea' });
 
 /* Legacy rows keep null metadata. A versioned public stamp is always complete. */
 const materialStamp = (revision: AnyPgColumn, digest: AnyPgColumn) => sql`
@@ -50,6 +49,10 @@ const questionChecks = (name: string, t: QuestionColumns) => [
   check(`${name}_classification_bound`, questionObjectBound(t.classification)),
   unique(`${name}_source_episode`).on(t.companyId, t.sourceKey),
 ];
+/* Why a task is made under another: a result a person can check on its own, another owner's work, or a block that runs at the same time as its siblings. */
+export const SUBTASK_REASONS = ['independent_result', 'other_owner', 'parallel_block'] as const;
+export type SubtaskReason = (typeof SUBTASK_REASONS)[number];
+
 export type QuestionRecoveryIntent = {
   sourceKey: string;
   reason: 'internal_route_unavailable' | 'plan_unavailable';
@@ -321,6 +324,9 @@ export const departments = pgTable('departments', {
   repoTestMemoryGb: integer('repo_test_memory_gb'),
   /* The command that runs the repository's whole test suite. Only a passed run of exactly this one lets GitHub skip its own tests. */
   repoFullTestCommand: text('repo_full_test_command'),
+  /* The path of the repository's release workflow, as a person named it in the repository settings: the workflow whose full run on
+     a commit says the commit may be released. Hornhoof never works it out; none named, no release records. */
+  repoReleaseWorkflow: text('repo_release_workflow'),
   /* The person the CEO named to take the department's approvals and set its policy; none means the CEO. Only the CEO sets it,
      and it is never worked out from who has access. It counts only while that person is active and still has access. */
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
@@ -328,8 +334,11 @@ export const departments = pgTable('departments', {
      commits for its main line with a green full run, an independent PASS verdict and a fast-forward path from main pass
      without a human approval card. Its products and parts go by it. */
   autonomousRelease: boolean('autonomous_release').notNull().default(false),
+  /* How many slots its turn holds at most, one per developer of the department: a task takes a slot and the next waits in the
+     queue for the next turn. None: the department runs no slots and gives every task out at once. */
+  slotCap: integer('slot_cap'),
   createdAt: createdAt(),
-}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`)]);
+}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`), check('departments_slot_cap', sql`${t.slotCap} is null or ${t.slotCap} >= 1`)]);
 
 /* A key of a git host Hornhoof creates repositories with, for now GitHub's: its token, encrypted with the server's secret and
    shown by its last 4 characters, and the user or organization the repositories go to. The company keeps one, and a
@@ -492,6 +501,13 @@ export const machines = pgTable(
     ageKey: text('age_key'),
     keepsBackups: boolean('keeps_backups').notNull().default(true),
     heldBackups: uuid('held_backups').array().notNull().default(sql`'{}'::uuid[]`),
+    /* The company's files (#2021): the area of its disk its owner gives them, none for the default of 10 GiB (files/area)
+       and 0 for none; the sealed bytes of the files its keeper last said it keeps; and the free and whole room of the
+       disk FILES_DIR lies on, which the floor is a tenth of, none before its keeper said. */
+    fileStoreLimitBytes: bigint('file_store_limit_bytes', { mode: 'number' }),
+    fileStoreUsedBytes: bigint('file_store_used_bytes', { mode: 'number' }).notNull().default(0),
+    filesDiskFree: bigint('files_disk_free', { mode: 'number' }),
+    filesDiskTotal: bigint('files_disk_total', { mode: 'number' }),
     /* Its place in taking the company server: 1 leads, none for a machine that may not hold the company's data.
        serverPin: the place the CEO pinned, from 2, or 'none' for a machine that never takes the server. serverWhy: a
        key the card turns into words. */
@@ -509,6 +525,9 @@ export const machines = pgTable(
     copyError: text('copy_error', { enum: COPY_ERRORS }),
     copyAt: timestamp('copy_at', { withTimezone: true }),
     copyName: text('copy_name'),
+    /* The first attempt in the current wait for the copy's schema, until that schema loads. */
+    copySchemaSince: timestamp('copy_schema_since', { withTimezone: true }),
+    copySchemaAttempt: integer('copy_schema_attempt'),
     copyOld: integer('copy_old'),
     /* The term under which the old database that waits for its merge led the company; null for one that never led. */
     copyOldLed: bigint('copy_old_led', { mode: 'number' }),
@@ -527,6 +546,9 @@ export const machines = pgTable(
     unique('machines_person_key').on(t.personId, t.machineKey),
     check('machines_role', sql`role IS NULL OR role IN ('data', 'worker')`),
     check('machines_path', sql`path IS NULL OR path IN ('direct', 'relay')`),
+    check('machines_file_store_limit', sql`file_store_limit_bytes IS NULL OR (file_store_limit_bytes >= 0 AND file_store_limit_bytes <= 9007199254740991)`),
+    check('machines_file_store_used', sql`file_store_used_bytes >= 0 AND file_store_used_bytes <= 9007199254740991`),
+    check('machines_files_disk', sql`(files_disk_free IS NULL OR files_disk_free BETWEEN 0 AND 9007199254740991) AND (files_disk_total IS NULL OR files_disk_total BETWEEN 0 AND 9007199254740991)`),
     check('machines_update_state', sql`update_state IS NULL OR update_state IN ('ready', 'installing', 'failed')`),
     uniqueIndex('machines_server_order').on(t.serverOrder),
     uniqueIndex('machines_server_pin').on(t.serverPin).where(sql`server_pin <> 'none'`),
@@ -1029,7 +1051,7 @@ export const telegramChatLanguages = pgTable(
   {
     botId: uuid('bot_id').notNull().references(() => telegramBots.id, { onDelete: 'cascade' }),
     chatId: bigint('chat_id', { mode: 'number' }).notNull(),
-    lang: text('lang', { enum: ['en', 'ru'] }).notNull(),
+    lang: text('lang', { enum: LOCALE_IDS }).notNull(),
   },
   t => [primaryKey({ columns: [t.botId, t.chatId] })],
 );
@@ -1045,7 +1067,7 @@ export const telegramReplies = pgTable(
     chatId: bigint('chat_id', { mode: 'number' }).notNull(),
     afterSeq: bigint('after_seq', { mode: 'number' }).notNull(),
     answered: boolean('answered').notNull().default(false),
-    lang: text('lang', { enum: ['en', 'ru'] }).notNull(),
+    lang: text('lang', { enum: LOCALE_IDS }).notNull(),
     createdAt: createdAt(),
   },
   t => [unique('telegram_replies_job_chat').on(t.botId, t.jobId, t.chatId)],
@@ -1126,9 +1148,11 @@ export const turns = pgTable(
   ],
 );
 
-/* A release of a turn as its holder asked for it before main moved: the exact commit and main under it, the full run on it,
-   the results it brings with the verdicts on them, or for turnkey work the report its holder closed it with after its own
-   review, security check and tests, and who approved it. Only the tag of a release kept here closes a turn. */
+/* A release of a turn as its holder asked for it before main moved: the exact commit and main under it, what the repository's
+   CI said of it (ciState green with the number of its checks, or none where the repository has no CI; a record from before
+   releases relied on CI names a whole run instead), the results it brings with the verdicts on them, or for turnkey work the
+   report its holder closed it with after its own review, security check and tests, and who approved it. Only the tag of a
+   release kept here closes a turn. */
 export type ReleasedTask = { taskId: string; number: number; commit: string; verdicts: string[]; report?: string };
 export const turnReleases = pgTable(
   'turn_releases',
@@ -1139,6 +1163,8 @@ export const turnReleases = pgTable(
     commit: text('commit').notNull(),
     baseCommitSha: text('base_commit_sha').notNull(),
     runId: uuid('run_id').references((): AnyPgColumn => testRuns.id),
+    ciState: text('ci_state'),
+    ciChecks: integer('ci_checks'),
     tasks: jsonb('tasks').$type<ReleasedTask[]>().notNull().default([]),
     /* The release task and, where it relied on approval, the request or the autonomous release log entry. */
     taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
@@ -1154,6 +1180,39 @@ export const turnReleases = pgTable(
     index('turn_releases_turn_id').on(t.turnId),
     check('turn_releases_commit', sql`${t.commit} ~ '^[0-9a-f]{40}$' AND ${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
     check('turn_releases_approved_once', sql`${t.approvalRequestId} IS NULL OR ${t.autonomousReleaseId} IS NULL`),
+    check('turn_releases_ci', sql`(${t.ciState} IS NULL AND ${t.ciChecks} IS NULL) OR (${t.runId} IS NULL AND ((${t.ciState} = 'green' AND ${t.ciChecks} > 0) IS TRUE OR (${t.ciState} = 'none' AND ${t.ciChecks} IS NULL) IS TRUE))`),
+  ],
+);
+
+/* The release workflow Hornhoof started on a commit of a turn branch for the release its holder asked for: one for each
+   commit, so none is started twice. It waits until the repository's CI says of that commit what a release needs; the minute
+   round then records the release (recorded, with its record) or ends it with why it could not (ended). */
+export const CI_DISPATCH_STATES = ['waiting', 'recorded', 'ended'] as const;
+export const ciDispatches = pgTable(
+  'ci_dispatches',
+  {
+    id: id(),
+    companyId: companyId(),
+    turnId: uuid('turn_id').notNull().references(() => turns.id),
+    taskId: uuid('task_id').notNull().references((): AnyPgColumn => tasks.id),
+    agentId: uuid('agent_id').notNull().references((): AnyPgColumn => agents.id),
+    commit: text('commit').notNull(),
+    branch: text('branch').notNull(),
+    workflow: text('workflow').notNull(),
+    runId: bigint('run_id', { mode: 'number' }),
+    state: text('state').notNull().default('waiting'),
+    note: text('note'),
+    releaseId: uuid('release_id').references((): AnyPgColumn => turnReleases.id),
+    createdAt: createdAt(),
+    settledAt: timestamp('settled_at', { withTimezone: true }),
+  },
+  t => [
+    unique('ci_dispatches_company_commit').on(t.companyId, t.commit),
+    index('ci_dispatches_waiting').on(t.createdAt).where(sql`state = 'waiting'`),
+    check('ci_dispatches_commit', sql`${t.commit} ~ '^[0-9a-f]{40}$'`),
+    check('ci_dispatches_state', sql`${t.state} IN ('waiting', 'recorded', 'ended')`),
+    check('ci_dispatches_settled', sql`(${t.state} = 'waiting') = (${t.settledAt} IS NULL)`),
+    check('ci_dispatches_recorded', sql`(${t.state} = 'recorded') = (${t.releaseId} IS NOT NULL)`),
   ],
 );
 
@@ -1220,10 +1279,17 @@ export const tasks = pgTable(
     goalId: uuid('goal_id').references((): AnyPgColumn => goals.id),
     /* The person who answers for it, named when it is made: it changes attention, counts and filters, never rights. */
     responsiblePersonId: uuid('responsible_person_id').references(() => people.id),
+    /* The person whose request started the tree this task is in, inherited down the tree and empty for work agents started themselves:
+       the person's list of what they asked for. responsible_person_id is who decides. */
+    askedByPersonId: uuid('asked_by_person_id').references(() => people.id),
+    /* Why a task made under another was made: independent_result, other_owner or parallel_block; empty for a task with nothing above it. */
+    subtaskReason: text('subtask_reason').$type<SubtaskReason>(),
     /* Why the task exists, in plain words; the brief says what the result is. */
     why: text('why').notNull().default(''),
     priority: text('priority').$type<TaskPriority>(),
     dueAt: timestamp('due_at', { withTimezone: true }),
+    /* Since when it waits in its department's queue for a turn with a free slot: nobody holds it until that turn takes it in. */
+    queuedAt: timestamp('queued_at', { withTimezone: true }),
     /* The department's map of hand-offs the task is placed on, and the stage it stands in. */
     pipelineId: uuid('pipeline_id').references((): AnyPgColumn => pipelines.id),
     pipelineStageId: uuid('pipeline_stage_id').references((): AnyPgColumn => pipelineStages.id),
@@ -1239,6 +1305,9 @@ export const tasks = pgTable(
     unique('tasks_company_number').on(t.companyId, t.number),
     index('tasks_goal_id').on(t.goalId),
     index('tasks_responsible').on(t.responsiblePersonId),
+    index('tasks_asked_by').on(t.askedByPersonId),
+    index('tasks_queued').on(t.departmentId, t.queuedAt),
+    check('tasks_subtask_reason_known', sql`${t.subtaskReason} is null or ${t.subtaskReason} in ('independent_result', 'other_owner', 'parallel_block')`),
     index('tasks_pipeline_id').on(t.pipelineId),
     index('tasks_department_id').on(t.departmentId),
     index('tasks_assignee').on(t.assigneeAgentId),
@@ -1590,11 +1659,19 @@ export const attachments = pgTable(
     taskId: uuid('task_id').references(() => tasks.id),
     name: text('name'),
     mediaType: text('media_type').notNull(),
-    bytes: bytea('bytes').notNull(),
+    /* The sha256 of its bytes, which the company's file store keeps on its machines (modules/files). None on a row moved
+       from before whose big file was lost with its machine, or on one still waiting to be moved. */
+    sha256: text('sha256'),
     size: integer('size').notNull(),
+    /* The test or work run whose log this is, or whose part made it; none on any other file, named as it may be. */
+    testRunId: uuid('test_run_id').references((): AnyPgColumn => testRuns.id),
     createdAt: createdAt(),
   },
-  t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_person_id').on(t.personId), index('attachments_operator_case_id').on(t.operatorCaseId)],
+  t => [
+    index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_person_id').on(t.personId), index('attachments_operator_case_id').on(t.operatorCaseId),
+    index('attachments_test_run_id').on(t.testRunId),
+    check('attachments_sha256', sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
+  ],
 );
 
 /* A phone is lent independently of its host computer's root access and compute pool. */
@@ -1709,7 +1786,9 @@ export const programOperatorSignals = pgTable('program_operator_signals', {
   caseId: uuid('case_id').notNull().references(() => programOperatorCases.id),
 }, t => [primaryKey({ columns: [t.agentId, t.instance, t.reason, t.evidenceKey] })]);
 
-export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as const;
+/* refused: Hornhoof refused what it was asked to run before any of it started, as a command a part may not run or a product
+   with no tests set up. It is a hint to the one who asked: no result, and no failure. */
+export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped', 'refused'] as const;
 
 /* A command an agent runs for a task on whichever machines of the company are free, in parts when it splits: the full
    test suite of a task's branch, or any other work, on a branch or in an empty folder with the task's files. The agent
@@ -1852,7 +1931,7 @@ export const updateWaits = pgTable('update_waits', {
   error: text('error'),
 }, t => [index('update_waits_open').on(t.endedAt), index('update_waits_company_since').on(t.companyId, t.since)]);
 
-export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
+export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped', 'refused'] as const;
 /* A machine that lost a part of a run as it ran: the place (a machine's id, or builtin), its name then, and why. */
 export type LostRun = { key: string; machine: string; why: string; computer?: string };
 
@@ -2456,7 +2535,9 @@ export const computerRuns = pgTable(
 ).enableRLS();
 
 /* Each exact commit Hornhoof let go to main without a card while the CEO had autonomous release on: who asked for it,
-   the full commit SHA, the main SHA it was fast-forward from, the full test run and the independent PASS verdict. */
+   the full commit SHA, the main SHA it was fast-forward from, what the repository's CI said of it (ciState green with the number
+   of its checks, or none for a repository with no CI; an entry from before releases relied on CI names a test run instead)
+   and the independent PASS verdict. */
 export const autonomousReleases = pgTable('autonomous_releases', {
   id: id(),
   companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
@@ -2468,7 +2549,9 @@ export const autonomousReleases = pgTable('autonomous_releases', {
   commitSha: text('commit_sha').notNull(),
   baseCommitSha: text('base_commit_sha').notNull(),
   testRunId: uuid('test_run_id').references(() => testRuns.id, { onDelete: 'set null' }),
-  testRunNumber: integer('test_run_number').notNull(),
+  testRunNumber: integer('test_run_number'),
+  ciState: text('ci_state'),
+  ciChecks: integer('ci_checks'),
   reviewerAgentId: uuid('reviewer_agent_id').references(() => agents.id, { onDelete: 'set null' }),
   reviewerName: text('reviewer_name').notNull(),
   verdictEventId: bigint('verdict_event_id', { mode: 'number' }).references(() => taskEvents.id, { onDelete: 'set null' }),
@@ -2479,6 +2562,7 @@ export const autonomousReleases = pgTable('autonomous_releases', {
   index('autonomous_releases_company_commit').on(t.companyId, t.commitSha),
   check('autonomous_releases_commit_sha', sql`${t.commitSha} ~ '^[0-9a-f]{40}$'`),
   check('autonomous_releases_base_commit_sha', sql`${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
+  check('autonomous_releases_proof', sql`(${t.testRunNumber} IS NOT NULL AND ${t.ciState} IS NULL AND ${t.ciChecks} IS NULL) OR (${t.testRunNumber} IS NULL AND ((${t.ciState} = 'green' AND ${t.ciChecks} > 0) IS TRUE OR (${t.ciState} = 'none' AND ${t.ciChecks} IS NULL) IS TRUE))`),
 ]);
 
 /* The company's vault of site sign-ins. A person types them into Hornhoof's form, or gives them to an agent that saves

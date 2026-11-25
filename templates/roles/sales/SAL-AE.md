@@ -2,8 +2,6 @@
 id: SAL-AE
 department: sales
 kind: member
-title: { en: "Account executive", ru: "Менеджер по сделкам" }
-description: { en: "Specialist in customer opportunities and sales agreements.", ru: "Специалист по возможностям клиентов и коммерческим соглашениям." }
 tier: standard
 effort: high
 perProduct: false

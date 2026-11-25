@@ -604,7 +604,7 @@ describe('external task wait', () => {
     const headTools = await c.tools(c.head.id);
     const created = (await headTools.callTool({
       name: 'create_task',
-      arguments: { title: 'Fix task messages', brief: 'One small code result.', body: '', executor: robin!.id, parent: parent.number, small: true, paths: ['logic/totals.ts'] },
+      arguments: { title: 'Fix task messages', brief: 'One small code result.', body: '', executor: robin!.id, parent: parent.number, subtaskReason: 'other_owner', small: true, paths: ['logic/totals.ts'] },
     })) as { isError?: boolean; content: { text: string }[] };
     expect(created.isError).toBeFalsy();
 

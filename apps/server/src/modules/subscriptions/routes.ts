@@ -17,6 +17,7 @@ import { servesWholeCompany } from '../tools/staff.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
 import { pumpWaiting } from '../conversation/queue.js';
 import { endRemovedPlanCommands, lockCommandOwner } from '../nodes/codes.js';
+import { repinMoved } from '../tasks/echelons-repin.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { createInstallCommand } from '../nodes/command.js';
 import { builtinOf, nodeIdentity, ownBuiltin } from '../nodes/hub.js';
@@ -489,7 +490,9 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
    open jobs end. */
 export async function removeSubscription(ctx: Ctx, sub: typeof subscriptions.$inferSelect): Promise<void> {
   const { db, hub } = ctx;
-  if (!sub.removedAt) await db.transaction(async tx => {
+  const moved = sub.removedAt ? [] : await db.transaction(async tx => {
+    /* Those on it now, as their own plan or for a while: each goes home or is left with none. */
+    const on = await tx.select({ id: agents.id }).from(agents).where(eq(agents.subscriptionId, sub.id));
     await tx
       .update(subscriptions)
       .set({ removedAt: new Date(), leaseNodeId: null, ...(sub.kind === 'api_key' ? { secretEnc: null } : {}) })
@@ -500,6 +503,7 @@ export async function removeSubscription(ctx: Ctx, sub: typeof subscriptions.$in
     await tx.update(nodes).set({ status: 'needs_login' }).where(eq(nodes.subscriptionId, sub.id));
     /* Its sign-in, sealed to its nodes, goes with it. */
     await tx.delete(planCredentials).where(eq(planCredentials.subscriptionId, sub.id));
+    return on.map(agent => agent.id);
   });
   /* The nodes stop their jobs when they hear remove, and may never report them, so they end here. */
   const ended = await failOpenJobs(ctx, eq(jobs.subscriptionId, sub.id), 'subscription_removed');
@@ -515,4 +519,6 @@ export async function removeSubscription(ctx: Ctx, sub: typeof subscriptions.$in
   await tryPlaceOperator(ctx, sub.companyId);
   /* Who sees the agents that ran on it changed with it. */
   ctx.bus.accessChanged(sub.companyId);
+  /* Their checking stages follow them home, or go back to the head with the reason. */
+  await repinMoved(ctx, moved);
 }

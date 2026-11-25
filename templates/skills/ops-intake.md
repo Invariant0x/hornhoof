@@ -1,7 +1,5 @@
 ---
 id: ops-intake
-title: { en: "Request intake", ru: "Прием запросов" }
-description: { en: "Sorts each request that reaches Operations, checks what it needs and gives it to the right member.", ru: "Разбирает каждый запрос в операционный отдел, определяет, что для него нужно, и передает подходящему сотруднику." }
 kind: procedure
 sources: []
 ---

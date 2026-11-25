@@ -146,13 +146,19 @@ export async function migratedTemplate(control: pg.Pool, migrationsFolder: strin
   } finally { await release(); }
 }
 
+/* A test's own database. On a run's piece of the machine's warm PostgreSQL (#2091), its name starts with the piece's, so the
+   piece's end drops it, and its roles, with whatever else a stopped run left there. */
+export function databaseName(piece = process.env.HH_TEST_PG_PIECE): string {
+  return piece ? `${piece}_${randomBytes(8).toString('hex')}` : `hh_pg_${randomBytes(12).toString('hex')}`;
+}
+
 /* Every test owns a new database, including grants and migration history: a copy of the template of its migrations, the
    candidate's unless it names others, or an empty one. The supplied database is never reset. */
 export async function privatePostgres(options: { migrate?: boolean; migrations?: string } = {}): Promise<PostgresFixture> {
   const source = sourceUrl();
   const cleanups: Cleanup[] = [];
   onTestFinished(() => dispose(cleanups));
-  const name = `hh_pg_${randomBytes(12).toString('hex')}`;
+  const name = databaseName();
   const control = ownedPool(source.toString(), `${name}_control`, cleanups);
   await requirePostgres17(control);
   const migrated = options.migrate !== false;

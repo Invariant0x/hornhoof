@@ -3,6 +3,7 @@ import { HIDDEN } from '../src/db/agent-sql.js';
 import { factsOf, sameShape, type Facts, type Query } from '../src/modules/merge/facts.js';
 import { BOOKKEEPING, CLOSING, SOFT_REFS, TABLE_RULES, ceosConflict, isSecret, protectedSummary, ruleOf } from '../src/modules/merge/rules.js';
 import { nameOf, rangeWords, timeWords, valueWords } from '../src/modules/merge/words.js';
+import { storedLayoutProblem } from '../src/modules/world/stored-layout.js';
 import { openTestDb } from './helpers-db.js';
 
 /* What the catalog says of a database as the migrations leave it. */
@@ -40,14 +41,19 @@ describe('the rule of each table in a merge', () => {
 
   it('never compares what the leader recomputes', async () => {
     const { tables } = await facts();
-    const own = ['server_order', 'server_why', 'memory', 'cores', 'copy_state', 'copy_progress', 'copy_error', 'copy_at', 'copy_name', 'copy_old', 'data_left_at', 'upload_state', 'link_rtt_ms', 'link_mbps', 'internet_rtt_ms', 'internet_mbps'];
+    const own = ['server_order', 'server_why', 'memory', 'cores', 'copy_state', 'copy_progress', 'copy_error', 'copy_at', 'copy_name', 'copy_old', 'data_left_at', 'upload_state', 'link_rtt_ms', 'link_mbps', 'internet_rtt_ms', 'internet_mbps',
+      /* What a machine's files take and the room of the disk they lie on, which its keeper says every 20 seconds. */
+      'file_store_used_bytes', 'files_disk_free', 'files_disk_total'];
     expect(BOOKKEEPING.machines).toEqual(expect.arrayContaining(own));
+    /* What its owner gave the files is a setting, not a count. */
+    expect(BOOKKEEPING.machines).not.toContain('file_store_limit_bytes');
     /* How far a bot has read its messages is the leader's own count, and a person's layout and the company's city have their own clock. */
     expect([BOOKKEEPING.telegram_bots, BOOKKEEPING.map_layouts, BOOKKEEPING.world_layouts]).toEqual([['update_offset'], ['updated_at'], ['updated_at']]);
     /* A bot's token is the company's way out to a person: two that differ are the CEO's to settle. Two cities that differ
        are the company's world, never its people or access: the orchestrator's, like a person's map. */
     expect([ceosConflict('telegram_bots'), ceosConflict('map_layouts'), ceosConflict('world_layouts')]).toEqual([true, false, false]);
-    expect(ruleOf('world_layouts')).toEqual({ kind: 'rows', topic: 'work' });
+    /* A city a merge writes passes the check the app saves one with (#1967). */
+    expect(ruleOf('world_layouts')).toEqual({ kind: 'rows', topic: 'work', check: storedLayoutProblem });
     /* A place the CEO pinned is his word, so two that differ are his to settle. */
     expect(BOOKKEEPING.machines).not.toContain('server_pin');
     for (const [table, columns] of Object.entries(BOOKKEEPING)) {

@@ -1,7 +1,5 @@
 ---
 id: ops-account-signup
-title: { en: "Account sign-up", ru: "Регистрация в сервисе" }
-description: { en: "Signs the company up with an outside service itself; only a paid plan waits for a person to pay.", ru: "Сама регистрирует компанию во внешнем сервисе; только платный тариф ждет, пока человек оплатит." }
 kind: procedure
 sources: []
 ---

@@ -1,7 +1,7 @@
 import type { LineState } from '@hornhoof/protocol/map';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { api } from '../api';
-import { deptLabel, errorText, useLanguage, useT } from '../i18n';
+import { deptLabel, errorText, useLanguage, useT, type Language } from '../i18n';
 import { useStream } from '../live';
 import { useDepartmentTree } from '../tasks';
 import { Idle, LoadState, useLoad, type Load } from '../ui/Loading';
@@ -31,6 +31,7 @@ import { SpeedPanel } from './SpeedPanel';
 import { arrowD, CH, FW, HH, HW, PH, PW, leadsStage, schemaLayout, stepPaths, type Frame, type Line, type Schema, type Sizes } from './schema';
 import { takeEscape } from '../ui/escape';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
+import { say, sayIf } from '@hornhoof/protocol';
 
 export { employeeGroups };
 
@@ -38,16 +39,16 @@ export { employeeGroups };
    tasks do. */
 const workOf = (d: Pick<Department, 'keepsRepository'>) => ({ resultKind: d.keepsRepository === false ? 'document' as const : 'code' as const });
 
-const frameTitle = (f: Frame, language: 'en' | 'ru', t: ReturnType<typeof useT>, d: Pick<Department, 'keepsRepository'>) =>
-  f.oneShot ? stageName(t, workOf(d), f.oneShot.stage) : f.team ? f.team.name : f.role ? f.role.title[language] : t.dept.others;
+const frameTitle = (f: Frame, language: Language, t: ReturnType<typeof useT>, d: Pick<Department, 'keepsRepository'>) =>
+  f.oneShot ? stageName(t, workOf(d), f.oneShot.stage) : f.team ? f.team.name : f.role ? say(f.role.title, language) : t.dept.others;
 
-function frameDescription(role: NonNullable<Frame['role']>, language: 'en' | 'ru', t: ReturnType<typeof useT>): string {
+function frameDescription(role: NonNullable<Frame['role']>, language: Language, t: ReturnType<typeof useT>): string {
   if (role.schema === 'final_check') return t.dept.finalTurnCheck;
   if (role.schema === 'observer') return t.dept.turnObserver;
-  return role.description[language] ?? '';
+  return say(role.description, language);
 }
 
-function FrameHeading({ frame: f, language, canGive, department }: { frame: Frame; language: 'en' | 'ru'; canGive: boolean; department: Pick<Department, 'calls' | 'keepsRepository'> }) {
+function FrameHeading({ frame: f, language, canGive, department }: { frame: Frame; language: Language; canGive: boolean; department: Pick<Department, 'calls' | 'keepsRepository'> }) {
   const t = useT();
   return (
     <Edge cut={14} corner>
@@ -185,7 +186,7 @@ function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { 
         </Edge>
       </div>
     );
-  const role = head.title?.[language];
+  const role = sayIf(head.title, language);
   return (
     <div className={`sslot${head.on ? '' : ' off'}${onSwitch ? ' has-sw' : ''}`} style={style}>
       <button type="button" className={`shead ${STATUS_CLASS[head.status]}${on ? ' on' : ''}${flash ? ' flash' : ''}`} aria-pressed={on} onClick={() => onOpen(head.id)}>
@@ -340,43 +341,18 @@ function DrawerHead({ title, onClose }: { title: string; onClose(): void }) {
   );
 }
 
-/* The line of what happened, in its own direction: as many lines as its words take, up to three. A longer one folds to three,
-   and its own button at the end of the first row unfolds it whole and folds it again. It is measured folded, as it shows. */
+/* The line of what happened, in its own direction, on one row with its dot and time. Words wider than the row end in an
+   ellipsis, and the whole text is the line's title. */
 function HintLine({ said }: { said: Said }) {
   const t = useT();
-  const id = useId();
-  const fold = useRef<HTMLSpanElement>(null), words = useRef<HTMLSpanElement>(null);
-  const [open, setOpen] = useState(false);
-  const [long, setLong] = useState(false);
   const text = said?.text ?? t.dept.hint;
-  useLayoutEffect(() => {
-    setOpen(false);
-    const box = fold.current, line = words.current;
-    if (!box || !line) return;
-    const measure = () => {
-      if (box.classList.contains('folded')) setLong(line.offsetHeight > box.clientHeight + 1);
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = guardedResizeObserver(measure, 'department-hint');
-    observer.observe(line);
-    return () => observer.disconnect();
-  }, [said?.key]);
-  const toggle = open ? t.dept.hintLess : t.dept.hintMore;
   return (
     <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
       <span className="live" />
       {said && <span className="tt">{said.at}</span>}
-      <span ref={fold} id={id} className={`tx-fold${open ? '' : ' folded'}`}>
-        <span ref={words} key={said?.key ?? 0} className="tx in" dir="auto" title={text}>
-          {text}
-        </span>
+      <span key={said?.key ?? 0} className="tx in" dir="auto" title={text}>
+        {text}
       </span>
-      {long && (
-        <button className="zbtn tx-more" type="button" aria-expanded={open} aria-controls={id} aria-label={toggle} title={toggle} onClick={() => setOpen(!open)}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={open ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} /></svg>
-        </button>
-      )}
     </div>
   );
 }
@@ -396,7 +372,7 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
   const root = useRef<HTMLDivElement>(null), dock = useRef<HTMLDivElement>(null), actions = useRef<HTMLDivElement>(null), crumbs = useRef<HTMLElement>(null);
   /* plate: how tall the department's name stands, as it wraps; 0 until it is measured. */
   const [space, setSpace] = useState({ right: 16, bottom: 228, plate: 0, tickerHidden: false });
-  /* What Show everything leaves free at the bottom: the dock, with the line of what happened as tall as it shows folded. */
+  /* What Show everything leaves free at the bottom: the dock, with the line of what happened. */
   const fitBottom = useRef(76);
   const tickerHidden = space.tickerHidden;
   const [icons, setIcons] = useState(false);
@@ -417,14 +393,11 @@ function useDepartmentSpace(language: string, panel: Props['panel'], tools: stri
       }
       setIcons(phone || (!!el.clientWidth && need.current!.px > width - ZOOM_ROOM - 16));
       const right = phone ? 16 : acts.offsetWidth + 32;
-      /* A wide screen ends the tree and the drawers 16 px above the line of what happened, which grows up with its words. */
+      /* A wide screen ends the tree and the drawers 16 px above the line of what happened. */
       const line = el.querySelector<HTMLElement>(':scope > .dv-dock > .ticker');
       const bottom = phone ? (el.clientHeight ? el.clientHeight - (dock.current ?? acts).offsetTop + 8 : 228)
         : Math.max(76, el.clientHeight && line ? el.clientHeight - line.offsetTop + 16 : 0);
-      /* The line of what happened keeps its own room: as much as it shows folded, three lines, whatever it says now. */
-      const fold = line?.querySelector<HTMLElement>(':scope > .tx-fold.folded');
-      const most = fold ? parseFloat(getComputedStyle(fold).maxHeight) : NaN;
-      fitBottom.current = bottom + (fold && most > fold.offsetHeight ? most - fold.offsetHeight : 0);
+      fitBottom.current = bottom;
       const name = crumbs.current;
       setSpace({ right, bottom, plate: name?.offsetHeight ?? 0, tickerHidden: !phone && width - right - ZOOM_ROOM < 220 });
       onPlate?.(name?.offsetHeight ? name.getBoundingClientRect().height + 8 : null);
@@ -702,10 +675,10 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
                   type="checkbox"
                   className="sw"
                   checked={f.members.some(m => shown(m.e).on)}
-                  aria-label={t.dept.roleOn(f.role.title[language])}
-                  title={t.dept.roleOn(f.role.title[language])}
+                  aria-label={t.dept.roleOn(say(f.role.title, language))}
+                  title={t.dept.roleOn(say(f.role.title, language))}
                   onPointerDown={ev => ev.stopPropagation()}
-                  onChange={ev => flipRole(f.role!.title[language], f.members.map(m => m.e))(ev.target.checked)}
+                  onChange={ev => flipRole(say(f.role!.title, language), f.members.map(m => m.e))(ev.target.checked)}
                 />
               )}
               <div className="slayer">{f.members.map(m => <Chip key={m.e.id} e={shown(m.e)} x={m.x - f.x} y={m.y - s.ft} h={m.h} on={selected === m.e.id} lead={leadsStage(m.e)} flash={flashing.has(m.e.id)} serverNow={serverNow} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />)}</div>

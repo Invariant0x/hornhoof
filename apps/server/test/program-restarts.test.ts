@@ -5,6 +5,8 @@ import { agentEvents, agents, departments, jobs, machines, nodes, subscriptions,
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
+import { programRestartStatus } from '../src/modules/tasks/program-restarts.js';
 import type { Grant } from '../src/modules/templates/load.js';
 import { registerWatchTools } from '../src/modules/tools/watch.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
@@ -183,6 +185,49 @@ describe('restart_program', () => {
     const c = await stuck();
     await c.report('thinking', 80, 'Bash');
     expect((await c.run()).content[0]!.text).toContain('tool');
+  });
+
+  it.each(['codex', 'antigravity'] as const)('allows restart_program at state=tool when the live view has job=null on %s, and refuses when the running job owns the tool', async provider => {
+    const c = await stuck(provider);
+    await c.report('tool', 31, 'call_mcp_tool');
+    vi.spyOn(c.ctx.hub, 'hasProgramOperator').mockReturnValue(true);
+    let viewJobId: string | null = c.id;
+    c.sent.mockImplementation((node, msg) => {
+      if (msg.type === 'program.view_get') {
+        receiveOperatorReply(c.ctx, node, {
+          type: 'program.view',
+          agentKey: msg.agentKey,
+          request: msg.request,
+          result: 'ok',
+          reason: null,
+          snapshot: 'snap-1',
+          instance: 'inst-1',
+          jobId: viewJobId,
+          state: 'working',
+          tool: 'call_mcp_tool',
+          question: null,
+          input: 'empty',
+          undelivered: false,
+          cols: 80,
+          rows: 24,
+          cells: '> ',
+        });
+      }
+      if (msg.type === 'agent.restart') {
+        queueMicrotask(() => void handleNodeMessage(c.ctx, c.identity, { type: 'agent.restarted', jobId: c.id, agentKey: c.target.id, ok: true, reason: null }));
+      }
+      return true;
+    });
+
+    expect((await programRestartStatus(c.ctx, c.companyId, c.agent.id)).allowed).toBe(false);
+    expect((await c.run()).isError).toBe(true);
+
+    viewJobId = null;
+    expect(await programRestartStatus(c.ctx, c.companyId, c.agent.id)).toEqual({ allowed: true, reason: null });
+    const restarted = await c.run();
+    expect(restarted.isError).toBeFalsy();
+    expect(c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart' && m.jobId === c.id)).toBe(true);
+    expect((await c.jobOf(c.id)).restartedAt).not.toBeNull();
   });
 
   it.each([['claude', 74], ['codex', 29], ['kimi', 29], ['antigravity', 200]] as const)('refuses %s after only %i quiet minutes', async (provider, minutes) => {

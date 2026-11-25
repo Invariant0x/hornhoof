@@ -125,12 +125,6 @@ export async function runModeOf(ctx: Pick<Ctx, 'db'>, run: Run, manifest: TestEn
   if (!since && !run.environmentRequest!.suite) return { mode: 'full', release, since };
   return { mode: printed ? 'cached' : 'off', release, since };
 }
-/* A run that checks its release whole: in full, or taking only what that release proved. One from before releases were kept took
-   results of any time. */
-export const ofItsRelease = (cache: TestRunFileCache | null): boolean => !cache || cache.mode !== 'cached' || cache.release !== undefined;
-/* A later run of a release where every test file kept its green result runs no part, and checks the release all the same. */
-export const keptEverything = (run: Pick<Run, 'parts' | 'fileCache'>): boolean => run.parts === 0 && run.fileCache?.mode === 'cached' && run.fileCache.reused > 0;
-
 const ofRepository = (table: typeof testFileResults | typeof testSuiteMemory, scope: RepositoryScope) => and(eq(table.companyId, scope.companyId), eq(table.repositoryOwnerId, scope.repositoryOwnerId), eq(table.repoUrlHash, scope.repoUrlHash));
 
 const newerRun = alias(testRuns, 'newer_run'), newerPart = alias(testParts, 'newer_part'), preparation = alias(testParts, 'preparation_part');

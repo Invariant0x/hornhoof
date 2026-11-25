@@ -1,7 +1,5 @@
 ---
 id: biz-deal-terms
-title: { en: "Deal terms", ru: "Условия сделки" }
-description: { en: "Drafts a term sheet and gives partner contracts and NDAs a first read for the human who signs.", ru: "Готовит проект условий и первично читает договоры и NDA партнеров для человека, который подписывает." }
 kind: procedure
 sources: [alirezarezvani/claude-skills commercial/skills, anthropics/knowledge-work-plugins legal/skills/review-contract/SKILL.md, anthropics/knowledge-work-plugins legal/skills/triage-nda/SKILL.md]
 ---

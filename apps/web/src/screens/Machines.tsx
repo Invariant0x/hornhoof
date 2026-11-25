@@ -29,6 +29,7 @@ import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUna
 import { addablePlans, machinePool, machineRows, type MachineRow } from './machine-rows';
 import { everyVisible } from '../guard';
 import { Phones } from '../ui/Phones';
+import { sayIf } from '@hornhoof/protocol';
 
 const REFRESH_MS = 5000;
 /* Docker's system on a Mac keeps a little of what it is given, so only a clear gap says it was set smaller. */
@@ -232,7 +233,7 @@ function machineFilters(t: Messages): FilterGroup<MachineRow>[] {
 
 function machineSearch(t: Messages, language: Language, subs: SubView[], row: MachineRow): string {
   const plans = row.plans.map(p => { const s = subs.find(s => s.id === p.id); return s ? subName(t, s) : PROVIDER_NAMES[p.provider]; });
-  return [row.hostname, row.owner?.name, ...plans, ...row.running.agents.flatMap(a => [a.name, a.title?.[language], a.department?.name])].join(' ');
+  return [row.hostname, row.owner?.name, ...plans, ...row.running.agents.flatMap(a => [a.name, sayIf(a.title, language), a.department?.name])].join(' ');
 }
 
 /* A machine's place in the order the server passes on in: 1 where the server runs, whatever that machine's own row
@@ -321,6 +322,7 @@ type MachineControls = {
   cancelAdd: (machineId: string, id: string) => unknown;
   lend: (machine: MachineView, value: boolean) => unknown;
   keepBackups: (machine: MachineView, value: boolean) => unknown;
+  setArea: (id: string, bytes: number | null) => unknown;
   disconnect: (machine: MachineView) => unknown;
   refresh: () => Promise<void>;
   fail: (err: unknown) => void;
@@ -347,6 +349,39 @@ function OwnerSettings({ machine, editable, onLend, onKeep }: { machine: Machine
     items.push([t.backups.title, <>{keeps}{(machine.heldBackups ?? 0) > 0 && <> <span className="muted">{t.machines.backupsHeld(machine.heldBackups ?? 0)}</span></>}</>]);
   }
   return <Facts items={items} />;
+}
+
+const GIB = 1024 ** 3;
+/* The area a machine gives the company's files unless its owner set another, as the server's files/area.ts has it. */
+const DEFAULT_AREA = 10 * GIB;
+const AREAS = [5, 10, 20, 50, 100, 200, 500].map(n => n * GIB);
+
+/* The area of the machine's disk the company's files may take, what they take there and what that disk has free. Its
+   owner, or someone who sees the whole company, sets it on a computer someone joined; the CEO, on the server's own. */
+function FilesArea({ row, editable, controls }: { row: MachineRow; editable: boolean; controls: MachineControls }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const store = row.fileStore;
+  if (!store) return null;
+  const gb = (bytes: number) => gigabytes(language, bytes);
+  const sizes = [...new Set([...AREAS, ...(store.limitBytes ? [store.limitBytes] : [])])].sort((a, b) => a - b);
+  const room = editable ? (
+    <div className="select-wrap">
+      <select className="lang-select" aria-label={t.machines.filesAreaLabel(row.hostname)} value={store.limitBytes === null ? 'default' : String(store.limitBytes)}
+        onChange={e => controls.setArea(store.id, e.target.value === 'default' ? null : Number(e.target.value))}>
+        <option value="default">{t.machines.filesAreaDefault(gb(DEFAULT_AREA))}</option>
+        <option value="0">{t.machines.filesAreaNone}</option>
+        {sizes.map(bytes => <option key={bytes} value={String(bytes)}>{t.machines.filesAreaSize(gb(bytes))}</option>)}
+      </select>
+    </div>
+  ) : <span>{store.areaBytes === 0 ? t.machines.filesAreaNone : t.machines.filesAreaSize(gb(store.areaBytes))}</span>;
+  const items: [string, React.ReactNode][] = [[t.machines.filesAreaRoom, room], [t.machines.filesAreaTake, <bdi key="take">{t.machines.gbOf(gb(store.usedBytes), gb(store.areaBytes))}</bdi>]];
+  if (store.diskFree !== null) items.push([t.machines.filesAreaFree, <bdi key="free">{t.machines.filesAreaSize(gb(store.diskFree))}</bdi>]);
+  return (
+    <CardBlock title={t.machines.filesArea}>
+      <Facts items={items} />
+    </CardBlock>
+  );
 }
 
 function PlanPicker({ machine, addable, shown, picking, controls }: { machine: MachineView; addable: SubView[]; shown: ActiveCommand | null; picking: boolean; controls: MachineControls }) {
@@ -449,17 +484,29 @@ function whyText(t: Messages, why: string | null): string | null {
   return often && what ? p.both(often, what) : often ?? null;
 }
 
+const SAVING_LINES = {
+  dump: 'savingDump',
+  seal: 'savingSeal',
+  server: 'savingServer',
+  send: 'savingSend',
+  retry: 'savingRetry',
+} as const;
+
+function savingLineText(c: Messages['machines']['copy'], language: Language, copy: Extract<NonNullable<DataView['copy']>, { line: 'saving' }>): string {
+  return copy.waiting ? c[SAVING_LINES[copy.waiting]](clock(language, copy.since ?? null)) : c.saving;
+}
+
 function copyText(t: Messages, language: Language, copy: NonNullable<DataView['copy']>): string {
   const c = t.machines.copy;
   switch (copy.line) {
     case 'making': return c.making(copy.progress);
     case 'remaking': return c.remaking(copy.progress);
-    case 'saving': return c.saving;
+    case 'saving': return savingLineText(c, language, copy);
     case 'ready': return c.ready;
     case 'catching_up': return c.catchingUp;
     case 'behind': return c.behind(copy.minutes);
     case 'asleep': return c.asleep(clock(language, copy.since));
-    case 'stopped': return copy.why === 'disk_full' ? c.stoppedDiskFull : copy.why === 'setup' ? c.stoppedSetup : c.stopped;
+    case 'stopped': return copy.why === 'disk_full' ? c.stoppedDiskFull : copy.why === 'setup' ? c.stoppedSetup : copy.why === 'gave_up' ? c.stoppedGaveUp(copy.attempts ?? 0, copy.since ? clock(language, copy.since) : null) : copy.why === 'path_slow' ? c.stoppedPathSlow : copy.why === 'path_late' ? c.stoppedPathLate : c.stopped;
   }
 }
 
@@ -575,6 +622,29 @@ function MovePart({ row, data, moving, refresh }: { row: MachineRow; data: DataV
   </>;
 }
 
+/* The CEO's button to make a copy again on a machine whose keeper gave its copy up. */
+function RetryCopy({ row, refresh }: { row: MachineRow; refresh: () => Promise<void> }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const retry = async () => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await api.post(`/api/machines/${row.id}/copy/retry`);
+      await refresh();
+    } catch (err) {
+      setFailure(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <>
+    <div className="entry-actions"><button className="act" type="button" disabled={busy} onClick={() => void retry()}>{t.machines.copy.retryCopy}</button></div>
+    {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+  </>;
+}
+
 /* What the server order shows on a card: the number of the machine the server runs on; for the CEO's order, a machine
    that cannot take the server and why, one with a place or kept out, or one the server was asked to move to; nothing
    for a machine with no place. */
@@ -642,7 +712,12 @@ function ServerBlock({ row, me, order, refresh }: { row: MachineRow; me: Me; ord
   return (
     <CardBlock title={t.cards.serverBlock}>
       {kind && <PriorityPart row={row} me={me} order={order} kind={kind} refresh={refresh} />}
-      {copy.length > 0 && <Part title={t.cards.copyPart}>{copy.map(line => <p key={line}>{line}</p>)}</Part>}
+      {copy.length > 0 && (
+        <Part title={t.cards.copyPart}>
+          {copy.map(line => <p key={line}>{line}</p>)}
+          {me.person.isOwner && row.data?.copy?.line === 'stopped' && row.data.copy.why === 'gave_up' && <RetryCopy row={row} refresh={refresh} />}
+        </Part>
+      )}
     </CardBlock>
   );
 }
@@ -715,6 +790,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
         <ServerBlock row={row} me={me} order={order} refresh={controls.refresh} />
         <SystemBlock row={row} editable={editable} controls={controls} />
         {m && <OwnerBlock machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking || core)} controls={controls} />}
+        <FilesArea row={row} editable={row.fileStore?.id === m?.id ? editable : me.person.isOwner} controls={controls} />
       </div>
       {m && <MachineConnections key={m.id} id={m.id} hostname={m.hostname} online={row.online} />}
     </CardFrame>
@@ -863,6 +939,14 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       setMachines(list => list?.map(x => (x.id === m.id ? { ...x, keepsBackups } : x)) ?? null);
     });
 
+  /* The area is set on the row the card names, which for the computer the server runs on is the server's own; the list is
+     read again, as the server says what the setting gives. */
+  const setArea = (id: string, fileStoreLimitBytes: number | null) =>
+    run(async () => {
+      await api.patch(`/api/machines/${id}`, { fileStoreLimitBytes });
+      await load();
+    });
+
   const disconnect = (m: MachineView) =>
     run(async () => {
       setConfirm(null);
@@ -917,7 +1001,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           search={search}
           filters={machineFilters(t)}
           card={row => <MachineDetails row={row} subs={subs} me={me} now={now} order={{ shown: priority, last: Math.max(1, ...rows.map(one => placeOf(one) ?? 0)), moving }} controls={{
-            picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, disconnect, refresh: load, fail: setFailure,
+            picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, setArea, disconnect, refresh: load, fail: setFailure,
           }} />}
         />
       )} />

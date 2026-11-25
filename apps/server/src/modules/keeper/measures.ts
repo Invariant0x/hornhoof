@@ -11,7 +11,7 @@ const PROBE_BYTES = 4096;
 const FEWEST_SAMPLES = 10;
 
 /* memory and cores: what the keeper's container sees, which on a Mac is what Docker's VM was given. */
-export type MachineMeasures = { uptimeS: number; fsyncP99Ms: number | null; diskFree: number; memory: number; cores: number };
+export type MachineMeasures = { uptimeS: number; fsyncP99Ms: number | null; diskFree: number; memory: number; cores: number; filesDiskFree?: number; filesDiskTotal?: number };
 
 /* The rank in whole numbers first, so no error of floating point moves it. With fewer than a hundred samples the
    ninety-ninth of a hundred would be the slowest one of all, and one slow write while a machine is still being set up
@@ -49,8 +49,9 @@ export class Measures {
   private timer: NodeJS.Timeout | undefined;
   private busy = false;
 
-  /* copying: whether the machine makes its copy of the company's data now, or makes it again. */
-  constructor(private readonly opts: { dir: string; sampleMs?: number; internet?: Internet; copying?: () => boolean }) {}
+  /* copying: whether the machine makes its copy of the company's data now, or makes it again. filesDir: FILES_DIR, whose
+     disk the company's files lie on, which need not be the keeper's. */
+  constructor(private readonly opts: { dir: string; sampleMs?: number; internet?: Internet; copying?: () => boolean; filesDir?: string | null }) {}
 
   start(): void {
     this.timer = setInterval(() => void this.sampleUnlessBusy(), this.opts.sampleMs ?? SAMPLE_MS);
@@ -85,7 +86,21 @@ export class Measures {
   /* Throws when the folder is gone: there is no honest number for free space then. */
   snapshot(): MachineMeasures {
     const { bavail, bsize } = statfsSync(this.opts.dir);
-    return { uptimeS: Math.floor(uptime()), fsyncP99Ms: fsyncP99(this.samples), diskFree: bavail * bsize, memory: totalmem(), cores: availableParallelism() };
+    return { uptimeS: Math.floor(uptime()), fsyncP99Ms: fsyncP99(this.samples), diskFree: bavail * bsize, memory: totalmem(), cores: availableParallelism(), ...this.filesDisk() };
+  }
+
+  /* The room of the disk FILES_DIR lies on; nothing where there is none or it cannot be read, and the server keeps what
+     it had. */
+  private filesDisk(): { filesDiskFree?: number; filesDiskTotal?: number } {
+    if (!this.opts.filesDir) return {};
+    try {
+      const { bavail, blocks, bsize } = statfsSync(this.opts.filesDir);
+      const free = bavail * bsize;
+      const total = blocks * bsize;
+      return Number.isSafeInteger(free) && Number.isSafeInteger(total) ? { filesDiskFree: free, filesDiskTotal: total } : {};
+    } catch {
+      return {};
+    }
   }
 
   /* A disk that hangs never collects a pile of open writes. A sample it refuses costs only that sample: a measure changes

@@ -11,7 +11,9 @@ import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { UPLOAD_SPARE } from '../src/modules/keeper/uploads.js';
 import { saveLink } from '../src/modules/link/link.js';
 import { LEFT_SLOTS_FRESH_MS } from '../src/modules/copies/left-slots.js';
+import { dataViews } from '../src/modules/copies/view.js';
 import { certFacts, issuedBy } from '../src/modules/network/authority.js';
+import { thisMachine } from '../src/modules/network/store.js';
 import { as, invitePerson, setUpCompany, testApp, until } from './helpers.js';
 
 const MACHINE_ID = 'a1b2c3d4'.repeat(4);
@@ -481,5 +483,55 @@ describe('the network routes the keeper calls', () => {
     const res = await c.certificate(newKey());
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toMatchObject({ reason: 'no_machine_id', message: 'This server has no machine id. Run the install command again.' });
+  });
+
+  it('tells a former leader how far the server applied its log, and surfaces why saving waits', async () => {
+    const c = await company();
+    const leader = await thisMachine(c.db, c.config, c.companyId);
+    const former = await c.joined('data', newKey(), { networkId: 'b0'.repeat(32), serverOrder: 2 });
+    const third = await c.joined('data', newKey(), { networkId: 'c0'.repeat(32), serverOrder: 3 });
+    await c.db.execute(sql`INSERT INTO net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at, kind)
+      VALUES (gen_random_uuid(), ${former.id}, 7, ${'b0'.repeat(16)}, '0/4500120', ${leader.id}, '2026-11-24T01:08:00.000Z'::timestamptz, 'takeover'),
+             (gen_random_uuid(), ${former.id}, 8, ${'b0'.repeat(16)}, '0/9999999', ${third.id}, '2026-11-24T01:12:00.000Z'::timestamptz, 'takeover')`);
+    expect((await c.peers(from(former.id))).json().copy).toMatchObject({ applied: { term: 7, lsn: '0/4500120' } });
+    const report = (payload: object) => c.app.inject({ method: 'POST', url: '/api/network/report', payload, ...from(former.id) });
+    const saving = {
+      state: 'saving', progress: null, error: null, at: null, name: 'copy_b0b0b0b0b0b0b0b0_1', old: null,
+      saving: { waiting: 'retry', since: '2026-11-24T01:09:00.000Z' },
+    };
+    expect((await report({ copy: saving })).statusCode).toBe(204);
+    expect((await dataViews(c.app.ctx, new Date())).get(former.id)?.copy).toEqual({
+      line: 'saving', waiting: 'retry', since: '2026-11-24T01:09:00.000Z',
+    });
+    expect((await report({ copy: { ...saving, state: 'remaking', progress: 5, saving: undefined } })).statusCode).toBe(204);
+    expect((await dataViews(c.app.ctx, new Date())).get(former.id)?.copy).toEqual({ line: 'remaking', progress: 5 });
+    expect((await report({ copy: { ...saving, saving: undefined } })).statusCode).toBe(204);
+    expect((await dataViews(c.app.ctx, new Date())).get(former.id)?.copy).toEqual({ line: 'saving' });
+    /* A restore from an older backup than the handover means the leader may no longer hold everything up to applied. */
+    await c.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, kept) VALUES (gen_random_uuid(), gen_random_uuid(), '2026-11-24T01:00:00.000Z'::timestamptz, 'hornhoof_before_20261124_010000')`);
+    expect((await c.peers(from(former.id))).json().copy.applied).toBeNull();
+  });
+
+  it('shows a copy its keeper gave up, since when and after how many attempts, until the keeper says anything else', async () => {
+    const c = await company();
+    const parked = await c.joined('data', newKey(), { networkId: 'd0'.repeat(32), serverOrder: 2 });
+    const rowOf = async (id: string) => (await c.db.select().from(machines).where(eq(machines.id, id)))[0]!;
+    const report = (payload: object) => c.app.inject({ method: 'POST', url: '/api/network/report', payload, ...from(parked.id) });
+    const stopped = {
+      state: 'stopped', progress: null, error: 'apply', at: null, name: 'copy_d0d0d0d0d0d0d0d0_5', old: null,
+      gaveUp: { since: '2026-11-24T20:00:00.000Z', attempts: 4 },
+    };
+    expect((await report({ copy: stopped })).statusCode).toBe(204);
+    expect(await rowOf(parked.id)).toMatchObject({ copyState: 'stopped', copyError: 'apply', copyName: 'copy_d0d0d0d0d0d0d0d0_5' });
+    expect((await dataViews(c.app.ctx, new Date())).get(parked.id)?.copy).toEqual({ line: 'stopped', why: 'gave_up', since: '2026-11-24T20:00:00.000Z', attempts: 4 });
+    /* A stop for another reason is no give-up: the word of the keeper decides, and a leader that restarted forgets it. */
+    expect((await report({ copy: { ...stopped, error: 'disk_full', gaveUp: undefined } })).statusCode).toBe(204);
+    expect((await dataViews(c.app.ctx, new Date())).get(parked.id)?.copy).toEqual({ line: 'stopped', why: 'disk_full' });
+    /* A copy that was asked for again is made, and says so. */
+    expect((await report({ copy: stopped })).statusCode).toBe(204);
+    expect((await report({ copy: { ...stopped, state: 'making', progress: 0, error: null, gaveUp: undefined, name: 'copy_d0d0d0d0d0d0d0d0_6' } })).statusCode).toBe(204);
+    expect((await dataViews(c.app.ctx, new Date())).get(parked.id)?.copy).toEqual({ line: 'making', progress: 0 });
+    /* The words of a keeper of a build before, which cannot say it, are refused by none. */
+    expect((await report({ copy: { ...stopped, gaveUp: { since: 'yesterday', attempts: 0 } } })).statusCode).toBe(400);
   });
 });

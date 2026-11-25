@@ -1,7 +1,5 @@
 ---
 id: ops-incident-response
-title: { en: "Incident response", ru: "Реагирование на инциденты" }
-description: { en: "Restores a broken node, tool or integration first, then finds the root cause with evidence.", ru: "Сначала восстанавливает работу узла, инструмента или интеграции, затем находит первопричину с доказательствами." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins engineering/skills/incident-response/SKILL.md, wshobson/agents plugins/incident-response/skills/incident-runbook-templates/SKILL.md, obra/superpowers skills/systematic-debugging/SKILL.md]
 ---

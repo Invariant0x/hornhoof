@@ -1,10 +1,11 @@
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { useLanguage, useT, type Language, type Messages } from '../i18n';
+import { partyDepartment, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { useOpenWindowTask } from '../screens/AgentWindowContext';
 import type { InboxLetter, InboxMode, InboxView, MessageParty } from '../types';
 import { PanelFrame } from './SidePanels';
+import { sayIf } from '@hornhoof/protocol';
 
 type Choice = InboxMode | 'rule';
 const CHOICES: Choice[] = ['rule', 'inbox', 'direct'];
@@ -108,9 +109,9 @@ function senderOf(t: Messages, language: Language, p: MessageParty): { name: str
   if (p.kind === 'hornhoof') return { name: t.window.hornhoof, about: t.agentInbox.system };
   if (p.agentKind === 'orchestrator') return { name: t.window.orchestrator, about: t.window.hornhoof };
   if (p.kind === 'agent' && p.id === null) return { name: t.window.hiddenEmployee, about: null };
-  const role = p.role?.[language];
+  const role = sayIf(p.role, language);
   const named = role && role.toLocaleLowerCase(language) !== p.name.toLocaleLowerCase(language) ? role : null;
-  const about = [named, p.department?.name[language]].filter(Boolean).join(' · ');
+  const about = [named, partyDepartment(t, language, p.department)].filter(Boolean).join(' · ');
   return { name: p.name, about: about || null };
 }
 

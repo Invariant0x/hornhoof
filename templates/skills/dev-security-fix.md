@@ -1,7 +1,5 @@
 ---
 id: dev-security-fix
-title: { en: "Repair security findings", ru: "Исправлять замечания безопасности" }
-description: { en: "Use when the current Security owner must repair a confirmed weakness in its assigned candidate.", ru: "Для текущего владельца Security, которому надо исправить подтвержденную уязвимость назначенного кандидата." }
 kind: procedure
 sources: []
 ---

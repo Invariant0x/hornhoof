@@ -228,7 +228,9 @@ async function readSourceFiles(
 ): Promise<Map<string, Map<string, Row | null>>> {
   const files = new Map<string, Map<string, Row | null>>();
   for (const t of facts.tables.values()) {
-    if (fileColumns(t).length === 0) continue;
+    /* A table the facts show no file column of still brings the rows the merge asked for whole, as attachments do while
+       the source keeps bytes the store has not taken yet. */
+    if (fileColumns(t).length === 0 && !requested.has(t.name)) continue;
     const rows = candidateTableRows(t.name, journal, compared);
     const extra = requested.get(t.name) ?? new Map<string, Record<string, unknown>>();
     files.set(t.name, await loadTableFiles(leader, src, t, rows, extra));
@@ -270,13 +272,20 @@ async function readTaskCodeLine(src: Query, taskId: string): Promise<CodeLine | 
     : null;
 }
 
+/* The company a source database is of: the one it holds, or null when it holds none or more than one, which no merge
+   takes (#1967). */
+export async function sourceCompanyOf(src: Query): Promise<string | null> {
+  const found = await src<{ id: string }>('SELECT id FROM public.companies ORDER BY id LIMIT 2');
+  return found.length === 1 ? found[0]!.id : null;
+}
+
 /* Streaming reader for kept and uploaded databases in the leader's own Postgres: reads 500-row pages and individual
    file rows on demand inside the transaction without holding equal rows in memory. */
 export function liveMergeReader(src: Query, nameKeys: NameKeys): MergeReader {
   let parkedCache: Promise<Row[]> | undefined;
   return {
     facts: () => factsOf(src),
-    companyId: async () => (await src<{ id: string }>('SELECT id FROM public.companies LIMIT 1'))[0]?.id ?? null,
+    companyId: () => sourceCompanyOf(src),
     horizon: () => horizonOf(src),
     restores: () => restoresOf(src),
     journalIds: cutoff => journalIds(src, cutoff),
@@ -317,8 +326,7 @@ async function checkSourceReady(
   const shape = sameShape(leaderFacts, facts);
   if (shape) refuse(shape);
   for (const name of leaderFacts.tables.keys()) ruleOf(name);
-  const [theirs] = await src<{ id: string }>('SELECT id FROM public.companies LIMIT 1');
-  const companyId = theirs?.id ?? null;
+  const companyId = await sourceCompanyOf(src);
   if (companyId !== merge.companyId) refuse(anotherCompany);
   return { facts, companyId };
 }

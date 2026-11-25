@@ -7,6 +7,8 @@ import { appendEvent } from '../events/store.js';
 import { operationsStaff } from './staff.js';
 import { operatorNotification } from './notifications.js';
 import { operatorRecoveryHolds } from './recovery-state.js';
+import { saying } from '../../locales/index.js';
+import type { Texts } from '@hornhoof/protocol';
 
 const HOLD_WATCH_MS = 5 * 60_000;
 
@@ -35,8 +37,8 @@ const holdText = (row: Case, name: string, to: Agent) =>
 export const holdWatchDue = (row: Case, now: Date): boolean => row.escalatedAt !== null && +now - +row.escalatedAt > HOLD_WATCH_MS;
 
 /* What the one who can release a hold is told of it: the words of its turn, and the line people see. */
-export type HoldWords = { text: (row: Case, name: string, to: Agent) => string; detail: (name: string) => { en: string; ru: string } };
-const wordsOnHold: HoldWords = { text: holdText, detail: name => ({ en: `${name}: words on hold for more than five minutes`, ru: `${name}: слова ждут дольше пяти минут` }) };
+export type HoldWords = { text: (row: Case, name: string, to: Agent) => string; detail: (name: string) => Texts };
+const wordsOnHold: HoldWords = { text: holdText, detail: name => saying(words => words.operator.wordsOnHold(name)) };
 
 /* Called with the agent row locked, once a round for a case on hold. It calls Operations once, and the orchestrator once
    while Operations cannot take it: the turn it queues is no case of its own. */
@@ -59,7 +61,7 @@ const unavailableHoldWords: HoldWords = {
     `Hornhoof: ${name}'s queue has been on hold since ${row.escalatedAt!.toISOString()} (case ${row.id}). The program operator was unavailable and the server could not release the hold safely. ` +
     (to.id === row.agentId ? 'Open the employee window and have another responder check the program. ' : `Use program_screen for employee ${row.agentId} to see what blocks it. `) +
     'If the program needs its owner, ask them to clear the screen. When the screen is ready, use program_recovery_release with the case and your reason.',
-  detail: name => ({ en: `${name}: recovery hold needs attention`, ru: `${name}: удержание требует внимания` }),
+  detail: name => saying(words => words.operator.holdNeedsAttention(name)),
 };
 
 async function activeOrchestrator(ctx: Ctx, companyId: string): Promise<Agent | undefined> {

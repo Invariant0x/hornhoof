@@ -1,13 +1,12 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { attachments, departments, type RequestOption } from '../../db/schema.js';
 import { type Task } from './state.js';
-export const onDisk = sql<boolean>`(octet_length(${attachments.bytes}) = 0 and ${attachments.size} > 0)`;
 
 /* The files on a task, the newest under each name, without their bytes. */
-export async function filesOf(db: Db, taskId: string): Promise<{ id: string; name: string; size: number; agentId: string; personId: string | null; at: Date; big: boolean }[]> {
+export async function filesOf(db: Db, taskId: string): Promise<{ id: string; name: string; size: number; agentId: string; personId: string | null; at: Date }[]> {
   const rows = await db
-    .select({ id: attachments.id, name: attachments.name, size: attachments.size, agentId: attachments.agentId, personId: attachments.personId, at: attachments.createdAt, big: onDisk })
+    .select({ id: attachments.id, name: attachments.name, size: attachments.size, agentId: attachments.agentId, personId: attachments.personId, at: attachments.createdAt })
     .from(attachments)
     .where(and(eq(attachments.taskId, taskId), isNull(attachments.operatorCaseId)))
     .orderBy(desc(attachments.createdAt));

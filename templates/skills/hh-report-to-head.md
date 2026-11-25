@@ -1,7 +1,5 @@
 ---
 id: hh-report-to-head
-title: { en: "Report to your head", ru: "Отчет руководителю" }
-description: { en: "Ends every piece of work with a short status your head can act on.", ru: "Завершает каждую работу коротким статусом, по которому руководитель может действовать." }
 kind: core
 sources: [obra/superpowers skills/subagent-driven-development/implementer-prompt.md]
 ---

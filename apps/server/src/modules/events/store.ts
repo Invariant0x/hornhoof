@@ -9,6 +9,7 @@ import { idOnly } from '../../db/selections.js';
 import { HORNHOOF, agentParty, incomingEnvelope, messageData, readMessage, type MessageEnvelope, type MessageParty } from './parties.js';
 import { notStep } from '../tools/steps.js';
 import { privateTurn } from '../tools/private-turns.js';
+import { saying } from '../../locales/index.js';
 
 export type EventView = { seq: number; kind: AgentEventKind; data: unknown; message?: MessageEnvelope; jobId: string | null; person: { id: string; name: string } | null; at: string };
 
@@ -198,5 +199,5 @@ export async function publishWorking(ctx: Pick<Ctx, 'db' | 'bus'>, companyId: st
 function automaticMessage(message: MessageEnvelope, job: { retryOf?: string | null; continueOf?: string | null }): MessageEnvelope {
   const original = job.retryOf ?? job.continueOf;
   if (!original) return message;
-  return { direction: 'in', from: HORNHOOF, to: message.to, notification: { source: job.retryOf ? 'machine' : 'go_on', tasks: message.notification?.tasks ?? [], detail: { en: `after turn ${original}`, ru: `после хода ${original}` } } };
+  return { direction: 'in', from: HORNHOOF, to: message.to, notification: { source: job.retryOf ? 'machine' : 'go_on', tasks: message.notification?.tasks ?? [], detail: saying(words => words.notices.afterTurn(original)) } };
 }

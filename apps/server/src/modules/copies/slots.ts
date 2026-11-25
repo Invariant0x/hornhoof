@@ -5,6 +5,8 @@ import type { CopyOrder } from '../keeper/copy.js';
 import { queryOf } from '../merge/leader.js';
 import { machineSource } from '../merge/source.js';
 import { findThisMachine } from '../network/store.js';
+import { weakPath } from './path.js';
+import { copyRetryAsked } from './retry.js';
 
 /* A replication slot of the server's Postgres. pid: the connection that reads it now, none while nobody does.
    confirmed: how far its reader said it holds the changes. */
@@ -44,7 +46,10 @@ export const slotPrefix = (networkId: string): string => `copy_${networkId.slice
    it is. join: the slot this machine made for the copy when it took the server in the newest planned switch, while the
    copy's row still names an attempt below it: a copy that held everything the leader before had written joins that
    slot, and takes no row again. */
-export async function copyOrder(ctx: Ctx, row: { id: string; networkId: string | null; copyName: string | null; copyOld?: number | null; copyOldLed?: number | null; uploadState?: UploadState | null }): Promise<CopyOrder> {
+export async function copyOrder(
+  ctx: Ctx,
+  row: { id: string; networkId: string | null; copyName: string | null; copyOld?: number | null; copyOldLed?: number | null; uploadState?: UploadState | null; copyState?: string | null; linkMbps?: number | null; linkRttMs?: number | null },
+): Promise<CopyOrder> {
   const q = queryOf(ctx.db);
   const found = row.copyName ? (await ctx.replication.slots()).find(slot => slot.name === row.copyName) : null;
   const slot = !row.copyName ? null : !found ? 'missing' : found.walStatus === 'lost' ? 'lost' : 'ok';
@@ -57,10 +62,30 @@ export async function copyOrder(ctx: Ctx, row: { id: string; networkId: string |
   const upload = !row.uploadState ? null : row.uploadState === 'kept' ? 'wipe' : row.uploadState;
   const attempt = /_(\d+)$/.exec(row.copyName ?? '')?.[1];
   const leader = ctx.config.machineId ?? undefined;
+  /* A copy that is not whole yet is not kept over a path measured too weak for it. */
+  const weak = row.copyState === 'ready' ? null : weakPath(row, sized ? Number(sized.size) : null);
   return {
     slot, leaderSize: sized ? Number(sized.size) : null, migrations: counted?.n ?? null, old, upload, lastAttempt: attempt ? Number(attempt) : null,
+    applied: await appliedOf(ctx, row.id),
+    ...(copyRetryAsked(ctx, row.id) ? { retry: true as const } : {}),
+    ...(weak ? { weak } : {}),
     ...(leader === undefined ? {} : { leader, join: await slotToJoin(ctx, row.networkId ?? null, attempt ? Number(attempt) : 0) }),
   };
+}
+
+/* How far a handover from that machine to this server applied its log, while no restore replaced it. */
+async function appliedOf(ctx: Ctx, machineId: string): Promise<{ term: number; lsn: string } | null> {
+  const mine = (await findThisMachine(ctx.db, ctx.config))?.id;
+  if (!mine) return null;
+  const [row] = await queryOf(ctx.db)<{ term: number; lsn: string }>(
+    `SELECT h.term_number::int AS term, h.applied AS lsn FROM net.handovers h
+      WHERE h.from_machine_id = $1::uuid AND h.to_machine_id = $2::uuid
+        AND h.applied ~ '^[0-9A-Fa-f]{1,8}/[0-9A-Fa-f]{1,8}$'
+        AND NOT EXISTS (SELECT 1 FROM net.restores r WHERE r.dumped_at < h.at OR r.at >= h.at)
+      ORDER BY h.term_number DESC, h.at DESC, h.id DESC LIMIT 1`,
+    [machineId, mine],
+  );
+  return row ? { term: Number(row.term), lsn: row.lsn } : null;
 }
 
 /* The slot the newest planned switch made for that machine, when this machine took the server in it and the slot's

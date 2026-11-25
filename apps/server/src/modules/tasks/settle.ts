@@ -7,6 +7,7 @@ import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { repoAt } from '../departments/repository.js';
 import type { Grant } from '../templates/load.js';
+import { withRepoCompany } from '../testruns/github-limit.js';
 import { requiredStagesComplete } from './echelons-accept.js';
 import { routeOf } from './echelons-store.js';
 import { filesOf } from './file-views.js';
@@ -15,7 +16,7 @@ import { taskByRef } from './lookup.js';
 import { endRoutes } from './route-records.js';
 import { CLOSED, loadTask, refuse, stillOpen, waitsForPerson, type Moved, type Task, type Wake } from './state.js';
 import { move } from './transitions.js';
-import { branchHolds, headOf } from './turn-integration.js';
+import { branchHolds, BranchProofUnavailable, headOf, type BranchProofReader } from './turn-integration.js';
 import { versionsNewestFirst } from './turn-tags.js';
 import type { ToolJob } from './tools.js';
 
@@ -28,7 +29,7 @@ import type { ToolJob } from './tools.js';
    Anything else stays open: a commit outside every release is unfinished work, work paused or held by a person's own assistant
    is never touched, and a duplicate or a task paused long is a question for the head of its department. */
 
-type Readers = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCommit' | 'readCompare' | 'readMerged' | 'readTags'>>;
+type Readers = BranchProofReader & Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCommit' | 'readTags'>>;
 
 export type Released = { task: number; commit: string | null; source: 'record' | 'branch' | null; inMain: boolean; release: string | null; released: boolean; why: string | null };
 
@@ -100,6 +101,18 @@ async function heldIn(ctx: Readers, repo: Repo, main: string, commit: string): P
   return release ? { inMain: false, release } : null;
 }
 
+async function proveNamed(ctx: Readers, repo: Repo, task: Task, named: Named): Promise<Released> {
+  const { commit } = named;
+  const lacking = await lacksOwnWork(ctx, repo, named);
+  if (lacking) return none(task, lacking, commit, 'record');
+  const main = await headOf(ctx, repo, repo.branch);
+  if (!main) return none(task, `${repo.branch} could not be read, so nothing is proved.`, commit, 'record');
+  const held = await heldIn(ctx, repo, main, commit);
+  return held
+    ? { task: task.number, commit, source: 'record', ...held, released: true, why: null }
+    : none(task, `${commit} is in neither ${repo.branch} nor a release tag as far as the repository could be read: it is unfinished work.`, commit, 'record');
+}
+
 /* Whether the commit of a task is in main or in a release, as the repository says: a commit only a turn branch or a branch of
    its own holds, or one that could not be read, is not. Only a commit a hand-in of the task names, with work of its own past
    the base it names, counts: the head of the task's branch, or a hand-in whose commit is its own base, may be a commit main
@@ -107,17 +120,15 @@ async function heldIn(ctx: Readers, repo: Repo, main: string, commit: string): P
 export async function releasedState(ctx: Readers, task: Task): Promise<Released> {
   const found = ctx.config ? await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]) : null;
   if (!found) return none(task, 'The department of the task keeps no repository, so it has no commit to look for.');
+  const repo = withRepoCompany(found.repo, task.companyId);
   const named = (await namedCommits(ctx.db, task)).at(-1);
-  if (!named) return unnamed(ctx, found.repo, task);
-  const { commit } = named;
-  const lacking = await lacksOwnWork(ctx, found.repo, named);
-  if (lacking) return none(task, lacking, commit, 'record');
-  const main = await headOf(ctx, found.repo, found.repo.branch);
-  if (!main) return none(task, `${found.repo.branch} could not be read, so nothing is proved.`, commit, 'record');
-  const held = await heldIn(ctx, found.repo, main, commit);
-  return held
-    ? { task: task.number, commit, source: 'record', ...held, released: true, why: null }
-    : none(task, `${commit} is in neither ${found.repo.branch} nor a release tag as far as the repository could be read: it is unfinished work.`, commit, 'record');
+  if (!named) return unnamed(ctx, repo, task);
+  try {
+    return await proveNamed(ctx, repo, task, named);
+  } catch (err) {
+    if (err instanceof BranchProofUnavailable) return none(task, err.message, named.commit, 'record');
+    throw err;
+  }
 }
 
 /* No hand-in names a commit: the branch of the task, if it has one, is reported and is no proof. */

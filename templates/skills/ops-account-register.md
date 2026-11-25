@@ -1,7 +1,5 @@
 ---
 id: ops-account-register
-title: { en: "Account register", ru: "Реестр учетных записей" }
-description: { en: "Keeps one current list of the company's accounts and subscriptions, their owners, costs and renewal dates.", ru: "Ведет единый актуальный список учетных записей и подписок компании: владельцы, стоимость, даты продления." }
 kind: procedure
 sources: []
 ---

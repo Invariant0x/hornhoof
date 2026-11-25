@@ -54,6 +54,22 @@ test('a push stands on the tip it moved, when that tip passed', async t => {
   assert.equal(found.base, before, found.why);
 });
 
+test('a full run stands on no commit, whatever an earlier commit has for a mark: every test runs (B1)', async t => {
+  const { git, commit } = repository(t);
+  commit();
+  const before = commit(), sha = commit();
+  let asked = 0;
+  const forged = async () => { asked += 1; return true; };
+  for (const [name, event] of [['push', { before }], ['pull_request', { pull_request: { base: { sha: before } } }], ['workflow_dispatch', {}]]) {
+    const found = await provedBase({ name, event, sha, full: true }, { git, proved: forged });
+    assert.equal(found.base, null, `${name}: ${found.why}`);
+    assert.match(found.why, /full run/);
+  }
+  assert.equal(asked, 0, 'a full run reads no mark');
+  const narrowed = await provedBase({ name: 'push', event: { before }, sha, full: false }, { git, proved: forged });
+  assert.equal(narrowed.base, before, 'without the input the same event stands on the commit before it');
+});
+
 test('a push stands on the nearest commit before that tip that passed, as a push of texts alone leaves no mark', async t => {
   const { git, commit } = repository(t);
   const marked = commit(), before = commit(), sha = commit();

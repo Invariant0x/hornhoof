@@ -1,5 +1,6 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
+import { filesDirRefusal } from './files-dir.js';
 import { openAgentSql } from './db/agent-sql.js';
 import { APP_NAME, openDb } from './db/client.js';
 import { loggable } from './errors.js';
@@ -16,6 +17,11 @@ function requireDbUrl(url: string | undefined): string {
 }
 
 const config = loadConfig(process.env);
+const refused = filesDirRefusal(process.env, config);
+if (refused) {
+  console.error(refused);
+  process.exit(1);
+}
 const url = requireDbUrl(config.databaseUrl);
 await migrateWhenAlone(config, url);
 const db = openDb(url, APP_NAME, { fenced: config.keeper });
