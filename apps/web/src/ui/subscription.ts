@@ -1,4 +1,4 @@
-import { currentLimits } from '@hornhoof/protocol';
+import { currentLimits, modelGroup, type LimitGroup, type ProviderId } from '@hornhoof/protocol';
 import type { Language, Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { Limits, PlanStatus, SubView } from '../types';
@@ -50,9 +50,43 @@ export function stateOf(s: SubView, now: number) {
   return s.kind === 'personal' && limitState(s.limits, now, snapshotAt(s, now)).reached ? 'limit' : 'ready';
 }
 
+/* Each plan provider's own model family, matched against the group names and descriptions reported for the plan. */
+const PROVIDER_OWN_MODELS: Partial<Record<ProviderId, string>> = {
+  antigravity: 'gemini',
+  claude: 'claude',
+  codex: 'gpt codex',
+  kimi: 'kimi',
+  glm: 'glm',
+};
+
+function countByGroup(groups: readonly LimitGroup[], agents: SubView['agents']): Map<LimitGroup, number> {
+  const counts = new Map<LimitGroup, number>();
+  for (const agent of agents ?? []) {
+    const group = modelGroup(groups, agent.model);
+    if (group) counts.set(group, (counts.get(group) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/* The group most of the company's employees on this plan use, breaking ties by the provider's group order. */
+function mostUsedGroup(groups: readonly LimitGroup[], agents: SubView['agents']): LimitGroup | null {
+  const counts = countByGroup(groups, agents);
+  return groups.filter(group => counts.has(group)).sort((a, b) => counts.get(b)! - counts.get(a)!)[0] ?? null;
+}
+
+/* The plan's main model group: the group of the plan provider's own models (Gemini for Antigravity). If a plan has no
+   provider-own group, fall back to the group most of the company's employees on that plan use, then to the first group
+   the provider reported. */
+export function mainLimitGroup(sub: Pick<SubView, 'provider' | 'agents'>, groups: readonly LimitGroup[] | undefined): LimitGroup | null {
+  if (!groups?.length) return null;
+  return modelGroup(groups, PROVIDER_OWN_MODELS[sub.provider]) ?? mostUsedGroup(groups, sub.agents) ?? groups[0]!;
+}
+
 export function windowUsage(s: SubView, name: string, now: number): number | null {
   if (s.kind === 'api_key') return null;
-  return currentPlanLimits(s, now)?.windows.find(w => w.name === name)?.utilization ?? null;
+  const limits = currentPlanLimits(s, now);
+  const windows = mainLimitGroup(s, limits?.groups)?.windows ?? limits?.windows;
+  return windows?.find(w => w.name === name)?.utilization ?? null;
 }
 
 export function clock(language: Language, iso: string | null): string | null {

@@ -108,8 +108,8 @@ export type SkinLook = {
   worldColors?: WorldColors;
   terminal?: SkinTerminal;
 };
-/* The name of a person's own skin in each language Hornhoof speaks. */
-export type SkinNames = Readonly<{ ru: string; en: string }>;
+/* The name of a person's own skin in each language it was written in; English always, which every other reads as when it has none. */
+export type SkinNames = Readonly<{ en: string } & { [language: string]: string | undefined }>;
 /* A skin of a person's own, as its file holds it: the built-in skin it stands on, which gives it the shape of its cut,
    its names, and the values it sets. */
 export type Skin = { base: string; name: SkinNames; scheme: Scheme; colors: SkinColors; fonts: SkinFonts; cut: number };

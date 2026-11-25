@@ -1,7 +1,5 @@
 ---
 id: sup-bilingual
-title: { en: "Support in the customer's language", ru: "Поддержка на языке клиента" }
-description: { en: "Replies in the customer's language, with product terms used the same way in every language.", ru: "Отвечает на языке клиента и одинаково использует термины продукта на всех языках." }
 kind: procedure
 sources: []
 ---

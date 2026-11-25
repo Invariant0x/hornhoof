@@ -1,7 +1,5 @@
 ---
 id: sup-support-policy
-title: { en: "Support policy", ru: "Правила поддержки" }
-description: { en: "Sets how support answers customers: from the department's own mailbox, with every contact recorded in git, no forbidden promises and a person for the real decisions.", ru: "Задает, как поддержка отвечает клиентам: со своего ящика отдела, с записью каждого контакта в git, без запретных обещаний и с человеком там, где решает человек." }
 kind: checklist
 sources: []
 ---

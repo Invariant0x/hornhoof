@@ -3,6 +3,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { LOCALES } from '@hornhoof/protocol';
 import { containsWorldVoicePhrase, validateWorldPackBehavior } from '@hornhoof/protocol/world';
 import { describe, expect, it } from 'vitest';
 import { createWorldPackRegistry, worldSkillsForTheme } from '../src/modules/world/packs/index.js';
@@ -35,12 +36,12 @@ describe('Stage 9 space station test pack (server)', () => {
     expect(containsWorldVoicePhrase('Отчет готов', SPACE_WORLD_PACK)).toBe(false);
   });
 
-  it('gives enough distinct crew names in both languages and a ruler name', () => {
-    for (const lang of ['en', 'ru'] as const) {
-      const names = SPACE_WORLD_PACK.names.employees[lang];
+  it('gives enough distinct crew names in every language of the registry and a ruler name', () => {
+    for (const { id: lang } of LOCALES) {
+      const names = SPACE_WORLD_PACK.names.employees[lang] ?? [];
       expect(names.length).toBeGreaterThanOrEqual(30);
       expect(new Set(names.map(n => n.toLowerCase())).size).toBe(names.length);
-      expect(SPACE_WORLD_PACK.names.ruler[lang].trim()).not.toBe('');
+      expect(SPACE_WORLD_PACK.names.ruler[lang]?.trim()).toBeTruthy();
     }
   });
 

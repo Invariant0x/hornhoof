@@ -8,6 +8,7 @@
    front wall, so the door, the plot corner and the art's registration never move while it grows.
    Contains zero theme-specific words, files or colours. */
 
+import { bridgeEnds, bridgeSite, bridgeStepAllowed, bridgeTiles, onBridge, sameBridge, type BridgeSite } from './bridge-site';
 import type { TileCoord } from './coords';
 import { openVacatedLots, type VacatedLot } from './lot-clearing';
 import type { BuildingLayoutRules, BuildingLayoutSpec, CityBuildingKind, OuterWallMode } from './manifest';
@@ -146,6 +147,9 @@ export type CityState = {
   rngState: number;
   /* The pack's door and growth rules per kind; pack data, so snapshots leave it out. */
   buildingLayout: BuildingLayoutRules;
+  /* The map's bridge when the pack has its pictures (bridge-site.ts, #1985): the one place a street may cross water.
+     Null or absent, no street crosses water. Worked out from the map and the pack's art, so snapshots leave it out. */
+  bridge?: BridgeSite | null;
 };
 
 export type PlaceBuildingRequest = Readonly<{
@@ -503,23 +507,24 @@ export function canPlaceFootprint(
   return true;
 }
 
+/* `ignore` names a building whose own footprint does not block: one that moves, judged at its new place. */
 function canWalkRoad(
   city: CityState,
   map: GeneratedWorldMap,
   col: number,
   row: number,
   allowBridge: boolean,
+  ignore?: string,
 ): boolean {
   const spec = map.kindSpecAt(col, row);
   if (!spec) return false;
   if (spec.liquid) {
-    if (!allowBridge) return false;
+    if (!waterOpen(city, allowBridge, col, row)) return false;
   } else if (!spec.walkable && !spec.excavatable) {
     return false;
   }
-  const k = tileKey(col, row);
-  if (city.footprintOccupant.has(k)) return false;
-  return true;
+  const occupant = city.footprintOccupant.get(tileKey(col, row));
+  return occupant === undefined || occupant === ignore;
 }
 
 /* The door tile of a pack rule: on the named front wall, fromFront tile rows back from the front corner.
@@ -543,10 +548,11 @@ function pickDoorForFootprint(
   spanRow: number,
   target: TileCoord,
   rule?: BuildingLayoutSpec,
+  ignore?: string,
 ): TileCoord | null {
   if (rule) {
     const door = ruleDoorTile(col, row, spanCol, spanRow, rule);
-    return canWalkRoad(city, map, door.col, door.row, false) ? door : null;
+    return canWalkRoad(city, map, door.col, door.row, false, ignore) ? door : null;
   }
   const candidates: TileCoord[] = [];
   for (let r = row; r < row + spanRow; r++) candidates.push({ col: col + spanCol, row: r });
@@ -555,7 +561,7 @@ function pickDoorForFootprint(
   let best: TileCoord | null = null;
   let bestScore = Infinity;
   for (const cand of candidates) {
-    if (!canWalkRoad(city, map, cand.col, cand.row, false)) continue;
+    if (!canWalkRoad(city, map, cand.col, cand.row, false, ignore)) continue;
     const k = tileKey(cand.col, cand.row);
     const alreadyRoad = city.roads.has(k);
     const insideOtherLot = !alreadyRoad && city.lotReservation.has(k);
@@ -751,7 +757,7 @@ function findRoadPath(
       if (closed.has(nk)) continue;
 
       const isExistingRoad = city.roads.has(nk);
-      if (!isExistingRoad && !canWalkRoad(city, map, nc, nr, options.allowBridge)) continue;
+      if (!canStepTo(city, map, cur, { col: nc, row: nr }, isExistingRoad, options.allowBridge)) continue;
       if (!isExistingRoad && options.avoidLots && city.lotReservation.has(nk)) continue;
 
       const spec = map.kindSpecAt(nc, nr);
@@ -839,6 +845,97 @@ function connectDoorToRoads(
     setRoadTile(city, map, pt.col, pt.row, { trafficDelta });
   }
   return true;
+}
+
+/* A water tile is open to a street only on the city's bridge, and only where the search allows bridges (#1985). */
+function waterOpen(city: CityState, allowBridge: boolean, col: number, row: number): boolean {
+  return allowBridge && onBridge(city.bridge ?? null, col, row);
+}
+
+/* The land a street can reach from the city's centre, by terrain alone: over ground a road may be laid on, and over
+   water only on the city's bridge. With no bridge a building on the far bank could never be joined to the streets, so
+   the lot search keeps to this land. Kept per map and bridge, as neither changes. */
+const landReachKept = new WeakMap<GeneratedWorldMap, Map<string, ReadonlySet<string>>>();
+
+/* Whether a street could cross a tile by terrain alone: ground a road may be laid on, or water on the bridge. */
+function landOpen(map: GeneratedWorldMap, site: BridgeSite | null, col: number, row: number): boolean {
+  const spec = map.kindSpecAt(col, row);
+  if (!spec) return false;
+  return spec.liquid ? onBridge(site, col, row) : spec.walkable || spec.excavatable === true;
+}
+
+function landReach(city: CityState, map: GeneratedWorldMap): ReadonlySet<string> {
+  const site = city.bridge ?? null;
+  const which = `${city.center.col},${city.center.row}|${site ? `${site.axis},${site.col},${site.row},${site.length}` : 'none'}`;
+  const kept = landReachKept.get(map) ?? new Map<string, ReadonlySet<string>>();
+  landReachKept.set(map, kept);
+  const known = kept.get(which);
+  if (known) return known;
+  const reach = new Set<string>([tileKey(city.center.col, city.center.row)]);
+  const queue: TileCoord[] = [city.center];
+  for (let i = 0; i < queue.length; i++) {
+    for (const [dc, dr] of CARDINAL_DIRS) {
+      const next = { col: queue[i]!.col + dc, row: queue[i]!.row + dr };
+      const k = tileKey(next.col, next.row);
+      if (reach.has(k) || !landOpen(map, site, next.col, next.row)) continue;
+      reach.add(k);
+      queue.push(next);
+    }
+  }
+  kept.set(which, reach);
+  return reach;
+}
+
+/* A building's door, kept only where the streets can reach it. */
+const reachableDoor = (reach: ReadonlySet<string>, door: TileCoord | null): TileCoord | null =>
+  door && reach.has(tileKey(door.col, door.row)) ? door : null;
+
+/* A road search may step from one tile to the next: onto or off the bridge only at its ends, and onto a tile that is
+   a road already or one a road may be laid on. */
+function canStepTo(city: CityState, map: GeneratedWorldMap, from: TileCoord, to: TileCoord, isExistingRoad: boolean, allowBridge: boolean): boolean {
+  if (!bridgeStepAllowed(city.bridge ?? null, from, to)) return false;
+  return isExistingRoad || canWalkRoad(city, map, to.col, to.row, allowBridge);
+}
+
+const bridgeOption = (options?: { bridge?: BridgeSite | null }): BridgeSite | null => options?.bridge ?? null;
+
+/* Lays the street over the city's bridge, its two bank tiles included, unless a building stands on any of it; the
+   stitching that follows joins it to the streets. */
+function layBridge(city: CityState, map: GeneratedWorldMap): void {
+  if (!city.bridge) return;
+  const tiles = [...bridgeEnds(city.bridge), ...bridgeTiles(city.bridge)];
+  if (tiles.some(t => city.footprintOccupant.has(tileKey(t.col, t.row)))) return;
+  for (const t of tiles) setRoadTile(city, map, t.col, t.row, { trafficDelta: 4, minTier: 'dirt' });
+}
+
+/* Puts the bridge rule on a city built or saved before it, or under other art (#1985): a street on water stays only
+   where the bridge is, and with a bridge its street is laid and joined to the others. The same city is returned. */
+export function applyBridgeRule(city: CityState, map: GeneratedWorldMap, bridge: BridgeSite | null): CityState {
+  city.bridge = bridge;
+  for (const [k, road] of city.roads) {
+    if (map.isLiquid(road.col, road.row) && !onBridge(bridge, road.col, road.row)) city.roads.delete(k);
+  }
+  if (bridge && bridgeTiles(bridge).some(t => !city.roads.has(tileKey(t.col, t.row)))) {
+    layBridge(city, map);
+    stitchDisconnectedRoadArcs(city, map);
+  }
+  city.metrics.bridgeTiles = [...city.roads.values()].filter(road => road.bridge).length;
+  return city;
+}
+
+/* Each map's bridge site, worked out once. */
+const mapBridges = new WeakMap<GeneratedWorldMap, BridgeSite | null>();
+function bridgeOfMap(map: GeneratedWorldMap): BridgeSite | null {
+  if (!mapBridges.has(map)) mapBridges.set(map, bridgeSite(map));
+  return mapBridges.get(map)!;
+}
+
+/* The shown city keeps the map's bridge while the pack's bridge pictures are all there, and has none before they are
+   or after they go (#1985): the street over it is laid or taken away only when that changes. */
+export function keepMapBridge(state: Readonly<{ city: CityState }> | null, map: GeneratedWorldMap | undefined, bridgeArt: boolean): void {
+  if (!state || !map) return;
+  const site = bridgeArt ? bridgeOfMap(map) : null;
+  if (!sameBridge(state.city.bridge, site)) applyBridgeRule(state.city, map, site);
 }
 
 /* Reconnects any disconnected road arcs (e.g. liquid-split converted old wall segments) into the main network. */
@@ -949,7 +1046,7 @@ export function refreshCityMetrics(city: CityState): void {
 /* Creates a new city centered on the generated map's startCenter, with initial residence and starter avenue. */
 export function createCity(
   map: GeneratedWorldMap,
-  options?: { orderChaos?: number; outerWallMode?: OuterWallMode; buildingLayout?: BuildingLayoutRules },
+  options?: { orderChaos?: number; outerWallMode?: OuterWallMode; buildingLayout?: BuildingLayoutRules; bridge?: BridgeSite | null },
 ): CityState {
   const orderChaos = Math.max(0, Math.min(1, options?.orderChaos ?? 0.5));
   const outerWallMode: OuterWallMode = options?.outerWallMode ?? 'ring';
@@ -961,6 +1058,7 @@ export function createCity(
     orderChaos,
     outerWallMode,
     center: { col: map.startCenter.col, row: map.startCenter.row },
+    bridge: bridgeOption(options),
     stepCounter: 0,
     wallGeneration: 0,
     wallHull: null,
@@ -1109,6 +1207,7 @@ export function createCity(
     }
   }
 
+  layBridge(city, map);
   stitchDisconnectedRoadArcs(city, map);
   bindCityMap(city, map);
   refreshCityMetrics(city);
@@ -1218,6 +1317,7 @@ export function placeBuilding(
 
   /* Progressive search rings around the role anchor so nothing ever jumps to the far edge of the map. */
   const rings = req.kind === 'supply' ? [18, 36, 58] : [12, 24, 40, 58, 76];
+  const reach = landReach(city, map);
   const dept = req.departmentId
     ? city.buildings.find(b => b.kind === 'department' && b.departmentId === req.departmentId)
     : undefined;
@@ -1274,7 +1374,7 @@ export function placeBuilding(
           const lot = lotBehind(col, row, spanCol, spanRow, lotC, lotR);
 
           const nearestRoad = findNearestRoadTile(city, { col, row });
-          const door = pickDoorForFootprint(city, map, col, row, spanCol, spanRow, nearestRoad, rule);
+          const door = reachableDoor(reach, pickDoorForFootprint(city, map, col, row, spanCol, spanRow, nearestRoad, rule));
           if (!door) continue;
 
           const distAnchor = Math.hypot(col - anchor.col, row - anchor.row);
@@ -1661,7 +1761,23 @@ export function densifyCity(
   return { upgraded, merged };
 }
 
+/* Whether a street could reach the door a building would have at (toCol, toRow): the lot search's rule (landReach), so
+   that a move never takes a building to land the streets cannot come to, as the far bank of a map with no bridge. The
+   building's own footprint, which it leaves, does not block that door. */
+function movedDoorReached(city: CityState, map: GeneratedWorldMap, building: CityBuilding, toCol: number, toRow: number): boolean {
+  const nearestRoad = findNearestRoadTile(city, { col: toCol, row: toRow });
+  const door = pickDoorForFootprint(city, map, toCol, toRow, building.spanCol, building.spanRow, nearestRoad, city.buildingLayout[building.kind], building.id);
+  return reachableDoor(landReach(city, map), door) !== null;
+}
+
+/* Whether a building may be moved to (toCol, toRow): its footprint fits there and a street can reach its door. The map's
+   preview and the move itself ask the same, so a move the map shows as possible is never dropped when it is applied. */
+export function canMoveBuildingTo(city: CityState, map: GeneratedWorldMap, building: CityBuilding, toCol: number, toRow: number): boolean {
+  return canPlaceFootprint(city, map, toCol, toRow, building.spanCol, building.spanRow, building.id, true) && movedDoorReached(city, map, building, toCol, toRow);
+}
+
 /* Relocation by God's Word: creates a pending request without moving the building until the task is accepted. */
+
 export function requestRelocation(
   city: CityState,
   buildingId: string,
@@ -1672,9 +1788,7 @@ export function requestRelocation(
   const map = mapRef ?? (city as CityState & { _map?: GeneratedWorldMap })._map;
   const building = city.buildings.find(b => b.id === buildingId);
   if (!building || !map) return null;
-  if (!canPlaceFootprint(city, map, toCol, toRow, building.spanCol, building.spanRow, building.id, true)) {
-    return null;
-  }
+  if (!canMoveBuildingTo(city, map, building, toCol, toRow)) return null;
 
   const rel: CityRelocation = {
     id: `reloc-${city.relocations.length + 1}`,
@@ -1751,6 +1865,7 @@ export function advanceRelocationStep(
           building.spanRow,
           nearestRoad,
           city.buildingLayout[building.kind],
+          building.id,
         ) ?? {
           col: rel.toCol,
           row: rel.toRow + building.spanRow,

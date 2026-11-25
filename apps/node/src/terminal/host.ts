@@ -23,7 +23,7 @@ import { eraseKeys, flat, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, type
 import { ViewSessions } from './views.js';
 import { SessionPrivacy } from './privacy.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
-import { ProgramWatch, READY, REPORT_MS, completionText, programState, type Pending } from './program-state.js';
+import { ProgramWatch, READY, REPORT_MS, completionText, idleScreen, programState, type Pending } from './program-state.js';
 import type { LaunchSpec, TermProgram } from './programs.js';
 import { agyTranscript, prepareAgy } from '../providers/antigravity-terminal.js';
 import { acceptClaudeDialogs, claudeToolsFile, claudeTranscript, writeClaudeTools } from '../providers/claude-terminal.js';
@@ -212,6 +212,9 @@ type Agent = {
   tally: TurnTally;
   /* The final planner response has no tools; earlier text is not the answer a stop waits for. */
   agyAnswered: boolean;
+  /* Screen shown when the current Antigravity invocation began, and consecutive completed idle looks since. */
+  agyStartScreen: string | null;
+  agyIdlePolls: number;
   /* Diagnostics visible before this invocation cannot classify its failure. */
   agyCursor: RecordingCursor | null;
   /* agy refused its sign-in token (401), the program starts anew with the saved sign-in, and no turn has ended since: a second
@@ -502,6 +505,7 @@ export class TerminalHost {
     this.drain(a);
     const turn = a.turn, instance = a.instance;
     const screen = await this.opts.tmux.screen(a.name, 0, true);
+    this.releaseUnboundAgy(a, screen);
     const input = inputOf(a.program.kind, screen);
     const completion = await this.screenCompleted(a, screen);
     if (a.turn !== turn || a.instance !== instance) return null;
@@ -644,7 +648,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, completionStart: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyStartScreen: null, agyIdlePolls: 0, agyCursor: null, completionStart: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
       this.agents.set(key, a);
     }
     return a;
@@ -777,6 +781,7 @@ export class TerminalHost {
     if (starting && a.starting === starting) a.starting = null;
     if (a.turn === turn) {
       this.bridge.setToken(job.key, null);
+      this.clearTurnCalls(a);
       a.turn = null;
       a.ended = null;
     }
@@ -909,13 +914,34 @@ export class TerminalHost {
     const { watch, look } = this.observeProgram(a, job.input.jobId);
     this.drain(a);
     while (a.busy && !job.input.signal?.aborted) {
-      if (!(await this.opts.tmux.alive(a.name))) break;
+      if (!(await this.agyTurnStillBlocks(a))) break;
       await this.reportProgram(a, watch, look);
       await sleep(this.pollMs);
       this.drain(a);
     }
     await a.settling;
     await a.cancelling;
+  }
+
+  private agyUnboundReady(a: Agent, screen: string): boolean {
+    if (a.program?.kind !== 'antigravity' || a.turn || a.settling) return false;
+    return !a.unopened.length && agyWaits(screen);
+  }
+
+  private releaseUnboundAgy(a: Agent, screen: string): boolean {
+    if (!this.agyUnboundReady(a, screen)) {
+      if (!a.turn) a.agyIdlePolls = 0;
+      return false;
+    }
+    if (++a.agyIdlePolls < 2) return false;
+    this.clearTurnCalls(a);
+    a.busy = false;
+    return true;
+  }
+
+  private async agyTurnStillBlocks(a: Agent): Promise<boolean> {
+    if (!(await this.opts.tmux.alive(a.name))) return false;
+    return !this.releaseUnboundAgy(a, await this.opts.tmux.screen(a.name, 0, true));
   }
 
   /* What the agent is told before its turn. The conversation from before reaches a program that starts now; it is not part
@@ -1546,6 +1572,7 @@ export class TerminalHost {
     this.intentional(a, 'cancelled');
     if (!a.turn?.calledOff) await this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Escape'));
     await Promise.race([ended.promise, sleep(STOP_WAIT_MS)]);
+    this.clearTurnCalls(a);
     a.busy = false;
     return await this.failedTurn(a, job, 'cancelled');
   }
@@ -1570,9 +1597,44 @@ export class TerminalHost {
     /* A session gone since the last look shows no screen; whoever waits on this turn hears it is gone. */
     const screen = await this.opts.tmux.screen(a.name, 0, true).catch(() => null);
     if (screen === null || a.turn !== turn) return;
-    watch.look(now, screen, call, this.programRunning(a), a.signAt, a.retry);
+    this.observeAgyIdle(a, screen);
+    look.call = this.pendingCall(a);
+    watch.look(now, screen, look.call, this.programRunning(a), a.signAt, a.retry);
     if (this.atInterruption(a, screen)) this.interrupted(a);
     this.agyFailed(a);
+  }
+
+  private clearTurnCalls(a: Agent): void {
+    for (const id of a.calls.keys()) a.closedCalls.add(id);
+    a.calls.clear();
+    a.agyIdlePolls = 0;
+    a.retry = null;
+    this.clearQuestion(a);
+    a.question = null;
+  }
+
+  private clearIdleTurnCalls(a: Agent): void {
+    if (!a.busy) this.clearTurnCalls(a);
+  }
+
+  private agyTurnCalm(a: Agent): boolean {
+    if (a.program?.kind !== 'antigravity' || !this.stoppable(a)) return false;
+    return a.typing == null && !a.settling && !this.overIn(a);
+  }
+
+  private agyCompletedAtIdle(a: Agent, screen: string): boolean {
+    if (!this.agyTurnCalm(a) || !idleScreen('antigravity', screen)) return false;
+    return screen !== a.agyStartScreen || a.agyAnswered;
+  }
+
+  private observeAgyIdle(a: Agent, screen: string): void {
+    if (!this.agyCompletedAtIdle(a, screen)) {
+      if (a.turn) a.agyIdlePolls = 0;
+      return;
+    }
+    if (++a.agyIdlePolls < 2) return;
+    this.clearTurnCalls(a);
+    this.agyStopped(a);
   }
 
   /* agy's turn is under way from when its prompt is on the way, whether agy still works on other words or is about to take it:
@@ -1788,6 +1850,8 @@ export class TerminalHost {
     a.programTurnId = undefined;
     a.calls.clear();
     a.closedCalls.clear();
+    a.agyStartScreen = null;
+    a.agyIdlePolls = 0;
     a.question = null;
     a.retry = null;
     a.failure = a.apiError = null;
@@ -1841,9 +1905,7 @@ export class TerminalHost {
   private notBusyAfter(a: Agent, end: TurnEnd): void {
     if (a.pressed) a.pressed.until ??= Date.now() + UNHEARD_MS;
     a.busy = false;
-    a.retry = null;
-    a.calls.clear();
-    a.question = null;
+    this.clearTurnCalls(a);
     a.stopped = end.status === 'stopped';
     a.failure = end.failure ?? null;
   }
@@ -2608,6 +2670,7 @@ export class TerminalHost {
     if (session) this.follow(a, session);
     if (data.invocationNum !== 0) {
       a.agyAnswered = false;
+      a.agyIdlePolls = 0;
       a.busy = true;
       return;
     }
@@ -2634,9 +2697,12 @@ export class TerminalHost {
     await a.settling;
     if (a.program?.kind === 'antigravity') {
       a.agyAnswered = false;
+      a.agyIdlePolls = 0;
       /* Invocation 0 waits here before agy dispatches the message, including during a recorder append or trim. */
       a.agyCursor = await this.opts.tmux.programCursor(a.name);
-      a.interruptions = interruptionCount(await this.opts.tmux.screen(a.name, 0, true));
+      const screen = await this.opts.tmux.screen(a.name, 0, true);
+      a.agyStartScreen = screen;
+      a.interruptions = interruptionCount(screen);
     }
     a.busy = true;
     /* A message queued in the program starts its own turn after the previous one ends. */
@@ -2773,6 +2839,7 @@ export class TerminalHost {
   private notOpened(a: Agent, turn: Turn): void {
     if (a.turn !== turn) return;
     this.endWords(a, turn);
+    this.clearIdleTurnCalls(a);
     a.turn = null;
   }
 
@@ -3067,9 +3134,8 @@ export class TerminalHost {
 
   async restart(key: string, jobId: string, note: string): Promise<{ ok: boolean; reason: string | null }> {
     const a = this.agents.get(key);
-    if (a && !a.restarting) this.drain(a);
-    const reason = restartRefusal(restartEvidence(a), jobId, Date.now());
-    if (reason) return { ok: false, reason };
+    const early = await this.beforeRestart(a, jobId);
+    if (early) return early;
     if (!canRestart(a)) return { ok: false, reason: 'The program launch is not available.' };
     try {
       return await this.restartProgram(a, a.launch, a.turn, jobId, note);
@@ -3078,6 +3144,42 @@ export class TerminalHost {
     } finally {
       a.restarting = false;
     }
+  }
+
+  private drainBeforeRestart(a: Agent | undefined): void {
+    if (a && !a.restarting) this.drain(a);
+  }
+
+  private async beforeRestart(a: Agent | undefined, jobId: string): Promise<{ ok: boolean; reason: string | null } | null> {
+    this.drainBeforeRestart(a);
+    const unbound = a ? await this.restartUnbound(a, jobId) : null;
+    if (unbound) return unbound;
+    const reason = restartRefusal(restartEvidence(a), jobId, Date.now());
+    return reason ? { ok: false, reason } : null;
+  }
+
+  private waitingBehindUnbound(a: Agent, jobId: string): boolean {
+    return !a.turn && a.sinceRun.has(jobId) && a.queuedTurns > 0;
+  }
+
+  private async unboundInputRefusal(a: Agent, jobId: string): Promise<string | null> {
+    if (a.question) return 'The program is asking a person.';
+    if (!a.launch) return null;
+    const ok = await this.inputMayGo(a, { ...a.launch.job, input: { ...a.launch.job.input, jobId } });
+    return ok ? null : "The program's input holds words Hornhoof could not keep.";
+  }
+
+  private async restartUnbound(a: Agent, jobId: string): Promise<{ ok: boolean; reason: string | null } | null> {
+    if (!this.waitingBehindUnbound(a, jobId)) return null;
+    const refusal = await this.unboundInputRefusal(a, jobId);
+    if (refusal) return { ok: false, reason: refusal };
+    this.intentional(a, 'restart');
+    this.clearTurnCalls(a);
+    a.hash = null;
+    a.busy = false;
+    await this.opts.tmux.stop(a.name).catch(() => {});
+    this.log(`Agent ${a.key} (${a.program?.kind}): cleared unbound program state for job ${jobId}.`);
+    return { ok: true, reason: null };
   }
 
   /* The agent moved to another plan: its program here goes once it is idle, and first if it is already. A turn sent here before it
@@ -3243,6 +3345,7 @@ export class TerminalHost {
     /* A session that is gone took its program with it; the turn ends all the same. */
     a.cancelling = this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Escape')).catch(() => {});
     await a.cancelling;
+    this.clearTurnCalls(a);
     a.busy = false;
   }
 

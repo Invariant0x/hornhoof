@@ -1,7 +1,5 @@
 ---
 id: fin-work-pipeline
-title: { en: "Finance pipeline", ru: "Конвейер финансов" }
-description: { en: "Where finance checks item by item, in a batch, by sample and by code; read it when laying out work or changing a check.", ru: "Где финансы проверяют по штуке, пакетом, выборкой и кодом; читай, когда раздаешь работу или меняешь проверку." }
 kind: procedure
 sources: []
 ---

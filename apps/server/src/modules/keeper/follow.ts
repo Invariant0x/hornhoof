@@ -1,4 +1,5 @@
 import { createReadStream, statfsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { DbDoor, composeAllowed } from '../../net/db-door.js';
 import { PeerDoor } from '../../net/peer-door.js';
@@ -8,8 +9,10 @@ import { peerClientFor, peerClientId, type PeerServices } from '../link/peer-cli
 import type { Route } from '../link/relay.js';
 import { holdThroughOneEmptyRead, TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
 import type { BundleSecrets } from '../backups/bundle.js';
+import { BundleStore } from '../backups/store.js';
 import type { MakerView } from '../backups/types.js';
 import { ageKey } from './age-key.js';
+import { BUNDLES_DIR } from './backups.js';
 import { Beats, type Beat } from './beats.js';
 import { CopyMaker, NEXT_DB, type CopyMakerOptions, type CopyReport } from './copy.js';
 import { KEEPER_PORTS } from './doors.js';
@@ -154,10 +157,12 @@ export class FollowKeeper {
     this.clocks = opts.clocks ?? (() => ({ wall: Date.now(), mono: performance.now() }));
     this.asksRelay = Boolean(opts.relay ?? opts.watcher?.relay);
     this.copySql = opts.sql(COPY_DB);
+    const bundles = new BundleStore(join(config.dir, BUNDLES_DIR));
     this.saver = opts.secrets
       ? new LedSaver({
           dir: config.dir,
           controlDir: config.controlDir,
+          bundles,
           sql: this.copySql,
           key: machineKey(config.dir),
           held: () => this.worker.parts().certificates.current(),
@@ -185,13 +190,14 @@ export class FollowKeeper {
       password: replicaPassword(config.secret),
       diskFree: () => this.diskFree(),
       updating: () => this.updating.holds(),
-      ...(saver ? { saver: { tick: () => saver.tick(), done: () => saver.done(), state: () => saver.state(), forget: () => saver.forget() } } : {}),
+      ...(saver ? { saver: { tick: applied => saver.tick(applied), done: () => saver.done(), state: () => saver.state(), forget: () => saver.forget() } } : {}),
       log,
       now: opts.now,
       ...opts.maker,
     });
     this.worker = new WorkerKeeper({
       config,
+      bundles,
       frontHost: opts.frontHost,
       host: opts.host,
       log,

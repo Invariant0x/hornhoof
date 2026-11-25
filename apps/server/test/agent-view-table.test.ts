@@ -2,11 +2,12 @@ import { writeFileSync } from 'node:fs';
 import { eq } from 'drizzle-orm';
 import type { FastifyServerOptions, RouteOptions } from 'fastify';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { attachments, improvements, jobs, machines, tasks, testParts, testRuns, turns, vaultEntries, vaultLog } from '../src/db/schema.js';
+import { attachments, companies, improvements, jobs, machines, tasks, testParts, testRuns, turns, vaultEntries, vaultLog } from '../src/db/schema.js';
 import { addNote, companyBook, departmentBook } from '../src/modules/notebook/book.js';
 import { ask } from '../src/modules/tasks/engine.js';
 import { appFixture, as, testApp } from './helpers.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
+import { stored } from './files-fixture.js';
 
 const captured = vi.hoisted(() => [] as RouteOptions[]);
 vi.mock('fastify', async importOriginal => {
@@ -61,7 +62,7 @@ const aRepeated = async (c: AclCompany, agent: Crew): Promise<Call> => {
   return { method: 'POST', url: '/api/feedback/repeats', payload: { improvement: finding!.id } };
 };
 const aPicture = async (c: AclCompany, agent: Crew): Promise<Call> => {
-  const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew[agent].id, personId: c.ids.ceo, name: 'p.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+  const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew[agent].id, personId: c.ids.ceo, name: 'p.png', mediaType: 'image/png', sha256: await stored(c.db, PNG, c.app.ctx.config), size: PNG.length }).returning();
   return { method: 'GET', url: `/api/attachments/${picture!.id}` };
 };
 
@@ -129,15 +130,18 @@ const CASES: { name: string; viewer: Viewer; agent: Crew; closed: boolean }[] = 
 
 /* Lists, with what each person gets. company: it names every employee and the work of the company, which everyone of it
    sees, and keeps only the words of the agents a person does not open. */
-type Listed = { route: string; url: (c: AclCompany) => string; statuses: Partial<Record<Viewer, number>>; company?: boolean };
+/* theme: the company's theme for the call, for a route that answers only on a theme with a world (#1973). */
+type Listed = { route: string; url: (c: AclCompany) => string; statuses: Partial<Record<Viewer, number>>; company?: boolean; theme?: string };
 const ALL_OK = { ann: 200, olga: 200, wes: 200, clara: 200, ceo: 200 };
 const WHOLE_ONLY = { ann: 403, olga: 403, wes: 200, clara: 200, ceo: 200 };
 /* Ann has App, a product of Development, and not the department itself: for her it does not exist, and its notebook is closed. */
 const DEPARTMENT_ITSELF = { ann: 404, olga: 200, wes: 200, clara: 200, ceo: 200 };
 const LISTS: Listed[] = [
   { route: 'GET /api/org', url: () => '/api/org', statuses: ALL_OK, company: true },
-  { route: 'GET /api/world/state', url: () => '/api/world/state', statuses: ALL_OK, company: true },
+  { route: 'GET /api/world/state', url: () => '/api/world/state', statuses: ALL_OK, company: true, theme: 'egypt' },
   { route: 'GET /api/world/theme', url: () => '/api/world/theme', statuses: ALL_OK, company: true },
+  { route: 'GET /api/world/rewards', url: () => '/api/world/rewards', statuses: ALL_OK, company: true },
+  { route: 'GET /api/world/rewards/showcase', url: () => '/api/world/rewards/showcase', statuses: ALL_OK, company: true },
   { route: 'GET /api/tasks', url: c => `/api/tasks?status=all&department=${c.dev.id}`, statuses: ALL_OK, company: true },
   { route: 'GET /api/requests', url: () => '/api/requests', statuses: ALL_OK },
   { route: 'GET /api/wait-cards', url: () => '/api/wait-cards', statuses: ALL_OK },
@@ -176,6 +180,11 @@ const ELSEWHERE: Record<string, string> = {
   'GET /api/stream': 'agent-view-stream.test.ts: filtered per message',
   'PUT /api/departments/:id/inbox-mode': "inbox.test.ts: the department's owner, the CEO or the CEO delegate, 403 for another one, 404 for a product",
   'PUT /api/company/inbox-mode': 'inbox.test.ts: the CEO or the CEO delegate alone, 403 for everyone else',
+  'GET /api/company/file-store': "file-network.test.ts: the CEO or the orchestrator for him alone, 403 for a person of the whole company and a head acting for the CEO; the store's sizes, no agent",
+  'PATCH /api/company/file-store': 'file-network.test.ts: the CEO or the orchestrator for him alone, 403 for a person of the whole company and a head acting for the CEO',
+  'GET /api/files/move': 'file-move-routes.test.ts: the CEO or the orchestrator for him alone, 403 for a person of the whole company and a head acting for the CEO; counts and digests, no agent',
+  'POST /api/files/move/approve': 'file-move-routes.test.ts: the CEO or the orchestrator for him alone, 403 for a person of the whole company and a head acting for the CEO',
+  'POST /api/company/file-store/backup/restore': "file-backup.test.ts: the CEO or the orchestrator for him alone, 403 for a person of the whole company and a head acting for the CEO; the company's own files, a dry run first",
   'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
   'PUT /api/tasks/:id/paused': 'task-pause.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
   'POST /api/tasks/:id/close': 'orchestrator-close.test.ts: the orchestrator alone, through its own calls; 403 for every person, the CEO too, and for a head',
@@ -250,7 +259,7 @@ const NO_AGENT_DATA: string[] = [
   'GET /api/map/layout', 'PATCH /api/map/layout', 'DELETE /api/map/layout', 'PUT /api/world/layout',
   'PATCH /api/machines/:id', 'GET /api/machines/:id/connections', 'POST /api/machines/:id/core', 'POST /api/machines/:id/disconnect', 'PUT /api/machines/:id/priority', 'POST /api/machines/:id/move', 'DELETE /api/machines/:id/move', 'POST /api/machines/:id/plans', 'POST /api/machines/:id/programs/update', 'POST /api/machines/command',
   'GET /api/me/key', 'PUT /api/me/key',
-  'GET /api/backups', 'POST /api/backups/recovery', 'GET /api/backups/recovery', 'GET /api/backups/:id/warning', 'POST /api/backups/:id/restore', 'POST /api/backups/kept/:name/leave', 'GET /api/merges/:id/conflicts', 'POST /api/merges/pick', 'GET /api/network/backups', 'POST /api/network/backups', 'GET /api/network/switch', 'GET /api/network/switched', 'GET /api/network/question', 'POST /api/network/question/go-on', 'POST /api/network/question/wait', 'POST /api/network/certificate', 'GET /api/network/computer', 'POST /api/network/computer/:id', 'POST /api/network/join', 'GET /api/network/peers', 'POST /api/network/renew', 'POST /api/network/report', 'POST /api/network/secrets',
+  'GET /api/backups', 'POST /api/backups/recovery', 'GET /api/backups/recovery', 'GET /api/backups/:id/warning', 'POST /api/backups/:id/restore', 'POST /api/backups/kept/:name/leave', 'GET /api/merges/:id/conflicts', 'POST /api/merges/pick', 'GET /api/network/backups', 'POST /api/network/backups', 'GET /api/network/files', 'POST /api/network/files', 'GET /api/network/switch', 'GET /api/network/switched', 'GET /api/network/question', 'POST /api/network/question/go-on', 'POST /api/network/question/wait', 'POST /api/network/certificate', 'GET /api/network/computer', 'POST /api/network/computer/:id', 'POST /api/network/join', 'GET /api/network/peers', 'POST /api/network/renew', 'POST /api/network/report', 'POST /api/network/secrets',
   'GET /api/nodes/commands', 'POST /api/nodes/commands/:id/hide', 'POST /api/nodes/join', 'GET /api/nodes/socket', 'POST /api/nodes/update', 'DELETE /api/nodes/update',
   'POST /api/notebook', 'PATCH /api/notebook/:number', 'DELETE /api/notebook/:number',
   'GET /api/parts/:id/files/:name', 'PUT /api/parts/:id/files/:name',
@@ -330,8 +339,9 @@ describe('one thing of one agent', () => {
 });
 
 describe('every list', () => {
-  it.each(LISTS)('$route shows each person only what they may see', async ({ route, url, statuses, company }) => {
+  it.each(LISTS)('$route shows each person only what they may see', async ({ route, url, statuses, company, theme }) => {
     const c = await busy();
+    if (theme) await c.db.update(companies).set({ theme }).where(eq(companies.id, c.companyId));
     const got: string[] = [];
     for (const [viewer, status] of Object.entries(statuses) as [Viewer, number][]) {
       const res = await c.get(url(c), c.tokens[viewer]);

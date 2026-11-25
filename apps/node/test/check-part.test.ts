@@ -181,3 +181,16 @@ it.each(['progress', 'silence', 'upper limit'] as const)('applies the test part 
   else expect(result).toMatchObject({ ok: false, error: scenario === 'silence' ? 'silent' : 'upper_limit', log: expect.stringContaining(scenario) });
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it.each([
+  ['a whole suite as work', { command: 'npm test' }],
+  ["the product's suites as work", { command: '', environment: {} as never }],
+])('ends a part refused before it starts as refused, never failed: %s', async (_name, change) => {
+  const dir = mkdtempSync(join(tmpdir(), 'hh-check-part-'));
+  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+  const runPart = vi.fn(runTests);
+  const result = await runQueuedPart({ ...part, ...change }, runPart, { dir, hidden: [], user: null }, () => {}, () => {});
+  expect(result).toMatchObject({ type: 'tests.done', partId: part.partId, ok: false, exitCode: null, error: 'refused', commit: null, log: expect.stringContaining('A refusal is not a result.') });
+  expect(runPart).not.toHaveBeenCalled();
+  expect(spawn).not.toHaveBeenCalled();
+});

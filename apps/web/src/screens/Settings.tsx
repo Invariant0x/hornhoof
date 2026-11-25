@@ -16,6 +16,7 @@ import { Themes } from '../ui/Themes';
 import { Vault, VAULT_PATH } from '../ui/Vault';
 import { Backups } from './Backups';
 import { useSteady } from './Feedback';
+import { FileCopies } from './FileCopies';
 import { unavailableFailure } from './RouteUnavailable';
 
 /* The parts of the window in their order: Profile, then the four groups. Appearance & language has no group of its own in
@@ -228,12 +229,14 @@ function CompanyLink() {
   );
 }
 
-/* Company & access: for a person who sees the whole company the public link, and for the CEO alone the company theme and backups. */
+/* Company & access: for a person who sees the whole company the public link, and for the CEO alone the company theme, how
+   many machines keep each file, and backups. */
 function CompanyGroup({ me, onCompanyTheme }: { me: Me; onCompanyTheme?: (theme: string) => void }) {
   return (
     <div className="settings-group">
       {me.person.scopeKind === 'company' && <CompanyLink />}
       {me.person.isOwner && <Themes onCompanyTheme={onCompanyTheme} />}
+      {me.person.isOwner && <FileCopies />}
       {me.person.isOwner && <Backups />}
     </div>
   );

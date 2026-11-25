@@ -5,6 +5,7 @@
 import type { ResidentRoleClass, RoleArchetype } from '@hornhoof/protocol/world';
 import { validateArtCatalog, type WorldArtCatalog } from './art';
 import type { TileCoord } from './coords';
+import { text } from './pack-text';
 
 export type EngineKind = 'isometric-2d' | '3d';
 export type OuterWallMode = 'ring' | 'none';
@@ -26,12 +27,13 @@ export type RoleHeadgearKind = 'none' | 'cap' | 'hood' | 'helm' | 'crown' | 'cir
 
 export type PackRoleLookSpec = Readonly<{
   id: string;
-  label: Readonly<{ en: string; ru: string }>;
-  tunicColor: string;
-  trimColor: string;
+  label: string;
   prop: RolePropKind;
   headgear: RoleHeadgearKind;
   insignia?: boolean;
+  /* Its prop is a large item held in one hand or on one shoulder (a staff, a banner, a jar): a mirrored row would move
+     it to the other side, so its walk is drawn in the 4 diagonals NE, SE, SW and NW and its idle in SE and SW (order v3 4.4). */
+  largeItem?: boolean;
 }>;
 
 /* Building kinds the city engine places; a pack's layout rules and stage counts refer to them. */
@@ -66,7 +68,7 @@ export type BuildingLayoutRules = Readonly<Partial<Record<CityBuildingKind, Buil
 export type AltarAnchorSpec = Readonly<{
   offsetCol: number;
   offsetRow: number;
-  label?: Readonly<{ en: string; ru: string }>;
+  label?: string;
 }>;
 
 export const CONSTRUCTION_STAGE_IDS = [
@@ -104,7 +106,7 @@ export type WorkSlotAction =
 export type ConstructionStageSpec = Readonly<{
   stage: number;
   id: ConstructionStageId;
-  label: Readonly<{ en: string; ru: string }>;
+  label: string;
   heightRatio: number;
   openInteriorVisible: boolean;
   hasScaffolding: boolean;
@@ -114,21 +116,6 @@ export type ConstructionStageSpec = Readonly<{
   hasFinishing: boolean;
   hasUpgrades: boolean;
   defaultLoops: readonly BuildingLoopKind[];
-}>;
-
-export type ConstructionPaletteSpec = Readonly<{
-  scaffoldWood: string;
-  rampEarth: string;
-  dustColor: string;
-  smokeColor: string;
-  waterColor: string;
-  awningPrimary: string;
-  awningSecondary: string;
-  capstoneColor: string;
-  celebrationPrimary: string;
-  celebrationSecondary: string;
-  statueBaseColor: string;
-  statueFinishedColor: string;
 }>;
 
 export type Direction8 = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
@@ -332,7 +319,7 @@ export type PlantRange = Readonly<{ min: number; max: number }>;
 /* Pack-owned plant kind: what it looks like, where it may grow and how the wind moves it. */
 export type PlantKindSpec = Readonly<{
   id: string;
-  label: Readonly<{ en: string; ru: string }>;
+  label: string;
   /* Procedural silhouette, used when no art is supplied. */
   shape: PlantShape;
   /* Painted variants; when they load they replace the procedural silhouette. */
@@ -402,7 +389,7 @@ export type LightingSpec = Readonly<{
 /* Pack-owned terrain tile category with gameplay rules and legend metadata. */
 export type TerrainKindSpec = Readonly<{
   id: string;
-  label: Readonly<{ en: string; ru: string }>;
+  label: string;
   color: string;
   materialId: string;
   buildable: boolean;
@@ -442,7 +429,7 @@ export type PreparedTerrainRecipe = Readonly<{
 /* Pack-owned procedural world generation recipe. */
 export type TerrainRecipeSpec = Readonly<{
   id: string;
-  name: Readonly<{ en: string; ru: string }>;
+  name: string;
   tileKinds: readonly TerrainKindSpec[];
   materialIds: readonly string[];
   minBuildableRatio: number;
@@ -491,7 +478,7 @@ export type WorldEngineParamsSpec = Readonly<{
 
 export type WorldPackManifest = Readonly<{
   id: string;
-  name: Readonly<{ en: string; ru: string }>;
+  name: string;
   engine: EngineKind;
   /* Single map dimension N for an N x N diamond tile grid. */
   mapSize: number;
@@ -517,7 +504,6 @@ export type WorldPackManifest = Readonly<{
   classFallbackLooks?: Readonly<Record<ResidentRoleClass, PackRoleLookSpec>>;
   /* Pack-owned Stage 6 construction stage sequence (1..10) and visual loop palette. */
   constructionStages?: readonly ConstructionStageSpec[];
-  constructionPalette?: ConstructionPaletteSpec;
   materials?: readonly GroundMaterialSpec[];
   liquidLayer?: LiquidLayerSpec;
   terrainRecipe?: TerrainRecipeSpec;
@@ -583,52 +569,40 @@ const COLOR_PATTERN = /^(?:#[0-9a-f]{3,8}|rgba?\([^)]+\))$/i;
 const ENGINE_DEFAULT_CLASS_LOOKS: Readonly<Record<ResidentRoleClass, PackRoleLookSpec>> = {
   ruler: {
     id: 'default-ruler',
-    label: { en: 'Ruler', ru: 'Правитель' },
-    tunicColor: '#EAE0C8',
-    trimColor: '#E8B948',
+    label: text('Ruler'),
     prop: 'staff',
     headgear: 'crown',
     insignia: true,
   },
   head: {
     id: 'default-head',
-    label: { en: 'Department Head', ru: 'Глава отдела' },
-    tunicColor: '#D6C7A8',
-    trimColor: '#5CA6E6',
+    label: text('Department Head'),
     prop: 'staff',
     headgear: 'circlet',
     insignia: true,
   },
   checker: {
     id: 'default-checker',
-    label: { en: 'Inspector', ru: 'Проверяющий' },
-    tunicColor: '#C5CFD9',
-    trimColor: '#6994C2',
+    label: text('Inspector'),
     prop: 'scroll',
     headgear: 'cap',
   },
   executor: {
     id: 'default-executor',
-    label: { en: 'Builder', ru: 'Исполнитель' },
-    tunicColor: '#D4BC94',
-    trimColor: '#A67C52',
+    label: text('Builder'),
     prop: 'tool',
     headgear: 'none',
   },
   turnkey: {
     id: 'default-turnkey',
-    label: { en: 'Turnkey Specialist', ru: 'Универсал под ключ' },
-    tunicColor: '#48607A',
-    trimColor: '#E5B85C',
+    label: text('Turnkey Specialist'),
     prop: 'banner',
     headgear: 'hood',
     insignia: true,
   },
   day_laborer: {
     id: 'default-day-laborer',
-    label: { en: 'Day Laborer', ru: 'Поденщик' },
-    tunicColor: '#9C8D78',
-    trimColor: '#736553',
+    label: text('Day Laborer'),
     prop: 'stone',
     headgear: 'none',
   },
@@ -638,7 +612,7 @@ export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
   {
     stage: 1,
     id: 'stakes_and_rope',
-    label: { en: 'Stakes and Rope', ru: 'Колышки и веревка' },
+    label: text('Stakes and Rope'),
     heightRatio: 0.05,
     openInteriorVisible: false,
     hasScaffolding: false,
@@ -652,7 +626,7 @@ export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
   {
     stage: 2,
     id: 'foundation',
-    label: { en: 'Site and Foundation', ru: 'Площадка и фундамент' },
+    label: text('Site and Foundation'),
     heightRatio: 0.16,
     openInteriorVisible: false,
     hasScaffolding: false,
@@ -666,7 +640,7 @@ export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
   {
     stage: 3,
     id: 'low_walls_open',
-    label: { en: 'First Wall Courses (Open Rooms)', ru: 'Первые ряды стен (видны комнаты)' },
+    label: text('First Wall Courses (Open Rooms)'),
     heightRatio: 0.34,
     openInteriorVisible: true,
     hasScaffolding: false,
@@ -680,7 +654,7 @@ export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
   {
     stage: 4,
     id: 'waist_walls_scaffold',
-    label: { en: 'Waist Walls with Scaffolding and Ramp', ru: 'Стены по пояс с лесами и пандусом' },
+    label: text('Waist Walls with Scaffolding and Ramp'),
     heightRatio: 0.56,
     openInteriorVisible: true,
     hasScaffolding: true,
@@ -694,7 +668,7 @@ export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
   {
     stage: 5,
     id: 'full_walls',
-    label: { en: 'Full-Height Walls', ru: 'Стены в рост' },
+    label: text('Full-Height Walls'),
     heightRatio: 0.82,
     openInteriorVisible: false,
     hasScaffolding: true,
@@ -708,7 +682,7 @@ export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
   {
     stage: 6,
     id: 'roof_beams',
-    label: { en: 'Roof Beams', ru: 'Балки' },
+    label: text('Roof Beams'),
     heightRatio: 0.9,
     openInteriorVisible: false,
     hasScaffolding: true,
@@ -722,7 +696,7 @@ export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
   {
     stage: 7,
     id: 'roof',
-    label: { en: 'Roofing', ru: 'Крыша' },
+    label: text('Roofing'),
     heightRatio: 0.96,
     openInteriorVisible: false,
     hasScaffolding: true,
@@ -736,7 +710,7 @@ export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
   {
     stage: 8,
     id: 'finishing',
-    label: { en: 'Finishing Trim', ru: 'Отделка' },
+    label: text('Finishing Trim'),
     heightRatio: 1.0,
     openInteriorVisible: false,
     hasScaffolding: true,
@@ -750,7 +724,7 @@ export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
   {
     stage: 9,
     id: 'complete',
-    label: { en: 'Complete', ru: 'Готово' },
+    label: text('Complete'),
     heightRatio: 1.0,
     openInteriorVisible: false,
     hasScaffolding: false,
@@ -764,7 +738,7 @@ export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
   {
     stage: 10,
     id: 'upgraded',
-    label: { en: 'Upgraded Annex', ru: 'Улучшения' },
+    label: text('Upgraded Annex'),
     heightRatio: 1.16,
     openInteriorVisible: false,
     hasScaffolding: false,
@@ -777,30 +751,11 @@ export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
   },
 ];
 
-export const DEFAULT_CONSTRUCTION_PALETTE: ConstructionPaletteSpec = {
-  scaffoldWood: '#B9874A',
-  rampEarth: '#C9AD7F',
-  dustColor: '#DFCFAF',
-  smokeColor: '#6D717C',
-  waterColor: '#56BDE8',
-  awningPrimary: '#C96A4B',
-  awningSecondary: '#F2E5C4',
-  capstoneColor: '#FFDC62',
-  celebrationPrimary: '#FFE270',
-  celebrationSecondary: '#5FD1A8',
-  statueBaseColor: '#C5B89F',
-  statueFinishedColor: '#ECCB6C',
-};
-
 export function resolveConstructionStages(pack: WorldPackManifest): readonly ConstructionStageSpec[] {
   if (pack.constructionStages && pack.constructionStages.length > 0) {
     return pack.constructionStages;
   }
   return DEFAULT_CONSTRUCTION_STAGES;
-}
-
-export function resolveConstructionPalette(pack: WorldPackManifest): ConstructionPaletteSpec {
-  return pack.constructionPalette ?? DEFAULT_CONSTRUCTION_PALETTE;
 }
 
 /* Resolves a resident's visual look from the active world pack:

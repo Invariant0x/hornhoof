@@ -12,11 +12,15 @@ import { hideTaskSecret } from './hide-secret.js';
 import { departmentsHad, runsDepartment } from '../../auth/departments.js';
 import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
+import { decryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, people, requests, tasks, taskWaits, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { copyGaveUpCards } from '../copies/gave-up.js';
+import { copySchemaFailures } from '../copies/schema-failures.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
 import { deptName } from '../departments/templates.js';
+import { repoScopeOf } from '../testruns/github-limit.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { resolveStuck } from './stuck.js';
 import { answer, cancel, closeTask, createTask } from './engine.js';
@@ -42,6 +46,7 @@ import { turnRows, type Turn } from './turns.js';
 import { openTurnOf } from './turn-department.js';
 import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
 import { setPaused } from './pause.js';
+import { requirePersonTreeRules } from './tree-rules.js';
 
 const Priority = z.enum(TASK_PRIORITIES).nullable().optional();
 const IdParams = z.object({ id: z.uuid() });
@@ -198,6 +203,23 @@ function proposalView({ proposal: p, ownerPersonId, canAnswer, decidedBy }: Deci
 function machineCards(me: Person, person: string | undefined, cards: Decisions['machines']) {
   return cards.filter(card => !person || person === me.id || person === card.owner?.id)
     .map(card => ({ ...card, since: card.since.toISOString(), back: card.back?.toISOString() ?? null }));
+}
+
+async function companyGitHubRepos(ctx: Ctx, companyId: string) {
+  const rows = await ctx.db
+    .select({ url: departments.repoUrl, tokenEnc: departments.repoTokenEnc })
+    .from(departments)
+    .where(and(eq(departments.companyId, companyId), isNotNull(departments.repoUrl)));
+  const decrypt = (enc: string) => decryptSecret(enc, ctx.config.secret);
+  return rows.flatMap(row => {
+    const scoped = repoScopeOf(row, companyId, decrypt);
+    return scoped ? [scoped] : [];
+  });
+}
+
+async function githubLimitCards(me: Person, person: string | undefined, ctx: Ctx) {
+  if (me.via || !me.isOwner || (person && person !== me.id) || !ctx.githubLimits.hasCards()) return [];
+  return ctx.githubLimits.cards(await companyGitHubRepos(ctx, me.companyId));
 }
 
 function requestViews(mine: Decisions['requests'], lines: Awaited<ReturnType<typeof linesFor>>, commits: (string | null)[], pictures: Map<string, string[]>, names: Map<string, string>, explaining: Set<string>, places: Places) {
@@ -377,10 +399,11 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const after = body.after?.length ? (await db.select().from(tasks).where(and(eq(tasks.companyId, me.companyId), inArray(tasks.number, body.after)))).filter(t => seesTask(viewer, t)) : [];
     const missing = (body.after ?? []).find(n => !after.some(t => t.number === n));
     if (missing !== undefined) throw refuse(400, 'task_invalid', `There is no task #${missing} to come after.`);
+    await requirePersonTreeRules(ctx, parent);
     const moved = await createTask(ctx, actorOf(me), {
-      title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: parent ? undefined : body.urgent,
+      useSlots: true, title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: parent ? undefined : body.urgent,
       parentId: parent?.id ?? null, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id), afterPlans: afterPlansOf(body.afterPlans, after), independentPart: body.independentPart, independentNone: body.independentNone,
-      goalId: body.goal, responsiblePersonId: body.responsible, why: body.why, priority: body.priority, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
+      goalId: body.goal, responsiblePersonId: body.responsible, askedByPersonId: me.id, why: body.why, priority: body.priority, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
     });
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
@@ -530,7 +553,10 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       machineAccess: [],
       merges: decisions.merges.filter(merge => picked(merge.ownerPersonId)).map(({ id, label, after, open, ownerPersonId }) => ({ id, label, after, open, ownerPersonId })),
       machinesAway: machineCards(me, person, decisions.machines),
+      copySchemaFailures: await copySchemaFailures(ctx, me, person),
+      copyGaveUp: await copyGaveUpCards(ctx, me, person),
       machinesLow: decisions.low.filter(card => !person || person === me.id || person === card.owner?.id),
+      githubLimits: await githubLimitCards(me, person, ctx),
       counts: decisions.counts,
     };
   });
@@ -593,6 +619,6 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { turn } = PipelineQuery.parse(req.query);
     const dept = await departmentOf(db, me.companyId, id);
     if (!dept || dept.parentId) throw refuse(404, 'department_unknown', 'This department does not exist.');
-    return { report: await departmentPipeline(db, me.companyId, dept.id, turn) };
+    return { report: await departmentPipeline(db, me.companyId, dept.id, turn, ctx.files) };
   });
 }

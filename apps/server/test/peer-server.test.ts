@@ -1,6 +1,6 @@
 import { createHash, createPrivateKey, generateKeyPairSync, randomBytes, randomUUID, webcrypto } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buffer } from 'node:stream/consumers';
@@ -341,6 +341,10 @@ describe('routeOf', () => {
 
   it.each([
     ['hello on the peer door', asked('GET', '/peer/hello'), 'peer', 'worker', db, { to: 'hello' }],
+    ['a file of the store', asked('GET', `/peer/files/${'a'.repeat(64)}`), 'peer', 'worker', db, { to: 'file', sha256: 'a'.repeat(64), put: false }],
+    ["a file of the store's backup, fetched", asked('GET', `/peer/store-backup/${'b'.repeat(64)}`), 'peer', 'worker', db, { to: 'file', sha256: 'b'.repeat(64), put: false, backup: true }],
+    ["a file of the store's backup, given back", asked('PUT', `/peer/store-backup/${'c'.repeat(64)}`), 'peer', 'worker', db, { to: 'file', sha256: 'c'.repeat(64), put: true, backup: true }],
+    ["a backup name that is no hash", asked('GET', '/peer/store-backup/../files'), 'peer', 'worker', db, refused(404)],
     ['hello on the app door', asked('GET', '/peer/hello'), 'app', 'worker', null, { to: 'hello' }],
     ['the app on the peer door', connect(APP_AUTHORITY), 'peer', 'worker', db, { to: 'app' }],
     ['the app on the app door', connect(APP_AUTHORITY), 'app', 'data', db, { to: 'app' }],
@@ -587,7 +591,10 @@ describe('PeerServer', () => {
   it('serves a bundle only to its holders', async () => {
     const { stand, backups } = await standWithBackups();
     const x = await backups.sealed();
-    backups.keeper.store().put(x.head, x.manifest, x.out);
+    await backups.keeper.store().seal(x.id, part => {
+      copyFileSync(x.out, part);
+      return Promise.resolve({ head: x.head, manifest: x.manifest });
+    });
     backups.view.holders = { [x.id]: [WORKER_ID] };
     await backups.keeper.round();
     for (const kind of ['peer', 'app'] as const) {

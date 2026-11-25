@@ -12,11 +12,12 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
 
   test(`notes the machine the server moved from, and one that saves what it led, ${place}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height });
-    /* The server was taken from the machine with the long name, whose copy is up to date again; the one before it
-       still saves what it did. */
+    /* The server was taken from the machine with the long name, whose copy is up to date again; one before it saves
+       what it did, and another shows what its stuck save waits on and since when. */
     const after = MACHINES.map(m =>
       m.id === 'm3' ? { ...m, data: placed({ number: 3, why: 'pinned', pin: 3, copy: { line: 'ready' }, led: { until: '2026-11-12T14:02:00.000Z' } }) }
-        : m.id === 'm2' ? { ...m, data: placed({ number: 2, why: 'always.best_link', copy: { line: 'saving' } }) } : m);
+        : m.id === 'm2' ? { ...m, data: placed({ number: 2, why: 'always.best_link', copy: { line: 'saving' } }) }
+          : m.id === 'm4' ? { ...m, data: placed({ number: 4, why: 'next', copy: { line: 'saving', waiting: 'retry', since: '2026-11-24T01:09:00.000Z' } }) } : m);
     await openMachines(page, language, theme, undefined, null, after);
     await open(page, LONG);
     const old = card(page, LONG);
@@ -28,6 +29,10 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     const saving = card(page, 'dev-studio').getByText(w.saving, { exact: true });
     await expect(saving).toBeVisible();
     expect(await within(saving, card(page, 'dev-studio'))).toBe(true);
+    await open(page, 'lab-nuc');
+    const stuck = card(page, 'lab-nuc').getByText(w.savingRetry);
+    await expect(stuck).toBeVisible();
+    expect(await within(stuck, card(page, 'lab-nuc'))).toBe(true);
     expect(await noSideScroll(page)).toBe(true);
     await page.screenshot({ path: info.outputPath(shot('move-led')), fullPage: true });
   });

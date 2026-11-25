@@ -19,7 +19,8 @@ initSkins();
 watchFrames({ every: 2000, budget: 250, strikes: 3, now: () => performance.now(), frame: cb => requestAnimationFrame(cb) });
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <LanguageProvider>
+    {/* The test languages (en-XL, ar-XB) are taken from the saved choice outside a production build only. */}
+    <LanguageProvider pseudo={import.meta.env.MODE !== 'production'}>
       <App />
     </LanguageProvider>
   </StrictMode>,

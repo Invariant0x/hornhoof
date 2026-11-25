@@ -13,7 +13,7 @@ import {
   type WorldArtCatalog,
 } from '../src/world/art';
 import type { CityBuilding } from '../src/world/city-layout';
-import type { BuildingConstructionState } from '../src/world/construction';
+import { createConstructionSimulation, startBuildingConstruction, stepConstructionSimulation, type BuildingConstructionState } from '../src/world/construction';
 import { validateWorldPack, type FootprintKey, type WorldPackManifest } from '../src/world/manifest';
 import { STUB_DIAMOND_PACK } from '../src/world/packs/stub-pack';
 import type { ResidentEntity } from '../src/world/residents';
@@ -22,13 +22,13 @@ const CATALOG: WorldArtCatalog = {
   baseUrl: '/world-art/test/',
   buildings: {
     house: [
-      { id: 'small', footprint: '1x1', label: { en: 'Small', ru: 'Малый' } },
-      { id: 'large', footprint: '3x3', label: { en: 'Large', ru: 'Большой' } },
+      { id: 'small', footprint: '1x1', label: 'Small' },
+      { id: 'large', footprint: '3x3', label: 'Large' },
     ],
-    department: [{ id: 'hall', footprint: '3x3', label: { en: 'Hall', ru: 'Зал' } }],
-    statue: [{ id: 'figure', footprint: '1x1', label: { en: 'Figure', ru: 'Фигура' } }],
-    monument: [{ id: 'mound', footprint: '4x4', label: { en: 'Mound', ru: 'Курган' } }],
-    supply: [{ id: 'store', footprint: '3x3', label: { en: 'Store', ru: 'Склад' } }],
+    department: [{ id: 'hall', footprint: '3x3', label: 'Hall' }],
+    statue: [{ id: 'figure', footprint: '1x1', label: 'Figure' }],
+    monument: [{ id: 'mound', footprint: '4x4', label: 'Mound' }],
+    supply: [{ id: 'store', footprint: '3x3', label: 'Store' }],
   },
   altar: true,
   flags: { district: true, department: true },
@@ -118,7 +118,7 @@ function resident(partial: Partial<ResidentEntity>): ResidentEntity {
     roleKey: null,
     roleClass: 'executor',
     archetype: 'builder',
-    look: { id: 'look-a', label: { en: 'A', ru: 'А' }, tunicColor: '#ffffff', trimColor: '#000000', prop: 'none', headgear: 'none' },
+    look: { id: 'look-a', label: 'A', prop: 'none', headgear: 'none' },
     level: 1,
     outfitTier: 1,
     cloakColor: '#C96A4B',
@@ -230,8 +230,9 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
     expect(resolveBuildingArt(STUB_DIAMOND_PACK, null, b, null)).toBeNull();
     expect(resolveBuildingArt(PACK, null, b, null)).toBeNull();
     expect(resolveBuildingArt(PACK, index({}), b, null)).toBeNull();
-    const onlyComplete = index({ 'buildings/department/hall/complete.png': picture('3x3', 900) });
-    expect(resolveBuildingArt(PACK, onlyComplete, b, job(5))).toBeNull();
+    /* A step with not one picture keeps its placeholder; with any picture, see 'shows the nearest drawn picture' below. */
+    const otherStepOnly = index({ 'buildings/house/large/complete.png': picture('3x3', 900) });
+    expect(resolveBuildingArt(PACK, otherStepOnly, b, job(5))).toBeNull();
   });
 
   it('draws the finished look, upgraded look, annex and a tinted district flag at the picture flag anchor', () => {
@@ -343,6 +344,32 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
     expect(resolveBuildingArt(PACK, files, b, job(0, 'cleared'))).toBeNull();
   });
 
+  it('walks every construction picture of the step in order over a job, whatever the building own number of stages (#1947 item 7)', () => {
+    const pack: WorldPackManifest = {
+      ...PACK,
+      art: { ...CATALOG, buildings: { ...CATALOG.buildings, district_hub: [{ id: 'workshop', footprint: '3x3', label: 'Workshop' }] } },
+    };
+    const at = (name: string) => `buildings/district_hub/workshop/${name}.png`;
+    const steps = ['01', '02', '03', '04', '05', '06', '07', '08'].map(n => at(`stage_${n}`));
+    const files = index(Object.fromEntries([...steps, at('complete'), at('upgraded')].map(path => [path, picture('3x3', 500)])));
+    /* A live district workshop grows in 3 steps, the pack draws 8 construction pictures before the finished one. */
+    const hub = building({ kind: 'district_hub', stage: 1, maxStage: 3 });
+    const sim = createConstructionSimulation(pack);
+    const build = startBuildingConstruction(sim, hub);
+    const shown: string[] = [];
+    const note = () => {
+      const path = resolveBuildingArt(pack, files, build.buildingSnapshot, build)?.layers[0]?.path;
+      if (path && shown[shown.length - 1] !== path) shown.push(path);
+    };
+    note();
+    for (let frame = 0; build.phase === 'building' && frame < 10_000; frame++) {
+      stepConstructionSimulation(sim, 1 / 60);
+      note();
+    }
+    const finished = resolveBuildingArt(pack, files, { ...hub, stage: 3 }, null)!.layers[0]!.path;
+    expect(shown).toEqual([...steps, finished]);
+  });
+
   it('picks statue stages, monument tiers with the capstone, and supply fill levels from live values', () => {
     const files = index({
       'buildings/statue/figure/stage_07.png': picture('1x1', 400),
@@ -398,8 +425,9 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
     expect(resolveResidentArt(PACK, files, resident({ pose: 'walking', facing: 'NW' }), 0)?.layers[0]?.frame.y).toBe(1 * 180);
     expect(resolveResidentArt(PACK, files, resident({ pose: 'walking', facing: 'S' }), 0)?.layers[0]?.frame.y).toBe(4 * 180);
 
-    /* 8 fps: at 0.5 s the walk shows frame 4. */
-    expect(resolveResidentArt(PACK, files, resident({ pose: 'walking' }), 0.5)?.layers[0]?.frame.x).toBe(4 * 120);
+    /* 8 fps: 0.5 s on, the walk shows the frame 4 after the one it showed (each resident starts on its own frame, #1983). */
+    const frameAt = (t: number) => resolveResidentArt(PACK, files, resident({ pose: 'walking' }), t)!.layers[0]!.frame.x / 120;
+    expect((frameAt(0.5) - frameAt(0) + 8) % 8).toBe(4);
 
     /* A pose with its own sheet uses it; carrying falls back to walking, inspecting to idle. */
     expect(resolveResidentArt(PACK, files, resident({ pose: 'praying' }), 0)?.layers[0]?.path).toBe('people/look-a/tier_1/pray.png');
@@ -414,7 +442,7 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
 
   it('rejects art catalogs with unknown footprints, duplicate steps or people tiers out of 1..5', () => {
     expect(validateWorldPack(PACK)).toEqual({ ok: true });
-    const badFootprint = { ...PACK, art: { ...CATALOG, buildings: { house: [{ id: 'x', footprint: '7x7' as FootprintKey, label: { en: 'X', ru: 'X' } }] } } };
+    const badFootprint = { ...PACK, art: { ...CATALOG, buildings: { house: [{ id: 'x', footprint: '7x7' as FootprintKey, label: 'X' }] } } };
     expect(validateWorldPack(badFootprint)).toMatchObject({ ok: false });
     const dupSteps = {
       ...PACK,
@@ -422,8 +450,8 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
         ...CATALOG,
         buildings: {
           house: [
-            { id: 'x', footprint: '1x1' as FootprintKey, label: { en: 'X', ru: 'X' } },
-            { id: 'x', footprint: '2x2' as FootprintKey, label: { en: 'X', ru: 'X' } },
+            { id: 'x', footprint: '1x1' as FootprintKey, label: 'X' },
+            { id: 'x', footprint: '2x2' as FootprintKey, label: 'X' },
           ],
         },
       },
@@ -431,5 +459,38 @@ describe('Stage 9 art contract: declared files, index validation and art resolut
     expect(validateWorldPack(dupSteps)).toMatchObject({ ok: false });
     expect(validateWorldPack({ ...PACK, art: { ...CATALOG, people: { looks: ['look-a'], tiers: 6 } } })).toMatchObject({ ok: false });
     expect(validateWorldPack({ ...PACK, art: { ...CATALOG, baseUrl: 'relative/' } })).toMatchObject({ ok: false });
+  });
+
+  /* Design, 24.11 (company note #107): no placeholder box in front of people. A fill level, tier or stage not drawn yet
+     shows the nearest drawn picture of the same line; ties go to the later one. */
+  it('shows the nearest drawn picture of the line when the one a building needs is not drawn yet', () => {
+    const pathOf = (files: ArtIndex, b: CityBuilding, j: BuildingConstructionState | null = null) => resolveBuildingArt(PACK, files, b, j)?.layers[0]?.path;
+
+    const onlyFull = index({ 'buildings/supply/store/fill_4.png': picture('3x3', 600) });
+    const store = building({ kind: 'supply', spanCol: 3, spanRow: 3, stage: 6, maxStage: 6, fullness: 0.25 });
+    expect(pathOf(onlyFull, store), 'a granary with only its full picture').toBe('buildings/supply/store/fill_4.png');
+    expect(pathOf(onlyFull, { ...store, resting: true }), 'resting, so empty').toBe('buildings/supply/store/fill_4.png');
+    const ends = index({ 'buildings/supply/store/fill_0.png': picture('3x3', 600), 'buildings/supply/store/fill_4.png': picture('3x3', 600) });
+    expect(pathOf(ends, { ...store, fullness: 0.5 }), 'a tie goes to the later picture').toBe('buildings/supply/store/fill_4.png');
+    expect(pathOf(ends, { ...store, fullness: 0.25 })).toBe('buildings/supply/store/fill_0.png');
+
+    const tier5 = index({ 'buildings/monument/mound/tier_05.png': picture('4x4', 900) });
+    const mound = building({ kind: 'monument', spanCol: 4, spanRow: 4, stage: 2, maxStage: 10, progress: 0.2 });
+    expect(pathOf(tier5, mound), 'a pyramid with only tier 5').toBe('buildings/monument/mound/tier_05.png');
+    expect(resolveBuildingArt(PACK, tier5, { ...mound, progress: 1, reached: true }, null)?.layers.map(l => l.path), 'no capstone off its last tier').toEqual([
+      'buildings/monument/mound/tier_05.png',
+    ]);
+
+    const carved = index({ 'buildings/statue/figure/stage_03.png': picture('1x1', 400) });
+    expect(pathOf(carved, building({ kind: 'statue', spanCol: 1, spanRow: 1, stage: 12, maxStage: 20 }))).toBe('buildings/statue/figure/stage_03.png');
+
+    /* A construction job on a step drawn finished only (the villas of 24.11), then with one stage of its own. */
+    const hall = building({ stage: 9 });
+    const finishedOnly = index({ 'buildings/department/hall/complete.png': picture('3x3', 900) });
+    expect(pathOf(finishedOnly, hall, job(5))).toBe('buildings/department/hall/complete.png');
+    const withStage = index({ 'buildings/department/hall/complete.png': picture('3x3', 900), 'buildings/department/hall/stage_04.png': picture('3x3', 900) });
+    expect(pathOf(withStage, hall, job(5)), 'stage 4 is nearer to stage 5 than the finished look').toBe('buildings/department/hall/stage_04.png');
+    const placed = resolveBuildingArt(PACK, withStage, hall, job(5))!;
+    expect(placed.artPxPerTile, 'scaled from the drawn picture like any other').toBeCloseTo(PACK.projection.buildingFootprintsMaster4x['3x3'].diamondW / 3, 6);
   });
 });

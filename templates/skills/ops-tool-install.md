@@ -1,7 +1,5 @@
 ---
 id: ops-tool-install
-title: { en: "Tool installation", ru: "Установка инструментов" }
-description: { en: "Installs the shared tools and MCP servers agents need on their nodes from trusted sources, pinned and recorded.", ru: "Устанавливает на узлы общие инструменты и MCP-серверы для агентов из надежных источников, с закрепленной версией и записью в учет." }
 kind: procedure
 sources: []
 ---

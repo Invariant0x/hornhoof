@@ -15,9 +15,10 @@ const MAC = { machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arc
 const codeOf = (command: string) => command.split('--join ')[1]!;
 
 /* The project template's pipeline owners, its other permanent roles and its turnkey teams. */
-const PROJECT = ['DEV-ARCH', 'DEV-DOCS', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-OPS', 'DEV-PM', 'DEV-REV', 'DEV-SEC', 'DEV-TEST', 'OPS-ACCT', 'OPS-BUGS', 'OPS-FIX', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH'];
-/* A member of a turnkey team runs the strongest model, as nobody checks after it. */
-const tierOf = (app: FastifyInstance, employee: typeof agents.$inferSelect) => (employee.teamId ? 'top' : app.ctx.templates.roles.get(employee.roleKey!)!.tier);
+const PROJECT = ['DEV-ARCH', 'DEV-DOCS', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-OPS', 'DEV-PM', 'DEV-REV', 'DEV-SEC', 'DEV-TEST', 'OPS-ACCT', 'OPS-BUGS', 'OPS-FIX', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH'];
+/* A member of a turnkey team runs the strongest model, as nobody checks after it; the Hotfix unit is no turnkey team. */
+const tierOf = (app: FastifyInstance, employee: typeof agents.$inferSelect, turnkeyTeams: Set<string>) => (employee.teamId && turnkeyTeams.has(employee.teamId) ? 'top' : app.ctx.templates.roles.get(employee.roleKey!)!.tier);
+const turnkeyTeamsOf = async (app: FastifyInstance) => new Set((await app.ctx.db.select({ id: teams.id }).from(teams).where(eq(teams.turnkey, true))).map(t => t.id));
 
 async function setUp(app: FastifyInstance, payload: object) {
   const res = await app.inject({ method: 'POST', url: '/api/setup', payload });
@@ -48,7 +49,10 @@ describe('POST /api/setup staffs the template', () => {
     ]);
     for (const employee of video.employees) expect(employee).toMatchObject({ model: '', provider: null });
     const head = (await staffOf(app)).find(employee => employee.roleKey === 'VID-HEAD')!;
-    expect((await agentParty(app.ctx, head.companyId, head.id)).department?.name).toEqual({ en: 'Video production', ru: 'Производство видео' });
+    /* A message names a template department by its English name and its template; the screen names it in the reader's language from its own files. */
+    const party = (await agentParty(app.ctx, head.companyId, head.id)).department;
+    expect(party?.name).toEqual({ en: 'Video production' });
+    expect(party?.templateKey).toBe('video_production');
     const route = video.pipelines.find((p: { isDefault: boolean }) => p.isDefault);
     expect(route.catalogKey).toBe('video-production');
     expect(route.stages.map((s: { name: string; ownerRole: string }) => [s.name, s.ownerRole])).toEqual([
@@ -127,12 +131,13 @@ describe('POST /api/setup staffs the template', () => {
     const staff = await staffOf(app);
     expect(staff.map(a => a.roleKey).sort()).toEqual(PROJECT);
     const dev = (await db.select().from(departments).where(eq(departments.templateKey, 'development')))[0]!;
-    expect(staff.filter(a => a.departmentId === dev.id).map(a => a.name).sort()).toEqual(['Architect', 'Code reviewer', 'DevOps engineer', 'Developer 1', 'Developer 1 (Turnkey team)', 'Developer 2', 'Developer 2 (Turnkey team)', 'Head of development', 'Product manager', 'Security engineer', 'Technical writer', 'Test engineer']);
+    expect(staff.filter(a => a.departmentId === dev.id).map(a => a.name).sort()).toEqual(['Architect', 'Code reviewer', 'DevOps engineer', 'Developer (Hotfix)', 'Developer 1', 'Developer 2', 'Head of development', 'Product manager', 'Security engineer', 'Technical writer', 'Test engineer']);
+    const turnkey = await turnkeyTeamsOf(app);
     for (const employee of staff) {
       const role = app.ctx.templates.roles.get(employee.roleKey!)!;
       expect(employee.subscriptionId, employee.name).toBe(key!.id);
       expect(employee.skills, employee.name).toEqual(expect.arrayContaining(role.skills.filter(s => s.on).map(s => s.id)));
-      expect(employee.model, employee.name).toBe(modelOnPlan(tierOf(app, employee), key!));
+      expect(employee.model, employee.name).toBe(modelOnPlan(tierOf(app, employee, turnkey), key!));
     }
   });
 
@@ -142,8 +147,8 @@ describe('POST /api/setup staffs the template', () => {
     const staff = await staffOf(app);
     const ops = (await db.select().from(departments).where(eq(departments.templateKey, 'operations')))[0]!;
     expect(staff.filter(a => a.departmentId === ops.id).map(a => a.roleKey).sort()).toEqual(['OPS-ACCT', 'OPS-BUGS', 'OPS-FIX', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH']);
-    /* The card says 62 employees for the full company: 53 in its departments and 9 in their turnkey teams. */
-    expect(staff).toHaveLength(62);
+    /* The card says 62 employees for the full company: 53 in its departments and 8 in their teams. */
+    expect(staff).toHaveLength(61);
     /* Each employee works in its department itself, not in one of its products. */
     expect(staff.every(a => a.productId === null)).toBe(true);
   });
@@ -169,9 +174,9 @@ describe('POST /api/setup staffs the template', () => {
     await setUp(app, { ...SETUP, template: 'project', orchestrator: { mode: 'personal', provider: 'kimi' } });
     const [plan] = await plans(app);
     const staff = await staffOf(app);
-    /* Kimi leaves the deep roles and the members of the turnkey teams waiting. */
-    expect(staff.filter(a => a.subscriptionId === null).map(a => a.roleKey).sort()).toEqual(['DEV-ARCH', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-REV', 'DEV-SEC', 'OPS-FIX']);
-    expect(staff.filter(a => a.subscriptionId === plan!.id)).toHaveLength(14);
+    /* Kimi leaves the deep roles and the members of the turnkey teams waiting; the Hotfix developer is no turnkey member. */
+    expect(staff.filter(a => a.subscriptionId === null).map(a => a.roleKey).sort()).toEqual(['DEV-ARCH', 'DEV-HEAD', 'DEV-REV', 'DEV-SEC', 'OPS-FIX']);
+    expect(staff.filter(a => a.subscriptionId === plan!.id)).toHaveLength(15);
   });
 });
 
@@ -198,7 +203,7 @@ describe('every ready-made company', () => {
         expect(pipeline.stages, stock.key).toHaveLength(stock.stages.length);
         for (const [i, step] of stock.stages.entries()) {
           const stage = pipeline.stages[i];
-          expect(stage, step.name).toMatchObject({ name: step.name, ownerRole: step.ownerRole, parentId: i ? pipeline.stages[i - 1].id : null });
+          expect(stage, step.name).toMatchObject({ name: step.name, ownerRole: step.ownerRole, parentId: step.parent ? pipeline.stages[stock.stages.findIndex(s => s.name === step.parent)].id : i ? pipeline.stages[i - 1].id : null });
           expect(stage.ownerTitle, step.name).toEqual(app.ctx.templates.roles.get(step.ownerRole)?.title);
           expect(stage.handoffs, step.name).toEqual(destinations.filter((d: { id: string; templateKey: typeof key }) => d.id !== dept.id && step.handoffTo?.includes(d.templateKey)));
           if (key !== unstaffed) {
@@ -326,7 +331,8 @@ describe('a subscription that comes later', () => {
     const [key] = await plans(app);
     const staff = await staffOf(app);
     expect(staff.every(a => a.subscriptionId === key!.id)).toBe(true);
-    for (const employee of staff) expect(employee.model, employee.name).toBe(modelOnPlan(tierOf(app, employee), key!));
+    const turnkey = await turnkeyTeamsOf(app);
+    for (const employee of staff) expect(employee.model, employee.name).toBe(modelOnPlan(tierOf(app, employee, turnkey), key!));
     expect((await orchestrator(app)).subscriptionId).toBe(key!.id);
     /* Hornhoof did it, so the card says no person did. */
     const [developer] = staff.filter(a => a.roleKey === 'DEV-ENG');

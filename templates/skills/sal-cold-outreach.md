@@ -1,7 +1,5 @@
 ---
 id: sal-cold-outreach
-title: { en: "Cold outreach", ru: "Холодные сообщения" }
-description: { en: "Drafts short, personal first messages and follow-ups for approved leads.", ru: "Готовит короткие персональные первые сообщения и повторные письма для одобренных лидов." }
 kind: procedure
 sources: [coreyhaines31/marketingskills skills/cold-email/SKILL.md, anthropics/knowledge-work-plugins sales/skills/draft-outreach/SKILL.md, msitarzewski/agency-agents sales/sales-outbound-strategist.md]
 ---

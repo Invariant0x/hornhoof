@@ -7,10 +7,11 @@ import { agentEvents, agents, people, telegramBots, telegramReplies } from '../.
 import { only } from '../../db/selections.js';
 import { ApiError, loggable } from '../../errors.js';
 import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.js';
+import { takenBytes } from '../tasks/attachments.js';
 import { writeToAgent } from '../conversation/routes.js';
 import { TELEGRAM_FILE_BYTES, TelegramError, type TelegramFile, type TelegramMessage, type TelegramUpdate, type TelegramUser } from './api.js';
 import { chatLanguage } from './language.js';
-import { agentName, WORDS, type BotLang } from './words.js';
+import { agentName, botWords, type BotLang } from './words.js';
 
 type Bot = Pick<typeof telegramBots.$inferSelect, 'id' | 'companyId' | 'agentId'>;
 /* Sends a few words of the bot's own to a chat. */
@@ -97,7 +98,7 @@ const megabytes = (bytes: number) => Math.round(bytes / 1024 / 1024);
 
 /* Brings the files over from Telegram and keeps them for the agent, each in turn. One that does not come is named in the
    words the agent reads, and the person hears why. */
-async function bringFiles(ctx: Ctx, me: Person, agentId: string, came: Came, fetchFile: FetchFile, transcribe: Transcribe, chatId: number, say: Say, words: (typeof WORDS)[BotLang]) {
+async function bringFiles(ctx: Ctx, me: Person, agentId: string, came: Came, fetchFile: FetchFile, transcribe: Transcribe, chatId: number, say: Say, words: ReturnType<typeof botWords>) {
   const ids: string[] = [];
   const notes: string[] = [];
   for (const { file, name, voice } of came.files) {
@@ -122,7 +123,7 @@ async function bringFiles(ctx: Ctx, me: Person, agentId: string, came: Came, fet
       notes.push(said ? `[A voice message${seconds(file)}. Its words, as speech recognition heard them: ${said}]` : `[A voice message${seconds(file)}, with no transcript: its recording is the file voice.ogg below.]`);
     }
     try {
-      ids.push((await keepMessageFile(ctx, me, agentId, { bytes, size: bytes.length }, name)).id);
+      ids.push((await keepMessageFile(ctx, me, agentId, await takenBytes(ctx, bytes), name)).id);
     } catch (err) {
       if (!(err instanceof ApiError)) throw err;
       notes.push(`[${name} did not come: Hornhoof has no room left for the company's files.]`);
@@ -143,7 +144,7 @@ export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | Tele
   const chatId = message.chat.id;
   const messages = all.map(u => u.message!);
   const lang = await chatLanguage(ctx.db, bot, chatId, messages, message.from.language_code);
-  const words = WORDS[lang];
+  const words = botWords(lang);
   const me = await senderOf(ctx, bot.companyId, message.from);
   if (!me) {
     await say(chatId, words.unknown(message.from.id, message.from.username ? `@${message.from.username}` : null));

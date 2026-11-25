@@ -1,7 +1,5 @@
 ---
 id: orch-people
-title: { en: "Manage people and access", ru: "Управлять людьми и доступами" }
-description: { en: "Applies invitations and access changes with the dedicated company tools, within the limits the company's notebook sets.", ru: "Выполняет приглашения и изменения доступа штатными инструментами компании, в пределах того, что запрещает блокнот компании." }
 kind: procedure
 ---
 You can apply a change to the company's people and access.

@@ -1,7 +1,5 @@
 ---
 id: dev-release-notes
-title: { en: "Release notes", ru: "Заметки к выпуску" }
-description: { en: "Writes what a release changes for users as one short list in the repository's language.", ru: "Пишет, что выпуск меняет для пользователей, одним коротким списком на языке репозитория." }
 kind: procedure
 sources: [garrytan/gstack document-release/SKILL.md.tmpl]
 ---

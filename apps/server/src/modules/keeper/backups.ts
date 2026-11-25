@@ -1,5 +1,5 @@
-import { randomBytes, randomUUID } from 'node:crypto';
-import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { createReadStream, existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import type { Peer } from '../../net/peer-server.js';
@@ -388,17 +388,17 @@ export class BackupKeeper {
     }
     let head = this.bundles.list().find(bundle => bundle.id === id)?.head;
     if (!head) {
-      mkdirSync(join(this.opts.dir, BUNDLES_DIR), { recursive: true, mode: 0o700 });
-      const out = join(this.opts.dir, BUNDLES_DIR, `${id}.${randomBytes(6).toString('hex')}.part`);
       try {
-        const sealed = await sealBundle({
-          dump: createReadStream(file), id, company, dumpedAt: dump.at, now: new Date(this.now()), reason: dump.reason, migrations: dump.migrations,
-          secrets: this.opts.secrets(), recipients: [...view.recipients, this.opts.age.recipient], recovery: view.recovery?.recipient ?? null,
-          recoveryLink: view.recovery?.link ?? null, key: this.opts.key, held, out,
-        });
-        head = this.bundles.put(sealed.head, sealed.manifest, out).head;
+        head = (
+          await this.bundles.seal(id, out =>
+            sealBundle({
+              dump: createReadStream(file), id, company, dumpedAt: dump.at, now: new Date(this.now()), reason: dump.reason, migrations: dump.migrations,
+              secrets: this.opts.secrets(), recipients: [...view.recipients, this.opts.age.recipient], recovery: view.recovery?.recipient ?? null,
+              recoveryLink: view.recovery?.link ?? null, key: this.opts.key, held, out,
+            }),
+          )
+        ).head;
       } catch (err) {
-        rmSync(out, { force: true });
         this.opts.log(`The keeper could not seal a dump of the database: ${reasonOf(err)}`);
         return;
       }
