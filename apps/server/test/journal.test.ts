@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { FENCED, isLeaseRefused, JOURNAL_NEEDS_PUTTING_BACK, type LeaseKind, type LeaseSync } from '../src/db/net.js';
 import { agents, attachments, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { as, createTestDb, ownDatabases, setLease, setUpCompany, testApp } from './helpers.js';
+import { stored } from './files-fixture.js';
 
 /* These tests change the lease, the journal's triggers and the tables themselves, which a truncate does not undo. */
 ownDatabases();
@@ -101,19 +102,20 @@ describe('the journal', () => {
     expect(deleted!.old).toEqual(before);
   });
 
-  it('keeps a hash of a file, not its bytes', async () => {
+  it("keeps a file's hash, which names its bytes in the store", async () => {
     const db = await createTestDb();
     const agent = await anAgent(db);
     const [person] = await db.insert(people).values({ companyId: agent.companyId, name: 'Ivan', email: 'ivan@acme.test', status: 'active', scopeKind: 'company' }).returning();
     const [plan] = await db.insert(subscriptions).values({ companyId: agent.companyId, provider: 'anthropic_api', kind: 'api_key', label: 'Plan', ownerPersonId: person!.id, status: 'ready' }).returning();
     const [job] = await db.insert(jobs).values({ companyId: agent.companyId, subscriptionId: plan!.id, agentId: agent.id, prompt: '', timeoutMs: 1000 }).returning();
     const bytes = Buffer.from('the bytes of a file');
-    const [file] = await db.insert(attachments).values({ companyId: agent.companyId, jobId: job!.id, agentId: agent.id, mediaType: 'text/plain', bytes, size: bytes.length }).returning();
+    const [file] = await db.insert(attachments).values({ companyId: agent.companyId, jobId: job!.id, agentId: agent.id, mediaType: 'text/plain', sha256: await stored(db, bytes), size: bytes.length }).returning();
 
     await db.execute(sql`DELETE FROM attachments WHERE id = ${file!.id}`);
 
     const deleted = (await journalOf(db, 'attachments')).find(row => row.op === 'delete')!;
-    expect(deleted.old!.bytes).toBe(`sha256:${createHash('sha256').update(bytes).digest('hex')}`);
+    expect(deleted.old!.sha256).toBe(createHash('sha256').update(bytes).digest('hex'));
+    expect(deleted.old).not.toHaveProperty('bytes');
   });
 
   it('journals an update that changes nothing', async () => {

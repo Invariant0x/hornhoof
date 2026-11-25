@@ -9,6 +9,7 @@ import { ask, comment } from '../src/modules/tasks/engine.js';
 import { as, openStream, until } from './helpers.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
 import { SERVER_MACHINE_ENV, serverMachine } from './helpers-computer.js';
+import { stored } from './files-fixture.js';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 
@@ -20,8 +21,8 @@ describe('what waits for people', () => {
     const task = await c.work('Secret launch', c.crew.other);
     const asked = kind === 'approval' ? { kind, approval: { channel: 'spend' as const, kind: 'ads', amount: 12 } } : { kind, topic: 'task' as const };
     const { request } = await ask(c.app.ctx, c.crew.other.id, task.id, { text: 'May this go out?', ...asked, link: 'https://x.test/task-secret' });
-    const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, requestId: request.id, name: 'shot.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
-    const [neighbour] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, taskId: task.id, name: 'neighbour.bin', mediaType: 'application/octet-stream', bytes: PNG, size: PNG.length }).returning();
+    const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, requestId: request.id, name: 'shot.png', mediaType: 'image/png', sha256: await stored(c.db, PNG, c.app.ctx.config), size: PNG.length }).returning();
+    const [neighbour] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, taskId: task.id, name: 'neighbour.bin', mediaType: 'application/octet-stream', sha256: await stored(c.db, PNG, c.app.ctx.config), size: PNG.length }).returning();
     return { task, request, picture: picture!, neighbour: neighbour! };
   }
   const answer = (c: AclCompany, id: string, token: string, payload: object) => c.app.inject({ method: 'POST', url: `/api/requests/${id}`, payload, ...as(token) });
@@ -238,7 +239,7 @@ describe('a long text kept as a file of its task', () => {
     const c = await aclCompany();
     const task = await c.work('Secret launch', c.crew.other);
     const { request } = await ask(c.app.ctx, c.crew.other.id, task.id, { text: 'May this go out?', kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 1 } });
-    const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, taskId: task.id, requestId: request.id, name: 'p.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+    const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, taskId: task.id, requestId: request.id, name: 'p.png', mediaType: 'image/png', sha256: await stored(c.db, PNG, c.app.ctx.config), size: PNG.length }).returning();
     const shown = await c.get(`/api/attachments/${picture!.id}`, c.tokens.olga);
     expect(shown.statusCode).toBe(200);
     expect(shown.headers['content-type']).toBe('image/png');
@@ -420,7 +421,7 @@ describe('jobs', () => {
 describe('pictures', () => {
   it('opens a picture sent to an agent only to someone who sees that agent', async () => {
     const c = await aclCompany();
-    const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, personId: c.ids.bob, name: 'shot.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+    const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, personId: c.ids.bob, name: 'shot.png', mediaType: 'image/png', sha256: await stored(c.db, PNG, c.app.ctx.config), size: PNG.length }).returning();
     expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.bob)).statusCode).toBe(200);
     expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.clara)).statusCode).toBe(200);
     expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.olga)).statusCode).toBe(200);
@@ -432,7 +433,7 @@ describe('pictures', () => {
     const c = await aclCompany();
     const hiddenWork = await c.work('Hidden work', c.crew.other);
     const { request } = await ask(c.app.ctx, c.crew.other.id, hiddenWork.id, { text: 'Look', kind: 'question', topic: 'task' });
-    const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, requestId: request.id, name: 'shot.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+    const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, requestId: request.id, name: 'shot.png', mediaType: 'image/png', sha256: await stored(c.db, PNG, c.app.ctx.config), size: PNG.length }).returning();
     expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.olga)).statusCode).toBe(200);
     expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.wes)).statusCode).toBe(404);
   });

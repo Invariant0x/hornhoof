@@ -11,6 +11,17 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - A copy of the company's data that its keeper gave up can be made again from the machine's card with "Try again", the CEO's alone. The company server gives no data to a machine whose path to it is measured too weak for a copy: under 2 Mbps, a rate at which the whole database would take over six hours, or a round trip over 1.5 seconds. A copy that is not whole on such a path is dropped with its slots on the server and waits, and goes on by itself once the path is no longer measured so; the machine's card says which, and Failures holds one card for each copy given up, with what to do.
 
+## [0.44.1] - 2026-11-25
+
+### Fixed
+
+- The line of what happened at the foot of a department and the orchestrator's line on the map stand on one row, with the dot, the time and the words, and end in an ellipsis where the words are wider, their whole text in the line's title; the button that unfolded a long line is gone
+
+### Changed
+
+- Before you update: a server installed by hand rather than from `compose.yaml` needs `FILES_DIR` set to a folder that stays, as `compose.yaml` sets `/files`. A server in production, or one behind a keeper whatever `NODE_ENV` says, with no `FILES_DIR` no longer starts, and says why in each language the server has, as it would keep its files in a folder that the next restart loses; development and tests keep that folder.
+- Files leave the database: every file of a task, a message, a run or a person's picture goes into the company's file store on the server's disk (`FILES_DIR`, the `files` volume), sealed and named by its sha256, and the database keeps only what describes it, so copies of the database and backups no longer grow with files. After the update the server copies the files of 0.43 into the store while it serves, checks each one by its hash, and clears their bytes from the database only after the CEO, or the orchestrator for him, says yes to the reconciliation it writes (`GET /api/files/move`, `POST /api/files/move/approve` with its digest); then it drops the old column and runs `VACUUM FULL`. A server in production does not start without `FILES_DIR`. `hh-fetch` downloads a file it has already only when Hornhoof has other bytes.
+
 ## [0.44.0] - 2026-11-24
 
 ### Fixed

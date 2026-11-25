@@ -16,7 +16,7 @@ import { agentState } from '../conversation/state.js';
 import { agentRole, departmentParty } from '../events/parties.js';
 import { personView } from '../people/views.js';
 import { checkPictureRoom } from '../tasks/file-policy.js';
-import { keepTaken, received } from '../tasks/attachments.js';
+import { received } from '../tasks/attachments.js';
 import { AnswerBody, answerRequest } from '../tasks/routes.js';
 import { fileByLink, fileFor } from './files.js';
 import { sendForOwner } from './messages.js';
@@ -127,9 +127,9 @@ export async function keepFor(ctx: Ctx, me: Person, query: unknown, body: unknow
   const { agentId, name } = FileQuery.parse(query);
   const agent = await addressee(ctx, me, agentId, await ownAgentOf(ctx, me.assistant!.id));
   const room = await checkPictureRoom(ctx, me.companyId, declared);
-  const taken = await received(ctx.config.filesDir, body, room);
+  const taken = await received(ctx, body, room);
   if (!taken.size) throw new ApiError(400, 'validation', 'This file is empty.', 'file_empty');
-  return { file: await keepTaken(ctx.config.filesDir, taken, () => keepMessageFile(ctx, me, agent.id, taken, name ?? '')) };
+  return { file: await keepMessageFile(ctx, me, agent.id, taken, name ?? '') };
 }
 
 /* A long poll: the events after a number at once, or the first that comes within the wait, until the asker goes. */

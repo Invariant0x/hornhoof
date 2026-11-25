@@ -7,6 +7,7 @@ import { addNote, companyBook, departmentBook } from '../src/modules/notebook/bo
 import { ask } from '../src/modules/tasks/engine.js';
 import { appFixture, as, testApp } from './helpers.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
+import { stored } from './files-fixture.js';
 
 const captured = vi.hoisted(() => [] as RouteOptions[]);
 vi.mock('fastify', async importOriginal => {
@@ -61,7 +62,7 @@ const aRepeated = async (c: AclCompany, agent: Crew): Promise<Call> => {
   return { method: 'POST', url: '/api/feedback/repeats', payload: { improvement: finding!.id } };
 };
 const aPicture = async (c: AclCompany, agent: Crew): Promise<Call> => {
-  const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew[agent].id, personId: c.ids.ceo, name: 'p.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+  const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew[agent].id, personId: c.ids.ceo, name: 'p.png', mediaType: 'image/png', sha256: await stored(c.db, PNG, c.app.ctx.config), size: PNG.length }).returning();
   return { method: 'GET', url: `/api/attachments/${picture!.id}` };
 };
 
@@ -177,6 +178,8 @@ const ELSEWHERE: Record<string, string> = {
   'GET /api/stream': 'agent-view-stream.test.ts: filtered per message',
   'PUT /api/departments/:id/inbox-mode': "inbox.test.ts: the department's owner, the CEO or the CEO delegate, 403 for another one, 404 for a product",
   'PUT /api/company/inbox-mode': 'inbox.test.ts: the CEO or the CEO delegate alone, 403 for everyone else',
+  'GET /api/files/move': 'file-move-routes.test.ts: the CEO or the orchestrator for him alone, 403 for a person of the whole company and a head acting for the CEO; counts and digests, no agent',
+  'POST /api/files/move/approve': 'file-move-routes.test.ts: the CEO or the orchestrator for him alone, 403 for a person of the whole company and a head acting for the CEO',
   'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
   'PUT /api/tasks/:id/paused': 'task-pause.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
   'POST /api/tasks/:id/close': 'orchestrator-close.test.ts: the orchestrator alone, through its own calls; 403 for every person, the CEO too, and for a head',

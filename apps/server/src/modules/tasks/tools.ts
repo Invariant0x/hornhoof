@@ -632,7 +632,7 @@ class TaskTools {
         inputSchema: { turn: Turn.optional(), department: z.uuid().optional().describe('The department whose turn to read when no turn is named.') },
       },
       async ({ turn, department }) => this.run(async () => {
-        const report = await pipelineReport(this.db, this.job.companyId, turn, department);
+        const report = await pipelineReport(this.db, this.job.companyId, turn, department, this.ctx.files);
         const reviewFindings = await pipelineFindings(this.db, this.job.companyId, report);
         return { text: JSON.stringify({ ...report, reviewFindings }, english) };
       }),
