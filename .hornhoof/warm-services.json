@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "services": [
+    {
+      "id": "pglite",
+      "build": {
+        "inputs": [
+          "apps/server/drizzle/**/*.sql",
+          "apps/server/drizzle/meta/_journal.json",
+          "apps/server/src/db/schema.ts",
+          "apps/server/src/db/client.ts",
+          "apps/server/src/db/agent-sql.ts",
+          "apps/server/src/db/confirm.ts",
+          "apps/server/src/db/errors.ts",
+          "apps/server/src/db/gate.ts",
+          "apps/server/src/db/net.ts",
+          "apps/server/src/db/sources.ts",
+          "apps/server/src/db/sql-check.ts",
+          "apps/server/src/db/sql-parser.ts",
+          "packages/protocol/dist/**",
+          "apps/server/test/prepare-environment.ts",
+          "apps/server/test/global-setup.ts",
+          "apps/server/test/helpers-db-metadata.ts",
+          "apps/server/test/warm/pglite-build.ts",
+          "package-lock.json"
+        ],
+        "command": {
+          "program": "node",
+          "args": [
+            "--import",
+            "tsx",
+            "test/warm/pglite-build.ts",
+            "{state}/pglite",
+            "{digest}"
+          ],
+          "cwd": "apps/server"
+        }
+      },
+      "piece": {
+        "create": {
+          "program": "node",
+          "args": [
+            "test/warm/pglite.mjs",
+            "create",
+            "{state}",
+            "{digest}",
+            "{piece}"
+          ],
+          "cwd": "apps/server"
+        },
+        "drop": {
+          "program": "node",
+          "args": [
+            "test/warm/pglite.mjs",
+            "drop",
+            "{state}",
+            "{digest}",
+            "{piece}"
+          ],
+          "cwd": "apps/server"
+        },
+        "list": {
+          "program": "node",
+          "args": [
+            "test/warm/pglite.mjs",
+            "list",
+            "{state}"
+          ],
+          "cwd": "apps/server"
+        },
+        "env": [
+          "HH_PGLITE_TEMPLATE"
+        ]
+      },
+      "uses": {
+        "programs": [
+          "vitest"
+        ],
+        "files": [
+          "apps/server/test/**/*.test.ts"
+        ]
+      }
+    },
+    {
+      "id": "postgres",
+      "start": {
+        "program": "node",
+        "args": [
+          "apps/server/test/warm/postgres.mjs",
+          "start",
+          "{state}"
+        ],
+        "cwd": "."
+      },
+      "ready": {
+        "program": "node",
+        "args": [
+          "apps/server/test/warm/postgres.mjs",
+          "ready",
+          "{state}"
+        ],
+        "cwd": "."
+      },
+      "piece": {
+        "create": {
+          "program": "node",
+          "args": [
+            "apps/server/test/warm/postgres.mjs",
+            "create",
+            "{state}",
+            "{piece}"
+          ],
+          "cwd": "."
+        },
+        "drop": {
+          "program": "node",
+          "args": [
+            "apps/server/test/warm/postgres.mjs",
+            "drop",
+            "{state}",
+            "{piece}"
+          ],
+          "cwd": "."
+        },
+        "list": {
+          "program": "node",
+          "args": [
+            "apps/server/test/warm/postgres.mjs",
+            "list",
+            "{state}"
+          ],
+          "cwd": "."
+        },
+        "env": [
+          "TEST_DATABASE_URL",
+          "HH_TEST_PG_PIECE"
+        ]
+      },
+      "uses": {
+        "programs": [
+          "vitest"
+        ],
+        "files": [
+          "apps/server/test/postgres/**/*.pg.spec.ts"
+        ]
+      }
+    }
+  ]
+}
