@@ -27,6 +27,12 @@ function Shown({ parts }: { parts: LoadPart[] }) {
   return <LanguageProvider><LoadState load={load} /><i className="phase">{load.phase}</i></LanguageProvider>;
 }
 
+/* A page area with nothing cached: where a state of the service road says itself in place. */
+function ShownScreen({ parts }: { parts: LoadPart[] }) {
+  const load = useLoad(parts);
+  return <LanguageProvider><LoadState load={load} form="screen" /><i className="phase">{load.phase}</i></LanguageProvider>;
+}
+
 /* A held list: its skeleton while the data comes, the rows once the load is done. */
 function Held({ parts }: { parts: LoadPart[] }) {
   const load = useLoad(parts);
@@ -157,19 +163,27 @@ describe('the wait of one load', () => {
     expect(phase(container)).toBe('done');
   });
 
-  it('says a state of the service road in place of the ring while one stands: the logo and the same line, nothing to press', () => {
-    const { container } = render(<Shown parts={[part(undefined)]} />);
+  it('says a state of the service road in place of the ring of a page area while one stands: the logo and the same line, nothing to press', () => {
+    const { container } = render(<ShownScreen parts={[part(undefined)]} />);
     later(RING_DELAY_MS);
-    expect(container.querySelector('.load-busy')).not.toBeNull();
+    expect(container.querySelector('.load-boot')).not.toBeNull();
     act(() => service.notify('x', 'A state'));
-    expect(container.querySelector('.load-busy')).toBeNull();
-    const loader = container.querySelector('.service-loader')!;
+    expect(container.querySelector('.load-boot')).toBeNull();
+    const loader = container.querySelector('.svc-loader')!;
     expect(loader.textContent).toBe('A state');
     expect(loader.querySelector('svg .mk-dome')).not.toBeNull();
     expect(loader.querySelectorAll('button')).toHaveLength(0);
     act(() => service.clear('x'));
-    expect(container.querySelector('.service-loader')).toBeNull();
+    expect(container.querySelector('.svc-loader')).toBeNull();
+    expect(container.querySelector('.load-boot')).not.toBeNull();
+  });
+
+  it('keeps its own ring and words for a small part of a card while a state of the service road stands', () => {
+    const { container } = render(<Shown parts={[part(undefined)]} />);
+    later(RING_DELAY_MS);
+    act(() => service.notify('x', 'A state'));
     expect(container.querySelector('.load-busy')).not.toBeNull();
+    expect(container.querySelector('.svc-loader')).toBeNull();
   });
 });
 

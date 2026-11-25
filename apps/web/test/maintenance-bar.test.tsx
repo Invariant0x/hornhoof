@@ -42,6 +42,8 @@ type Answer = readonly [number, unknown?];
 function server(routes: Record<string, Answer>, updates: 'running' | 'none' = 'running', available: Record<string, Answer> = {}) {
   const state = { held: true, polls: 0 };
   const calls = mockApi({
+    /* The page looks at the server before it says anything of it: an update that holds the server refuses the look too. */
+    'GET /api/build': () => (state.held ? [...REFUSED] : [200, { build: 'test' }]),
     'GET /api/updates': () => {
       state.polls++;
       if (updates === 'none' || (state.held && state.polls > 1)) return [...REFUSED];
@@ -57,8 +59,10 @@ const bars = () => screen.queryAllByRole('alert').map(alert => alert.textContent
 /* Answers already given are taken in: a number of turns of the event loop, with no timer. */
 const takenIn = () => act(async () => { for (let i = 0; i < 20; i++) await new Promise<void>(resolve => setImmediate(resolve)); });
 const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name });
-/* The service road says the update with its bar: how far it is, as the step it reports. */
-const progress = () => screen.getByRole('progressbar', { name: 'Updating' });
+/* The service road says the update in its one window, with its bar: how far it is, as the step it reports. A page area with
+   nothing cached says the same line and bar in its own place, so the window is where the bar is looked for. */
+const road = () => screen.getByRole('dialog', { name: 'Updating' });
+const progress = () => within(road()).getByRole('progressbar');
 
 /* The Shell under a held server, with the panel saying maintenance after the next poll on the test's clock. */
 async function held(routes: Record<string, Answer>, available?: Record<string, Answer>) {
@@ -278,39 +282,47 @@ describe('a maintenance refusal while the update panel shows', () => {
   });
 });
 
-describe('what still draws its bar', () => {
-  it('a maintenance refusal while no update panel shows, as for a person who does not see the whole company', async () => {
+describe('what the service road says, and what still draws its bar', () => {
+  it('a maintenance refusal with no update panel, as for a person who does not see the whole company: the road says it, the map adds no bar', async () => {
     server({ 'GET /api/org': [200, ORG] });
     render(<><Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
-    await waitFor(() => screen.getByText(MAINTENANCE));
-    /* The map says it where it will stand, in the block of a failed load (#1620). */
-    expect(screen.getByText(MAINTENANCE).closest('[role="alert"]')).not.toBeNull();
+    await waitFor(road);
+    await takenIn();
+    /* No update run is known to this person, so the window has its line and no bar; the map says nothing of its own. */
+    expect(within(road()).queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.queryByText(MAINTENANCE)).not.toBeInTheDocument();
+    expect(bars()).toEqual([]);
   });
 
-  it('a maintenance refusal while the updates screen has nothing to show yet', async () => {
+  it('a maintenance refusal while the updates screen has nothing to show yet: the road says it with no bar', async () => {
     server({ 'GET /api/org': [200, ORG] }, 'none');
     render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
-    await waitFor(() => screen.getByText(MAINTENANCE));
-    expect(screen.queryByRole('progressbar', { name: 'Updating' })).not.toBeInTheDocument();
+    await waitFor(road);
+    await takenIn();
+    expect(within(road()).queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.queryByText(MAINTENANCE)).not.toBeInTheDocument();
+    expect(bars()).toEqual([]);
   });
 
-  it('a maintenance refusal when a server move replaces the update panel', async () => {
+  it('a maintenance refusal when a server move shows: the road says the update once, and the move says itself', async () => {
     mockApi({
+      'GET /api/build': [...REFUSED],
       'GET /api/updates': [200, view('install')],
       'GET /api/org': [...REFUSED],
       'GET /api/network/switch': [200, { self: null, moving: true, from: null, to: 'm1', since: null, cut: false, question: false }],
     });
     render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
     await waitFor(() => screen.getByText(/Moving the company to another machine/));
+    await waitFor(road);
     await takenIn();
-    expect(bars()).toContainEqual(expect.stringContaining(MAINTENANCE));
-    expect(screen.queryByRole('progressbar', { name: 'Updating' })).not.toBeInTheDocument();
+    expect(screen.queryByText(MAINTENANCE)).not.toBeInTheDocument();
+    expect(bars()).toEqual([]);
   });
 
   it('a failure other than maintenance while the update runs', async () => {
     mockApi({ 'GET /api/updates': [200, view('install')], 'GET /api/org': [...BROKEN] });
     render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
-    await waitFor(() => screen.getByRole('progressbar', { name: 'Updating' }));
+    await waitFor(progress);
     await waitFor(() => expect(bars()).toEqual([expect.stringContaining(en.load.failed.server)]));
   });
 });

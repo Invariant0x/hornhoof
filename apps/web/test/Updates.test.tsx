@@ -104,9 +104,10 @@ describe('updates', () => {
     expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/updates')).toBe(true);
     await user.click(await screen.findByRole('button', { name: 'Update' }));
     expect(calls.filter(c => c.method === 'POST' && c.path === '/api/updates').pop()!.body).toEqual({ version: 'latest', whenIdle: false });
-    /* The service road says it at once, in its window, with no bar until the updater says how far it is. */
+    /* The service road says it at once, in its window, and the banner under the menu is gone; once the updater says it is at
+       its first step, the bar stands at the start. */
     expect(await screen.findByRole('dialog', { name: 'Updating' })).toBeInTheDocument();
-    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(await screen.findByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
     expect(screen.queryByRole('status', { name: 'Hornhoof update' })).not.toBeInTheDocument();
   });
 
@@ -247,7 +248,9 @@ describe('updates', () => {
     await user.click(within(within(dialog).getAllByRole('listitem')[2]!).getByRole('button', { name: 'Install' }));
     await user.click(within(dialog).getByRole('button', { name: 'Go back to 0.3.0 (ccccccc)' }));
     expect(await within(dialog).findByText('Updating Hornhoof to 0.3.0 (ccccccc)')).toBeInTheDocument();
-    expect(within(screen.getByRole('status', { name: 'Hornhoof update' })).getByText('Updating Hornhoof to 0.3.0 (ccccccc)')).toBeInTheDocument();
+    /* The service road says the update in its one window; the banner under the menu is not drawn while it runs. */
+    expect(await screen.findByRole('dialog', { name: 'Updating' })).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Hornhoof update' })).not.toBeInTheDocument();
     expect(calls.find(c => c.method === 'POST' && c.path === '/api/updates')!.body).toEqual({ version: '0.3.0', whenIdle: false });
   });
 

@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import type { EventView } from '../src/types';
-import { en } from '../src/i18n/en';
 import { STUCK_MS } from '../src/ui/Loading';
 import { CARD, DEV_ORG, ME, mockApi, ORG } from './api-mock';
 
