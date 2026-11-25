@@ -7,9 +7,23 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ## [Unreleased]
 
+### Fixed
+
+- A checking stage follows its owner when the owner's plan or model changes, by hand, through a fallback plan and back, or because a plan leaves the company: the owner keeps the stage when every rule that chose it still holds, and otherwise the stage waits with its reason and the department head is told, instead of every later result being refused with "The checking assignment changed".
+- A short one-shot Antigravity call no longer hangs on a long prompt: agy reads its prompt on stdin, and a one-shot call ends at its time limit.
+- A check started from inside a check that already holds the machine's check slot runs in that slot instead of waiting behind its own parent in the queue.
+
+### Added
+
+- Company achievements are computed on the server from verified records only and taken back when their record is undone; human members read them at `/api/world/rewards`, and `/api/world/rewards/showcase` carries no private data.
+- A development department runs its turn in slots, one task for each of up to five developers: a task that finds them all busy waits in a queue that the task card and the Turns and releases screen show, the next turn takes the queue in, and urgent work goes past it.
+- A task records who asked for it besides who decides it, and the list "Mine" holds what a person asked for and what waits for their decision; new task trees keep three levels, a reason for each sub-task and at most five under a task.
+- A repository can declare the test services its checks need in `.hornhoof/warm-services.json`: the node keeps each one warm, one set per machine, gives every check that needs it its own piece with its check slot and drops the piece afterwards, sweeps pieces whose run died, and starts a check that needs none at once. Hornhoof's own tests use it for one PGlite template per machine, read in place by every run, and one warm PostgreSQL 17 for the real-Postgres specs.
+
 ### Changed
 
 - A copy of the company's data that its keeper gave up can be made again from the machine's card with "Try again", the CEO's alone. The company server gives no data to a machine whose path to it is measured too weak for a copy: under 2 Mbps, a rate at which the whole database would take over six hours, or a round trip over 1.5 seconds. A copy that is not whole on such a path is dropped with its slots on the server and waits, and goes on by itself once the path is no longer measured so; the machine's card says which, and Failures holds one card for each copy given up, with what to do.
+- The Development template gives a new company the code pipeline as a tree (Development first, then Review, Security, Tests and the release, Architecture on request beside it), one Hotfix unit for urgent work in place of the turnkey team, and one Security read of the whole turn branch instead of one for each task; a function moves existing departments to it for the update, keeping what was changed by hand.
 
 ## [0.44.1] - 2026-11-25
 

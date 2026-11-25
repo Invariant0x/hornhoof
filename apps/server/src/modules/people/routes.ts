@@ -7,7 +7,7 @@ import type { Ctx } from '../../app.js';
 import { AccessInput, accessOf, agentSpot, canReach, checkAccess, saveAccess } from '../../auth/access.js';
 import { guard, limiter } from '../../auth/limit.js';
 import { hashPassword } from '../../auth/password.js';
-import { employeeChangedBy, personColumns, requireCompanyScope, requirePerson, startSession, type Person } from '../../auth/session.js';
+import { actorOf, employeeChangedBy, personColumns, requireCompanyScope, requirePerson, startSession, type Person } from '../../auth/session.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
@@ -21,6 +21,7 @@ import { afterLeave, cutReplication, leaveData, leavingData } from '../copies/sc
 import { publicUrl } from '../link/link.js';
 import { disconnectMachines, finishDisconnectedMachines, refuseLeader } from '../nodes/disconnect.js';
 import { removeSubscription } from '../subscriptions/routes.js';
+import { repinMoved } from '../tasks/echelons-repin.js';
 import { personView, personViews } from './views.js';
 
 const INVITE_DAYS = 7;
@@ -161,7 +162,7 @@ async function releasePlansOf(ctx: Ctx, owner: Pick<Person, 'id' | 'companyId' |
   if (!theirs.length) return;
   const bound = await db.select(idOnly(agents)).from(agents).where(and(inArray(agents.subscriptionId, theirs), isNull(agents.removedAt)));
   const access = await accessOf(db, owner);
-  let freed = false;
+  const freed: string[] = [];
   for (const { id } of bound) {
     /* In the agent's line, so a card change that read the plan cannot put it back. */
     await onAgent(ctx, id, async () => {
@@ -175,10 +176,13 @@ async function releasePlansOf(ctx: Ctx, owner: Pick<Person, 'id' | 'companyId' |
         await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: id, ...employeeChangedBy(by), field: 'subscription', before: agent.subscriptionId, after: null });
       });
       await releaseLeftProgram(ctx, id, agent.subscriptionId);
-      freed = true;
+      freed.push(id);
     });
   }
-  if (freed) ctx.bus.publish(owner.companyId, { type: 'org' });
+  if (!freed.length) return;
+  ctx.bus.publish(owner.companyId, { type: 'org' });
+  /* With no plan they hold no checking stage: each goes back to the head with the reason. */
+  await repinMoved(ctx, freed, actorOf(by));
 }
 
 /* A person's account ends: their sessions go, their machines leave the company, and their plans stop serving it. by:

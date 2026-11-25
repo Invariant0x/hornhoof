@@ -9,6 +9,7 @@ import type { runTests, TestsDone } from './tests.js';
 import type { TestPartUser } from './test-environment.js';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { classifyAgentCommand, classifyRunWork, localCommandFiles, refusalText, type CommandFiles, type CommandInput } from './command-guard.js';
+import { WarmServices } from './warm-services.js';
 
 export function createAgentCommandGuard(dir: string): CheckCommandGuard {
   return async (key, input) => {
@@ -36,9 +37,12 @@ async function commandContext(dir: string, key: string, requestedCwd: string): P
   return { cwd, workspaceRoot: root };
 }
 
-export function startCheckClient(dir: string, terminal: { user?: JobUser | null } | undefined, transport: () => ((frame: ProgramNodeMessage) => boolean) | null): CheckClient {
+/* The machine's warm test services live in its data folder, and stay up when the node stops: the next one uses them. */
+export function startCheckClient(dir: string, terminal: { user?: JobUser | null } | undefined, transport: () => ((frame: ProgramNodeMessage) => boolean) | null, log: (line: string) => void = () => {}): CheckClient {
   const checks = new CheckClient(frame => transport()?.(frame) ?? false);
-  setCheckClient(checks); configureCheckCommands(terminal?.user ?? null, createAgentCommandGuard(dir)); installCheckCommand(dir);
+  const warm = new WarmServices({ root: join(dir, 'warm'), user: terminal?.user ?? null, log });
+  void warm.start();
+  setCheckClient(checks); configureCheckCommands(terminal?.user ?? null, createAgentCommandGuard(dir), warm); installCheckCommand(dir);
   return checks;
 }
 
