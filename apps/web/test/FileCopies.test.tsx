@@ -22,10 +22,26 @@ describe('File copies in Settings', () => {
     expect(screen.getByText('Each file is kept on 2 machines now. 3 machines keep files.')).toBeInTheDocument();
     expect(screen.getByText("The files take 3.4 GB of the 15.0 GB the machines' areas hold.")).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    /* A server from before the archive of agents' history says nothing of it, and nothing of it shows. */
+    expect(screen.queryByRole('combobox', { name: "Days agents' work stays in the database" })).not.toBeInTheDocument();
 
     await userEvent.selectOptions(select, '3');
     await waitFor(() => expect(calls.find(call => call.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/company/file-store', body: { copies: 3 } }));
     expect(await screen.findByText('Each file is kept on 3 machines now. 3 machines keep files.')).toBeInTheDocument();
+  });
+
+  it("sets the days agents' work stays in the database before it moves into the file store", async () => {
+    const calls = mockApi({
+      'GET /api/company/file-store': [200, viewOf({ historyDays: 14 })],
+      'PATCH /api/company/file-store': body => [200, viewOf({ historyDays: (body as { historyDays: number }).historyDays })],
+    });
+    shown();
+    const days = await screen.findByRole('combobox', { name: "Days agents' work stays in the database" });
+    expect(days).toHaveValue('14');
+    expect(screen.getByText(/then moves into the file store/)).toBeInTheDocument();
+    await userEvent.selectOptions(days, '7');
+    await waitFor(() => expect(calls.find(call => call.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/company/file-store', body: { historyDays: 7 } }));
+    await waitFor(() => expect(days).toHaveValue('7'));
   });
 
   it('says when one machine keeps files, when files are kept fewer times than asked, and what waits for room', async () => {

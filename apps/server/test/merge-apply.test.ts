@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import type { Ctx } from '../src/app.js';
 import type { Db } from '../src/db/client.js';
 import {
-  agentChanges, agentEvents, agents, attachments, companies, computerRuns, departments, jobs, machineAccess, machines, mapReturns, nodes, notebookNotes, people, personAccess, programInstances,
+  agentChanges, agentEventArchives, agentEvents, agents, attachments, companies, computerRuns, departments, jobs, machineAccess, machines, mapReturns, nodes, notebookNotes, people, personAccess, programInstances,
   programOperatorCases, sessions, subscriptions, taskEvents, tasks, teams, testParts, testRuns, turns, worldLayouts,
 } from '../src/db/schema.js';
 import { idOnly, only } from '../src/db/selections.js';
@@ -117,6 +117,25 @@ describe('a merge applied', () => {
     await again.merge(other, { kept });
     const order = await again.db.select().from(agentEvents).orderBy(agentEvents.seq);
     expect(order.map(event => event.id)).toEqual([...told].sort((a, b) => Number(a.seq) - Number(b.seq)).map(event => event.id));
+  });
+
+  /* #2126: an event the leader moved into its archive of an agent's old history is not one it lacks. */
+  it.each([false, true])('adds no event the leader archived, kept %s', async kept => {
+    const s = await stand();
+    const ended = new Date(Date.now() - 30 * 86_400_000);
+    const [done] = await s.db.insert(jobs).values({ ...s.on, subscriptionId: s.plan.id, agentId: s.ana.id, prompt: 'Work', timeoutMs: 60_000, status: 'done', createdAt: ended, finishedAt: ended }).returning();
+    const told = await s.db.insert(agentEvents).values(['a', 'b', 'c'].map(text => ({ ...s.on, agentId: s.ana.id, jobId: done!.id, kind: 'text' as const, data: { text }, createdAt: ended }))).returning();
+    const fork = await s.sides.fork();
+    /* The leader's archive round: the archive's row names the events, and they leave the table. */
+    await s.db.insert(agentEventArchives).values({
+      ...s.on, agentId: s.ana.id, sha256: 'a'.repeat(64), firstSeq: told[0]!.seq, lastSeq: told[2]!.seq, events: 3, jobIds: [done!.id], eventIds: told.map(e => e.id),
+      firstAt: ended, lastAt: ended, clearedAt: new Date(),
+    });
+    await s.db.delete(agentEvents).where(inArray(agentEvents.id, told.map(e => e.id)));
+    const { id } = await s.merge(fork, { kept });
+    expect(await s.db.select(idOnly(agentEvents)).from(agentEvents).where(inArray(agentEvents.id, told.map(e => e.id)))).toEqual([]);
+    expect(await s.conflicts(id)).toEqual([]);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
   });
 
   it('applies a proven overwrite', async () => {
