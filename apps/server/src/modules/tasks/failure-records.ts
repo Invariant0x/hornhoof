@@ -146,15 +146,15 @@ export function lastFailureOf(ended: EndedJob | undefined): LastFailure | null {
   return { kind: ended.failure.kind, text: ended.failure.text, at: +(ended.finishedAt === null ? ended.createdAt : ended.finishedAt), tail: ended.tail };
 }
 
+/* The turns a waiting retry continues, a step at a time by their ids: a chain is a few turns long, and each step is one
+   lookup by the primary key, where one recursive query scans the table. */
 export async function retryHistory(ctx: Ctx, companyId: string, waiting: Pick<Job, 'continueOf'>[]): Promise<Map<string, Job>> {
-  const ids = waiting.flatMap(j => j.continueOf ? [j.continueOf] : []);
-  if (!ids.length) return new Map();
-  const history = await ctx.db.select().from(jobs).where(inArray(jobs.id, sql`(
-    with recursive history as (
-      select id, continue_of from jobs where company_id = ${companyId} and ${inArray(jobs.id, ids)}
-      union
-      select parent.id, parent.continue_of from jobs parent join history child on parent.id = child.continue_of where parent.company_id = ${companyId}
-    ) select id from history
-  )`));
-  return new Map(history.map(j => [j.id, j]));
+  const history = new Map<string, Job>();
+  let pending = [...new Set(waiting.flatMap(j => (j.continueOf ? [j.continueOf] : [])))];
+  while (pending.length) {
+    const rows = await ctx.db.select().from(jobs).where(and(eq(jobs.companyId, companyId), inArray(jobs.id, pending)));
+    for (const row of rows) history.set(row.id, row);
+    pending = [...new Set(rows.flatMap(row => (row.continueOf && !history.has(row.continueOf) ? [row.continueOf] : [])))];
+  }
+  return history;
 }
