@@ -12,7 +12,7 @@ import { factsOf, type Facts, type Query, type TableFacts } from '../merge/facts
 import { queryOf, quote } from '../merge/leader.js';
 import { loadTask, taskSpot, type Task } from './state.js';
 import { note } from './events.js';
-import { fileBytes } from './attachments.js';
+import { fileBytes } from './file-bytes.js';
 import { idOnly } from '../../db/selections.js';
 import { StoreRefused } from '../files/store.js';
 
