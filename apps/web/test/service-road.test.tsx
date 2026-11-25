@@ -87,7 +87,7 @@ describe('the window and the strip', () => {
   ])('go on as the strip once %s closed the window, with no window left', async (_how, close) => {
     road();
     await lose();
-    act(() => close());
+    act(() => { close(); });
 
     expect(screen.queryByRole('dialog')).toBeNull();
     const strip = screen.getByRole('status');
