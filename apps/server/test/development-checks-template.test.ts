@@ -119,11 +119,11 @@ describe('turnkey work', () => {
     for (const id of ['orch-plan-turn', 'orch-company', 'hh-head', 'hh-lead-tasks', 'dev-lead']) expect(body(id), id).not.toMatch(/plan_turn|\bturn mode\b|\bmode of (?:a|the) turn\b/i);
   });
 
-  it("tells a developer that a coding task's own route is Development only, and to hand the branch on and go to the next task", () => {
+  it("tells a developer that a coding task's own route is Development only, and to hand the branch on and take no task of their own", () => {
     const flow = body('dev-task-flow');
     expect(flow).toMatch(/own route is Development only[\s\S]*Review, Security and Tests[\s\S]*once, on the whole turn branch/);
     expect(flow).toMatch(/with no return to you/);
-    expect(flow).toMatch(/Go straight on to your next task/);
+    expect(flow).toMatch(/Then your slot is done for this turn, and you take no new task of your own/);
     expect(flow).not.toMatch(/turnkey|report done true|\bsubmit\b/i);
   });
 });

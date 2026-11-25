@@ -576,7 +576,7 @@ describe('templates', () => {
     const ids = dev.filter(r => r.inDefault).map(r => r.id);
     /* The default roster has someone for every echelon: Architecture, Development, Review, Security and Tests. */
     expect(ids).toEqual(['DEV-HEAD', 'DEV-ARCH', 'DEV-ENG', 'DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-PM']);
-    expect(dev.filter(r => !r.inDefault).map(r => r.id)).toEqual(['DEV-BE', 'DEV-FE', 'DEV-OPS', 'DEV-RED', 'DEV-QA', 'DEV-DOCS', 'DEV-PERF']);
+    expect(dev.filter(r => !r.inDefault).map(r => r.id)).toEqual(['DEV-BE', 'DEV-FE', 'DEV-OPS', 'DEV-RED', 'DEV-QA', 'DEV-DOCS', 'DEV-PERF', 'DEV-HOT']);
     expect(templates.roles.get('DEV-FE')!.title).toEqual({ en: 'Interface developer', ru: 'Разработчик интерфейсов' });
     expect(templates.roles.get('DEV-BE')!.title).toEqual({ en: 'Backend engineer', ru: 'Бэкенд-разработчик' });
     expect(templates.roles.get('DSN-UI')!.perProduct).toBe(true);
@@ -1833,7 +1833,7 @@ const SINGLE_RELEASE_RUN_RULES: { id: string; holds: (s: SingleReleaseRunSkills)
   },
   {
     id: 'the-release-relies-on-the-repositorys-ci',
-    holds: s => /affected tests in your workspace|local tests of the files it reaches/i.test(s.runChecks) && /release does not use run_tests: it relies on the repository's own CI/i.test(s.runChecks) && /relies on the repository's own CI for that exact commit[\s\S]*never replace them with a run of your own machines/i.test(s.devCiRelease),
+    holds: s => /affected tests in your workspace|local tests of the files it reaches/i.test(s.runChecks) && /whole suite runs exactly once per release, right before the release, in the Tests stage, through the release check the project declares/i.test(s.runChecks) && /relies on the repository's own CI for that exact commit[\s\S]*never replace them with a run of your own machines/i.test(s.devCiRelease),
   },
   {
     id: 'lead-tasks-preserves-coordination-and-hold-meaning',
@@ -1857,7 +1857,7 @@ describe('work joins the turn at once and leaves no record-only commits', () => 
 
   it('has a developer take its checked branch into the turn branch itself, waiting for no go-ahead and no release', () => {
     expect(skill('dev-task-flow')).toMatch(/Hand in the branch yourself[\s\S]*take the open turn branch into it[\s\S]*fast-forward the turn branch/);
-    expect(skill('dev-task-flow')).toMatch(/Wait for nobody's go-ahead, for no release to ship and for no next turn to open/);
+    expect(skill('dev-task-flow')).toMatch(/Wait for nobody's go-ahead to hand in, and hold no finished result back for the release/);
     expect(skill('dev-task-flow')).toMatch(/a clean merge needs no new checks/);
   });
 

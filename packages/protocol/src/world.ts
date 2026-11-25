@@ -54,10 +54,10 @@ export const RESIDENT_LIVE_STATES = [
 ] as const;
 export type ResidentLiveState = (typeof RESIDENT_LIVE_STATES)[number];
 
-/* All 75 role templates declared in templates/roles across all 11 Hornhoof department templates. */
+/* All 76 role templates declared in templates/roles across all 11 Hornhoof department templates. */
 export const ALL_HORNHOOF_ROLE_KEYS = [
   'BIZ-ANALYST', 'BIZ-HEAD', 'BIZ-PARTNER', 'BIZ-PM', 'BIZ-REV',
-  'DEV-ARCH', 'DEV-BE', 'DEV-DOCS', 'DEV-ENG', 'DEV-FE', 'DEV-HEAD', 'DEV-OPS', 'DEV-PERF', 'DEV-PM', 'DEV-QA', 'DEV-RED', 'DEV-REV', 'DEV-SEC', 'DEV-TEST',
+  'DEV-ARCH', 'DEV-BE', 'DEV-DOCS', 'DEV-ENG', 'DEV-FE', 'DEV-HEAD', 'DEV-HOT', 'DEV-OPS', 'DEV-PERF', 'DEV-PM', 'DEV-QA', 'DEV-RED', 'DEV-REV', 'DEV-SEC', 'DEV-TEST',
   'DSN-HEAD', 'DSN-PM', 'DSN-QA', 'DSN-SYS', 'DSN-UI',
   'FIN-AUDIT', 'FIN-BOOK', 'FIN-FPA', 'FIN-HEAD', 'FIN-PM',
   'HHD-BILLS', 'HHD-CAL', 'HHD-HEAD', 'HHD-PM', 'HHD-SUPPLY',
@@ -95,6 +95,7 @@ const ROLE_EXACT_MAP: Readonly<Record<string, { roleClass: ResidentRoleClass; ar
   'DEV-BE': { roleClass: 'executor', archetype: 'builder' },
   'DEV-FE': { roleClass: 'executor', archetype: 'builder' },
   'DEV-PERF': { roleClass: 'executor', archetype: 'builder' },
+  'DEV-HOT': { roleClass: 'executor', archetype: 'builder' },
   'DEV-OPS': { roleClass: 'executor', archetype: 'road_builder' },
   'DEV-DOCS': { roleClass: 'executor', archetype: 'scribe' },
   'DEV-PM': { roleClass: 'executor', archetype: 'scribe' },

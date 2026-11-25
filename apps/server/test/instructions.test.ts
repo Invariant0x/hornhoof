@@ -88,10 +88,10 @@ const INTEGRATION_ABILITIES = ['dev-gates', 'dev-task-flow', 'dev-lead', 'dev-wo
 
 /* The one Security rule, as the CEO approved it on 24.11 for the batch pipeline: Security reads the whole turn branch once, after
    Review and before Tests, and fixes what it finds there; nothing reaches main without that pass; the hotfix lane's fix has its
-   own read before its patch release. The older rule (a pass for every task before any shared branch, and a turnkey member alone)
+   own read before its patch release when it touches access, secrets or root processes (Ivan, 24.11 20:05). The older rule (a pass for every task before any shared branch, and a turnkey member alone)
    is nowhere. */
 const SECURITY_RULE =
-  "Security reads the whole turn branch once, after Review and before Tests, and fixes what it finds there; nothing goes to main without that pass; the hotfix lane's fix gets its own Security read before its patch release.";
+  "Security reads the whole turn branch once, after Review and before Tests, and fixes what it finds there; nothing goes to main without that pass; the hotfix lane's fix gets its own Security read before its patch release when it touches access, secrets or root processes, and any other hotfix rests on the batch stages of the release.";
 
 /* Check the delivered policy's obligations, rather than pinning its wording. */
 function preMergeSecurityProblems(text: string): string[] {

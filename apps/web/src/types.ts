@@ -283,6 +283,9 @@ export type ApprovalPolicyView = {
   canChangePolicy: boolean;
   autonomousRelease?: boolean;
   canSetAutonomousRelease?: boolean;
+  /* How the department starts its next turn after a release, and whether this person changes it. */
+  turnStart?: 'automatic' | 'manual';
+  canSetTurnStart?: boolean;
   hasAutonomousReleases?: boolean;
   /* Who the CEO may name: active people with access to the department. */
   candidates: { id: string; name: string; title: string }[];
@@ -799,6 +802,12 @@ export type TurnView = {
   openedAt: string | null;
   closedAt: string | null;
   tasks: { total: number; done: number };
+  /* A turn that waits for a person to start it, its department standing until then, and whether this person starts it. */
+  waiting?: boolean;
+  canStart?: boolean;
+  /* When the release branch was cut and as which branch: the batch is frozen from then until the tag. */
+  cutAt?: string | null;
+  cutBranch?: string | null;
 };
 
 /* The departments whose tasks a person reads, and whether they have the whole company. mine: a department of the person's

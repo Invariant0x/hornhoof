@@ -85,7 +85,7 @@ async function ownerCandidates(ctx: Pick<Ctx, 'db'>, companyId: string, departme
 
 export const mayChangeRules = async (db: Pick<Db, 'select'>, me: Person, departmentId: string) => actsAsCeo(me) || (await accessOf(db, me)).owns?.has(departmentId) === true;
 
-async function mayChangeApprovalPolicy(db: Pick<Db, 'select'>, me: Person, departmentId: string): Promise<boolean> {
+export async function mayChangeApprovalPolicy(db: Pick<Db, 'select'>, me: Person, departmentId: string): Promise<boolean> {
   if (me.status !== 'active' || me.assistant) return false;
   if (me.viaHead && me.via) {
     const [head] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.id, me.via), eq(agents.companyId, me.companyId),
@@ -112,6 +112,8 @@ async function policyView(ctx: Pick<Ctx, 'db'>, me: Person, dept: DeptRow) {
     canChangePolicy,
     autonomousRelease,
     canSetAutonomousRelease: canChangePolicy,
+    turnStart: dept.turnStart,
+    canSetTurnStart: canChangePolicy,
     hasAutonomousReleases,
     candidates: ownerList,
     rules,

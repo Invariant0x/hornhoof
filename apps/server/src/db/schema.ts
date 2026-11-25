@@ -78,6 +78,8 @@ const resolutionChecks = (name: string, t: ResolutionColumns) => [
 /* How mail from employees and Hornhoof reaches an employee: kept in its inbox and taken in one turn for the lot, or each
    as a turn of its own and into the turn that runs. */
 export const INBOX_MODES = ['inbox', 'direct'] as const;
+/* How a department's next turn starts once a release closes the one before: by itself, or only when a person confirms it. */
+export const TURN_STARTS = ['automatic', 'manual'] as const;
 export type InboxMode = (typeof INBOX_MODES)[number];
 
 export const companies = pgTable('companies', {
@@ -337,8 +339,11 @@ export const departments = pgTable('departments', {
   /* How many slots its turn holds at most, one per developer of the department: a task takes a slot and the next waits in the
      queue for the next turn. None: the department runs no slots and gives every task out at once. */
   slotCap: integer('slot_cap'),
+  /* Whether the turn that opens after a release takes the queue in by itself (automatic) or opens waiting, the department
+     standing, until a person confirms it (manual). Urgent work goes past either. */
+  turnStart: text('turn_start', { enum: TURN_STARTS }).notNull().default('automatic'),
   createdAt: createdAt(),
-}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`), check('departments_slot_cap', sql`${t.slotCap} is null or ${t.slotCap} >= 1`)]);
+}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_turn_start', sql`${t.turnStart} IN ('automatic', 'manual')`), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`), check('departments_slot_cap', sql`${t.slotCap} is null or ${t.slotCap} >= 1`)]);
 
 /* A key of a git host Hornhoof creates repositories with, for now GitHub's: its token, encrypted with the server's secret and
    shown by its last 4 characters, and the user or organization the repositories go to. The company keeps one, and a
@@ -1127,6 +1132,12 @@ export const turns = pgTable(
     /* Who closed a turn with no version and why: Hornhoof, by itself, when it held nothing for a release. None for a turn its
        release tag closed, or one closed by hand. */
     closedBecause: text('closed_because'),
+    /* When a person (or, in a department that starts turns by itself, the release) started the turn: none while it waits for
+       one, and the department stands. */
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }).defaultNow(),
+    /* When the release branch was cut and the branch it was cut as: from then on nothing joins the batch, until the tag. */
+    cutAt: timestamp('cut_at', { withTimezone: true }),
+    cutBranch: text('cut_branch'),
   },
   t => [
     unique('turns_company_number').on(t.companyId, t.number),

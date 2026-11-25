@@ -38,7 +38,7 @@ import { departmentBranches } from './branches.js';
 import { coversEveryPart } from '../testruns/github-status.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
 import { nextRevision } from '../tracker/revision.js';
-import { slotCapOfNew } from '../tasks/slots.js';
+import { slotCapOfNew, turnStartOfNew } from '../tasks/slots.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const TeamParams = z.object({ id: z.uuid(), teamId: z.uuid() });
@@ -327,7 +327,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (isNew(item)) {
           const [dept] = await tx
             .insert(departments)
-            .values({ companyId: me.companyId, templateKey: item.template, name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++, slotCap: slotCapOfNew(item.template) })
+            .values({ companyId: me.companyId, templateKey: item.template, name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++, slotCap: slotCapOfNew(item.template), turnStart: turnStartOfNew(item.template) })
             .returning();
           await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, me.companyId)).for('no key update');
           await ensureOpenTurn(tx, me.companyId, dept!.id);

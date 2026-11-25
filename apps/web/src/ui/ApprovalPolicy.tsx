@@ -238,6 +238,47 @@ function AutonomousReleaseControl({
   );
 }
 
+/* How the department starts its next turn after a release: by itself, or only when a person confirms it, for the people who run it
+   to change, in words for everyone else. */
+function TurnStartControl({ departmentId, view, onSaved }: { departmentId: string; view: ApprovalPolicyView; onSaved(next: ApprovalPolicyView): void }) {
+  const tt = useT();
+  const t = tt.dept.approvals;
+  const mode = view.turnStart ?? 'automatic';
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  async function change(next: 'automatic' | 'manual') {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await api.put(`/api/departments/${departmentId}/turn-start`, { mode: next });
+      onSaved({ ...view, turnStart: next });
+    } catch (err) {
+      setFailure(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="appr-auto">
+      {view.canSetTurnStart ? (
+        <fieldset className="segments appr-turn-start" disabled={busy}>
+          <legend>{t.turnStart}</legend>
+          {(['automatic', 'manual'] as const).map(m => (
+            <label key={m} className={m === mode ? 'on' : ''}>
+              <input type="radio" name={`turn-start-${departmentId}`} value={m} checked={m === mode} onChange={() => void change(m)} />
+              {t.turnStartModes[m]}
+            </label>
+          ))}
+        </fieldset>
+      ) : (
+        <p className="muted">{t.turnStartState(mode === 'manual')}</p>
+      )}
+      <p className="muted">{t.turnStartHint}</p>
+      {failure !== null && <p className="alert" role="alert">{errorText(tt, failure)}</p>}
+    </div>
+  );
+}
+
 function ChannelFieldset({
   departmentId,
   path,
@@ -302,6 +343,7 @@ export function ApprovalPolicy({ departmentId, ownerPersonId }: Props) {
           <ChannelFieldset key={rule.channel} departmentId={departmentId} path={path} view={view} rule={rule} modes={modes} onSaved={setView} />
         ))}
       </div>
+      {view.turnStart && <TurnStartControl departmentId={departmentId} view={view} onSaved={setView} />}
     </div>
   );
 }

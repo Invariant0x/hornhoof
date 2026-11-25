@@ -19,6 +19,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Two languages made for tests, a text 40% longer than English and the same text mirrored, are checked on the main screens at phone and desktop widths for cut text and sideways scroll. They never reach a person.
 - A development department runs its turn in slots, one task for each of up to five developers: a task that finds them all busy waits in a queue that the task card and the Turns and releases screen show, the next turn takes the queue in, and urgent work goes past it.
 - A task records who asked for it besides who decides it, and the list "Mine" holds what a person asked for and what waits for their decision; new task trees keep three levels, a reason for each sub-task and at most five under a task.
+- A department sets how its next turn starts: by itself, or only when a person confirms it. Development waits for the person: after a release the turn opens waiting, nobody is given work from the queue, the Turns and releases screen shows it with a button for the people who run the department, and urgent work goes on. From the cut of the release branch (`release-X.Y.Z`) to its tag the turn's batch is frozen: a new task waits in the queue for the next turn.
 
 ### Changed
 
@@ -26,6 +27,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A skin file of your own may name the skin in any language of the registry, with the English name required and the others optional, and the names of a world's employees can be taken in any language of the registry.
 - Follower machines that hold company data no longer prune their local backup bundles during worker backup-holder sweeps, keeping their own backups and saved former-leader bundles on disk while still sending any bundle the server asks for.
 - The Development template gives a new company the code pipeline as a tree (Development first, then Review, Security, Tests and the release, Architecture on request beside it), one Hotfix unit for urgent work in place of the turnkey team, and one Security read of the whole turn branch instead of one for each task; a function moves existing departments to it for the update, keeping what was changed by hand.
+- A project declares how a release is checked as a whole in `execution.releaseCheck` of its test environment, next to its full run: its own CI, a command of its own, or one run of the shared runner. The skills say that the whole suite runs exactly once per release, in the Tests stage, through that check, that nobody else starts it, and that checks needing no service run at once in the developer's own workspace and never wait in a queue on another machine. The Hotfix unit's engineer has a role of its own with a light skill set: read the cause, the smallest change, check only the touched files, three lines of report.
 
 ## [0.43.0] - 2026-11-23
 

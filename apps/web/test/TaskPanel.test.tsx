@@ -87,6 +87,7 @@ describe('the simple task card', () => {
   });
 
   it.each([
+    [0, 'Turn 44, once a person starts it'],
     [1, 'The next turn, after turn 44'],
     [2, 'The turn after next, after turn 44'],
     [3, 'The turn 3 turns ahead, after turn 44'],

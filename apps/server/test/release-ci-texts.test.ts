@@ -10,7 +10,8 @@ const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
    documents, the words of a tool or the refusal of the terminal. */
 const FORBIDDEN: { rule: RegExp; says: string }[] = [
   { rule: /\bevery test (?:of a release )?runs? together\b/i, says: 'every test runs together' },
-  { rule: /\bonce per (?:release|turn)\b/i, says: 'a whole suite once per release' },
+  /* The whole suite runs once per release, in the Tests stage, through the release check the project declares: only a text that has a turn's tests run again per turn says otherwise. */
+  { rule: /\bonce per turn\b/i, says: 'a whole suite once per turn' },
   { rule: /\bthe turn's whole release run\b|\bwhole release (?:run|suite)\b|\bfull release run\b|\brelease's (?:whole|full) (?:run|suite)\b|\bwhole run of (?:the|its|a) release\b|\bfull run of (?:the|its|a) release\b(?! workflow)/i, says: 'a whole run of the release' },
   { rule: /\brecord run\b|\bpassed whole run\b/i, says: 'a record run' },
   { rule: /\brun_tests\b[^.\n]{0,60}\brelease scope\b|\brelease needs run_tests\b/i, says: 'a release that needs run_tests' },
@@ -47,9 +48,9 @@ describe("no text says a release needs a run of Hornhoof's machines", () => {
 
   /* What replaced the rule, said in the places an agent or a person looks first. */
   it.each([
-    ['templates/skills/hh-run-checks.md', /A release does not use run_tests: it relies on the repository's own CI for its exact commit/],
+    ['templates/skills/hh-run-checks.md', /The whole suite runs exactly once per release, right before the release, in the Tests stage, through the release check the project declares/],
     ['templates/skills/dev-ci-release.md', /The release relies on the repository's own CI for that exact commit/],
-    ['templates/skills/dev-testing-policy.md', /the repository's CI runs for the release/],
+    ['templates/skills/dev-testing-policy.md', /exactly once per release, in the Tests stage, through the release check the project declares/],
     ['templates/skills/orch-plan-turn.md', /resting on the repository's own CI for that commit/],
     ['templates/skills/hh-head.md', /on the repository's green CI for that exact commit, or with no run where the repository has no CI/],
     ['guide/repositories.md', /A person names the release workflow, by the path of its file, in the repository's settings[^\n]*Hornhoof never works it out/],

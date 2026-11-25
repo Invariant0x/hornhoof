@@ -5,7 +5,8 @@ import { agents, autonomousReleases, ciDispatches, companies, departments, peopl
 import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { note } from './events.js';
-import { loadQueue, publishLoaded } from './slots.js';
+import { loadQueue, publishLoaded, startedAtOpening } from './slots.js';
+import { markCut } from './turn-start.js';
 import { refuse, type Task, type Tx } from './state.js';
 import { taskByRef } from './lookup.js';
 import { keepSnapshot } from './pipeline-report.js';
@@ -403,6 +404,8 @@ async function releaseOne(ctx: Reader, turn: Turn, repo: Repo): Promise<void> {
   const before = (await ctx.db.select(idOnly(tasks)).from(tasks).where(eq(tasks.turnId, turn.id))).map(row => row.id).sort();
   const read = await ctx.readTags(repo, 30_000);
   if ('problem' in read) return;
+  /* The cut of the release branch freezes the batch until the tag. */
+  await markCut({ db: ctx.db, bus: ctx.bus, readBranches: ctx.readBranches }, turn, repo);
   const tagged = versionsNewestFirst(read.tags);
   const records = await ctx.db.select().from(turnReleases).where(eq(turnReleases.turnId, turn.id)).orderBy(desc(turnReleases.createdAt));
   const versions = turn.baseVersion ? tagged : tagged.filter(([, commit]) => records.some(r => r.commit === commit));
@@ -486,7 +489,7 @@ async function closeTurn(ctx: Reader, repo: Repo, turn: Turn, record: Release, v
     await keepSnapshot(tx, done!, ctx.log, ctx.files);
     await recordTurnSummary(tx, done!);
     const number = (await lastTurnNumber(tx, turn.companyId)) + 1;
-    const [next] = await tx.insert(turns).values({ companyId: turn.companyId, departmentId: turn.departmentId, number, goal: 'The next release.', status: 'open', openedAt: new Date(), baseVersion: version, baseCommit: record.commit, startCommit: head }).returning();
+    const [next] = await tx.insert(turns).values({ companyId: turn.companyId, departmentId: turn.departmentId, number, goal: 'The next release.', status: 'open', openedAt: new Date(), confirmedAt: await startedAtOpening(tx, turn.departmentId!), baseVersion: version, baseCommit: record.commit, startCommit: head }).returning();
     const released = new Set(record.tasks.map(t => t.taskId));
     const left = rows.filter(row => !released.has(row.id));
     if (left.length) await tx.update(tasks).set({ turnId: next!.id }).where(inArray(tasks.id, left.map(row => row.id)));

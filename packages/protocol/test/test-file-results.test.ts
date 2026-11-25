@@ -44,6 +44,32 @@ describe('the full run of a manifest', () => {
   });
 });
 
+describe('the release check of a manifest', () => {
+  const declared = (releaseCheck: object) => manifest({ version: 2, releaseCheck });
+
+  it('names the mechanism of the one whole run of a release that the project declares: its CI, a command of its own, or one run of Hornhoof', () => {
+    expect(TestEnvironmentV1.parse(declared({ mechanism: 'ci' })).execution?.releaseCheck).toEqual({ mechanism: 'ci' });
+    expect(TestEnvironmentV1.parse(declared({ mechanism: 'command', command })).execution?.releaseCheck).toEqual({ mechanism: 'command', command });
+    expect(TestEnvironmentV1.parse(declared({ mechanism: 'hornhoof_run', profile: 'full' })).execution?.releaseCheck).toEqual({ mechanism: 'hornhoof_run', profile: 'full' });
+  });
+
+  it('sits beside the full run, which a manifest without a release check keeps as it was', () => {
+    const both = TestEnvironmentV1.parse(manifest({ version: 2, fullRun: { replaces: 'final', profile: 'full' }, releaseCheck: { mechanism: 'ci' } }));
+    expect(both.execution).toMatchObject({ fullRun: { replaces: 'final', profile: 'full' }, releaseCheck: { mechanism: 'ci' } });
+    expect(TestEnvironmentV1.parse(fullRun({ replaces: 'final', profile: 'full' })).execution?.releaseCheck).toBeUndefined();
+  });
+
+  it.each([
+    ['a mechanism nobody knows', { mechanism: 'github' }],
+    ['a command check with no command', { mechanism: 'command' }],
+    ['a CI check that carries a command', { mechanism: 'ci', command }],
+    ['a run of Hornhoof of a profile the manifest does not have', { mechanism: 'hornhoof_run', profile: 'whole' }],
+    ['a run of Hornhoof with no profile', { mechanism: 'hornhoof_run' }],
+  ])('refuses %s', (_name, value) => {
+    expect(TestEnvironmentV1.safeParse(declared(value)).success).toBe(false);
+  });
+});
+
 describe('what a suite declares for reuse', () => {
   it('takes the source a scenario drives and the paths it keeps between runs', () => {
     const parsed = TestEnvironmentV1.parse(manifest(undefined, { scenarioSources: 'web/src', keep: ['.metrics/mutate'] }));

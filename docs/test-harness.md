@@ -14,6 +14,16 @@ A harness is made of units: the dependencies, and each `prepare` entry. A unit's
 - Another architecture has other keys, so it gets its own build of the same version. The version in `harnessVersion` leaves the machine out, so it stays one.
 - What is stored never changes. A new version is a new entry beside the old one.
 
+## The release check
+
+A project says how its release is checked as a whole in `execution.releaseCheck` of its `test-environment.json`, next to `execution.fullRun`. The whole suite runs exactly once per release, right before the release, in the Tests stage, through that one mechanism, and nobody else starts it or repeats it:
+
+- `{ "mechanism": "ci" }`: the project's own CI runs it for the exact commit of the release, and the release rests on that result.
+- `{ "mechanism": "command", "command": { ... } }`: a command of the project's own, which the Tests stage runs once.
+- `{ "mechanism": "hornhoof_run", "profile": "full" }`: for a project with nothing else, one shared run of the named profile, started by the Tests stage alone.
+
+A manifest without it is read as before. Everyone else checks only what they touched, in their own workspace.
+
 ## Languages and their tools
 
 No language's tools are in the machines' image, and a product gets only those of its own languages, so a compiler a company does not use costs it nothing. They are one unit of the harness (`apps/node/src/test-tools.ts`): fetched once per product and architecture when the harness is first built, checked against the digest published with them, and passed to the other machines in its bundle like any other unit. While a part runs they are on its `PATH` by name.

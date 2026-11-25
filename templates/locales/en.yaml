@@ -35,6 +35,9 @@ roles:
   DEV-HEAD:
     title: "Head of development"
     description: "Development leader for software goals, engineering coordination and delivery."
+  DEV-HOT:
+    title: "Hotfix engineer"
+    description: "Removes an urgent defect with the smallest safe change, checked on the touched files only."
   DEV-OPS:
     title: "DevOps engineer"
     description: "Engineer of build systems, deployment and operational recovery."
@@ -301,6 +304,9 @@ skills:
   dev-gates:
     title: "Choose development checks"
     description: "Chooses checks from the assignment, task and risk, preserving independent approval before protected integration."
+  dev-hotfix:
+    title: "Urgent fix"
+    description: "Reads the cause, makes the smallest change, checks only what it touched and reports in three lines."
   dev-i18n-en-ru:
     title: "Languages of the product"
     description: "Keeps every text a user sees in each language the product supports, written well in each."
@@ -522,7 +528,7 @@ skills:
     description: "Ends every piece of work with a short status your head can act on."
   hh-run-checks:
     title: "Run change checks"
-    description: "Runs affected checks in the workspace and uses the shared runner for the checks of an assigned task."
+    description: "Runs affected checks in the workspace at once and the whole suite once per release, through the release check the project declares."
   hh-status-update:
     title: "Status update"
     description: "Says where the department stands in one line, and only when it matters."
@@ -809,7 +815,7 @@ teams:
     description: "Each member owns the work and its checks from start to finish."
   DEV-TEAM:
     title: "Hotfix"
-    description: "Takes only urgent work and ships the fix past the pipeline: each fix gets its own Security read before its patch release."
+    description: "Takes only urgent work and ships the fix past the pipeline: a fix gets its own Security read only when it touches access, secrets or root processes."
   DSN-TEAM:
     title: "Turnkey team"
     description: "Each member owns the work and its checks from start to finish."

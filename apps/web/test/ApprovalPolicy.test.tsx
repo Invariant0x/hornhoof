@@ -267,6 +267,27 @@ describe('the words', () => {
     expect(String((ru.dept.approvals as Record<string, unknown>).autonomousRelease)).toContain('Автономный выпуск');
   });
 
+  it('lets the people who run the department choose how the next turn starts, and tells everyone else', async () => {
+    const calls = mockApi({
+      [POLICY]: [200, ceoView({ turnStart: 'manual', canSetTurnStart: true } as Partial<ApprovalPolicyView>)],
+      'PUT /api/departments/d1/turn-start': [200, { departmentId: 'd1', turnStart: 'automatic' }],
+    });
+    const { unmount } = render(<ApprovalPolicy departmentId="d1" />);
+    await screen.findByRole('combobox', { name: t.owner });
+    const group = screen.getByRole('group', { name: t.turnStart });
+    expect(within(group).getByRole('radio', { name: t.turnStartModes.manual })).toBeChecked();
+    fireEvent.click(within(group).getByRole('radio', { name: t.turnStartModes.automatic }));
+    await waitFor(() => expect(calls.find(c => c.method === 'PUT' && c.path === '/api/departments/d1/turn-start')?.body).toEqual({ mode: 'automatic' }));
+    await waitFor(() => expect(within(screen.getByRole('group', { name: t.turnStart })).getByRole('radio', { name: t.turnStartModes.automatic })).toBeChecked());
+    unmount();
+
+    /* Someone who sees the department but does not run it reads the way, with no choice. */
+    mockApi({ [POLICY]: [200, view({ turnStart: 'manual', canSetTurnStart: false } as Partial<ApprovalPolicyView>)] });
+    render(<ApprovalPolicy departmentId="d1" />);
+    expect(await screen.findByText(t.turnStartState(true))).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: t.turnStartModes.automatic })).not.toBeInTheDocument();
+  });
+
   it('lets the people who run the department toggle its autonomous release, the CEO too, and shows its journal', async () => {
     const entry = {
       id: 'ar1',

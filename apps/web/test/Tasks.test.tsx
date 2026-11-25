@@ -470,8 +470,8 @@ describe('turns as releases', () => {
   });
 
   it.each([
-    ['en', 'Tasks', 'Turns and releases', 'Every slot of the turn is busy, so these start when a turn opens, in this order.', ['Waiting for the next turn', 'Waiting for the turn after next', 'Waiting 3 turns ahead']],
-    ['ru', 'Задачи', 'Ходы и выпуски', 'Все места хода заняты, поэтому эти задачи начнутся, когда откроется ход, в таком порядке.', ['Ждут следующего хода', 'Ждут хода после следующего', 'Ждут хода через 3 хода']],
+    ['en', 'Tasks', 'Turns and releases', 'Every slot of the turn is busy, or the turn is not running now, so these start when a turn opens, in this order.', ['Waiting for the next turn', 'Waiting for the turn after next', 'Waiting 3 turns ahead']],
+    ['ru', 'Задачи', 'Ходы и выпуски', 'Все места хода заняты или ход сейчас не идет, поэтому эти задачи начнутся, когда откроется ход, в таком порядке.', ['Ждут следующего хода', 'Ждут хода после следующего', 'Ждут хода через 3 хода']],
   ])('shows the queue of a department a batch for each turn ahead, in its order (%s)', async (lang, tasks, releases, why, headings) => {
     localStorage.setItem('hh-lang', lang);
     try {
@@ -491,6 +491,51 @@ describe('turns as releases', () => {
     } finally {
       localStorage.removeItem('hh-lang');
     }
+  });
+
+  it.each([
+    ['en', 'Tasks', 'Turns and releases', 'Turn 3 is waiting to be started', 'Start turn 3', 'The department stands until a person starts this turn'],
+    ['ru', 'Задачи', 'Ходы и выпуски', 'Ход 3 ждет начала', 'Начать ход 3', 'Отдел стоит, пока человек не начнет этот ход'],
+  ])('shows a turn that waits for a person, and starts it with the button of someone who may (%s)', async (lang, tasks, releases, waiting, start, why) => {
+    localStorage.setItem('hh-lang', lang);
+    try {
+      const user = userEvent.setup();
+      let started = false;
+      const calls = shell({
+        'GET /api/turns': () => [200, { turns: [FINISHED_TURN, { ...TURN, waiting: !started, canStart: !started }] }],
+        'POST /api/turns/u3/start': () => { started = true; return [200, { turn: { id: 'u3', number: 3, waiting: false } }]; },
+      });
+      await user.click(await screen.findByRole('button', { name: new RegExp(`^${tasks}`) }));
+      await goTo(user, releases);
+      const next = await screen.findByRole('region', { name: /3/ });
+      expect(within(next).getByRole('status')).toHaveTextContent(waiting);
+      expect(within(next).getByText(new RegExp(why))).toBeInTheDocument();
+      await user.click(within(next).getByRole('button', { name: start }));
+      await waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === '/api/turns/u3/start')).toBe(true));
+      await waitFor(() => expect(within(screen.getByRole('region', { name: /3/ })).queryByRole('button', { name: start })).not.toBeInTheDocument());
+      expect(within(screen.getByRole('region', { name: /3/ })).queryByText(waiting)).not.toBeInTheDocument();
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it('shows a waiting turn to someone who may not start it with no button, and says when the release branch was cut', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/turns': [200, { turns: [FINISHED_TURN, { ...TURN, waiting: true, canStart: false }] }] });
+    await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
+    await goTo(user, 'Turns and releases');
+    const next = await screen.findByRole('region', { name: /3/ });
+    expect(within(next).getByRole('status')).toHaveTextContent('Turn 3 is waiting to be started');
+    expect(within(next).queryByRole('button', { name: 'Start turn 3' })).not.toBeInTheDocument();
+  });
+
+  it('says that the batch is frozen from the cut of the release branch', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/turns': [200, { turns: [FINISHED_TURN, { ...TURN, waiting: false, canStart: false, cutAt: '2026-11-25T01:00:00.000Z', cutBranch: 'release-0.45.0' }] }] });
+    await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
+    await goTo(user, 'Turns and releases');
+    const next = await screen.findByRole('region', { name: /3/ });
+    expect(within(next).getByRole('status')).toHaveTextContent('The release branch release-0.45.0 was cut: nothing joins this turn now');
   });
 
   it.each([

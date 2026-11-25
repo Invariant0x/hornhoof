@@ -71,7 +71,15 @@ const OncePreparation = z.strictObject({ profiles: ProfileIds, suiteIds: Ids, co
    runs it whole; a later run of that release runs only what failed or changed. everyTurns is what a server or node before
    0.24.0 requires, so a repository keeps it for them: it is read and nothing runs by it. */
 const FullRun = z.strictObject({ everyTurns: z.number().int().min(1).max(1000).optional(), replaces: Id, profile: Id });
-const ExecutionPolicy = z.strictObject({ version: z.literal(2), oncePreparation: OncePreparation.optional(), fullRun: FullRun.optional() });
+/* How the project checks a release as a whole, exactly once per release, in the Tests stage, right before the release: through
+   its own CI (ci), a command of its own that the Tests stage runs once (command), or, for a project that has nothing, one run of
+   Hornhoof of a profile (hornhoof_run). Nobody else runs the whole suite, and the same scope is not run twice. */
+const ReleaseCheck = z.discriminatedUnion('mechanism', [
+  z.strictObject({ mechanism: z.literal('ci') }),
+  z.strictObject({ mechanism: z.literal('command'), command: Command }),
+  z.strictObject({ mechanism: z.literal('hornhoof_run'), profile: Id }),
+]);
+const ExecutionPolicy = z.strictObject({ version: z.literal(2), oncePreparation: OncePreparation.optional(), fullRun: FullRun.optional(), releaseCheck: ReleaseCheck.optional() });
 /* Who reads a file the import graph cannot follow: the named suites whole, or with tests only those of their test files. */
 const ImpactRule = z.strictObject({ globs: Inputs.min(1), suiteIds: Ids.min(1), tests: Inputs.min(1).optional() });
 const EnvironmentShape = z.strictObject({
@@ -164,12 +172,16 @@ function fullRunReferences(env: EnvironmentShape, ctx: z.RefinementCtx): void {
   if (!whole || !replaced || full.profile === full.replaces) { ctx.addIssue({ code: 'custom', path, message: 'A full run names two known profiles.' }); return; }
   if (replaced.some(id => !whole.includes(id))) ctx.addIssue({ code: 'custom', path, message: 'A full run covers every suite of the profile it replaces.' });
 }
+function releaseCheckReferences(env: EnvironmentShape, profiles: ReadonlySet<string>, ctx: z.RefinementCtx): void {
+  const check = env.execution?.releaseCheck;
+  if (check?.mechanism === 'hornhoof_run') reference(check.profile, profiles, ['execution', 'releaseCheck', 'profile'], ctx);
+}
 function environmentReferences(env: EnvironmentShape, ctx: z.RefinementCtx): void {
   const profiles = identities(env.profiles, 'profiles', ctx), suites = identities(env.suites, 'suites', ctx), services = identities(env.services, 'services', ctx);
   reference(env.defaultProfile, profiles, ['defaultProfile'], ctx);
   requiredSuites(env, suites, ctx); serviceProfiles(env, profiles, ctx);
   preparations(env, profiles, services, ctx); suiteReferences(env, suites, profiles, ctx);
-  oncePreparationReferences(env, profiles, ctx); fullRunReferences(env, ctx);
+  oncePreparationReferences(env, profiles, ctx); fullRunReferences(env, ctx); releaseCheckReferences(env, profiles, ctx);
 }
 
 export const TEST_ENVIRONMENT_BYTES = 64 * 1024;

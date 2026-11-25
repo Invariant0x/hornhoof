@@ -66,6 +66,7 @@ The development testing and environment procedures are project-owned adaptations
 | `roles/development/DEV-ENG.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/development/DEV-FE.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/development/DEV-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources; project-owned test-environment responsibilities | Hornhoof |
+| `roles/development/DEV-HOT.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/development/DEV-OPS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/development/DEV-PERF.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/development/DEV-PM.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
@@ -129,6 +130,7 @@ The development testing and environment procedures are project-owned adaptations
 | `skills/dev-engineering-rules.md` | Original adaptation | unclebob/ub-mode SKILL.md at the revision named above | ub-mode names no licence and its README invites copying SKILL.md; adaptation by Hornhoof |
 | `skills/dev-frontend-ui.md` | Written for Hornhoof | addyosmani/agent-skills skills/frontend-ui-engineering/SKILL.md; anthropics/skills skills/frontend-design/SKILL.md | Hornhoof |
 | `skills/dev-gates.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md; affaan-m/ECC skills/council-multi-model/SKILL.md; affaan-m/ECC skills/santa-method/SKILL.md | Hornhoof |
+| `skills/dev-hotfix.md` | Written for Hornhoof | Written for Hornhoof from the company's own way of working on urgent fixes | Hornhoof |
 | `skills/dev-i18n-en-ru.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dev-implement.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/implementer-prompt.md; addyosmani/agent-skills skills/incremental-implementation/SKILL.md; addyosmani/agent-skills skills/source-driven-development/SKILL.md | Hornhoof |
 | `skills/dev-language-rules.md` | Written for Hornhoof | affaan-m/ECC rules | Hornhoof |

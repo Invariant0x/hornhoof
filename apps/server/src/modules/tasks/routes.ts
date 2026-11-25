@@ -251,6 +251,19 @@ async function turnTask(db: Db, turn: Turn, viewer: AgentViewer): Promise<string
   return task && seesTask(viewer, task) ? task.id : null;
 }
 
+/* Where a turn stands: it waits for a person to start it (canStart: whether this person does), its department standing until then,
+   or the release branch was cut at cutAt and the batch is frozen until the tag. */
+const turnState = (turn: Turn, canStart: boolean) => ({
+  waiting: turn.status === 'open' && turn.confirmedAt === null,
+  canStart,
+  cutAt: turn.cutAt?.toISOString() ?? null,
+  cutBranch: turn.cutBranch,
+});
+
+/* Whether this person starts the turn: it waits for one, and they run its department, as a person and not through an agent. */
+const mayStartTurn = async (db: Db, me: Person, turn: Turn): Promise<boolean> =>
+  turn.status === 'open' && turn.confirmedAt === null && !me.via && !me.assistant && (await runsDepartment(db, me, turn.departmentId));
+
 /* Whether the department keeps a repository, so its turn comes out as a release; one without has nothing to release, and its
    work stays outside releases. Only the yes or no, never the repository. */
 async function releasesTurns(db: Db, departmentId: string | null): Promise<boolean> {
@@ -261,7 +274,7 @@ async function releasesTurns(db: Db, departmentId: string | null): Promise<boole
 
 /* Turns show to the whole company, each with the department it belongs to: the open one gets its release ready, a closed one
    is the release its tag made. The words they were laid out from only reach people with the full view. */
-async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer) {
+async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer, canStart = false) {
   if (!turn) return null;
   return {
     id: turn.id,
@@ -278,6 +291,8 @@ async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer) {
     taskId: await turnTask(db, turn, viewer),
     startedAt: (turn.openedAt ?? turn.createdAt).toISOString(),
     openedAt: turn.openedAt?.toISOString() ?? null,
+    /* A turn that waits for a person to start it: its department stands, whatever its tasks do. canStart: whether this person starts it. */
+    ...turnState(turn, canStart),
     closedAt: turn.closedAt?.toISOString() ?? null,
     tasks: await turnCounts(db, turn, viewer),
   };
@@ -585,7 +600,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/turns', async req => {
     const me = await requirePerson(req, db);
     const viewer = await viewerOf(db, me);
-    return { turns: await Promise.all((await turnRows(ctx, me.companyId)).map(t => turnView(db, t, viewer))) };
+    return { turns: await Promise.all((await turnRows(ctx, me.companyId)).map(async t => turnView(db, t, viewer, await mayStartTurn(db, me, t)))) };
   });
 
   /* The running turn of a department, a product or a sub-department naming the department it is in; with none named, the
@@ -596,7 +611,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const turn = department
       ? await openTurnOf(db, me.companyId, department)
       : (await db.select().from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open'))).orderBy(asc(turns.number)).limit(1))[0];
-    return { turn: await turnView(db, turn ?? undefined, await viewerOf(db, me)) };
+    return { turn: await turnView(db, turn ?? undefined, await viewerOf(db, me), turn ? await mayStartTurn(db, me, turn) : false) };
   });
 
   app.get('/api/departments/:id/tree', async req => {

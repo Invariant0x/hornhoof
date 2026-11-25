@@ -82,6 +82,7 @@ import { createBranch, readBranches, readCommit, readTags, type BranchCreator, t
 import { markCommit, type CommitMarker } from './modules/testruns/github-status.js';
 import { poolRoutes } from './modules/testruns/pool.js';
 import { taskRoutes } from './modules/tasks/routes.js';
+import { turnStartRoutes } from './modules/tasks/turn-start.js';
 import { TelegramBots } from './modules/telegram/bots.js';
 import { telegramRoutes } from './modules/telegram/routes.js';
 import { TerminalRelay } from './modules/terminals/relay.js';
@@ -517,6 +518,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   updateRoutes(app, ctx);
   computerRoutes(app, ctx);
   taskRoutes(app, ctx);
+  turnStartRoutes(app, ctx);
   trackerRoutes(app, ctx);
   attachmentRoutes(app, ctx);
   partFileRoutes(app, ctx);

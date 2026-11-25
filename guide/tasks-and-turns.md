@@ -24,6 +24,10 @@ A task runs in one of two ways:
 
 A Development department runs its turn in slots: one for each developer, five at most, and each slot holds one task. A small addition to the same product joins a slot that is running instead of taking another. A new task that finds every slot busy waits in the department's queue for the next turn: nobody is woken for it, its card says "Waits for the next turn" (or the one after it, in batches of the slots), and the Turns and releases screen lists the queue by the turn each task waits for. When a release ends the turn, the turn that opens takes the queue in, in order, each task to the developer it was given to or to the head. A queued task you cancel leaves the queue; one made urgent goes past it at once. Urgent work takes no slot and waits for nothing. Work given to a named developer waits for that developer and never goes to another when they are busy. A department with no slot cap hands every task out at once, as before.
 
+### How does a department start its next turn?
+
+A department starts its turns in one of two ways, which the people who run it choose in its approval rules: by itself, so that after a release the next turn opens and takes the queue in at once, or only when a person confirms it. A Development department starts in the second way. After a release its next turn opens waiting: the Turns and releases screen says "Turn N is waiting to be started", the department stands, and nobody is given work from the queue until a person who runs the department presses "Start turn N". Urgent work, the hotfix lane, goes on meanwhile. The same stand holds from the moment the release branch (`release-X.Y.Z`, a version newer than the last release) is cut until its tag: the turn's batch is frozen, nothing joins it, and a new task waits in the queue for the next turn.
+
 ## What does the Tasks tab show?
 
 The Tasks tab is the tracker. It opens on your own work.

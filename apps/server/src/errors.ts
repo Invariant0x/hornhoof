@@ -144,6 +144,8 @@ export type ErrorReason =
   | 'switched_off'
   | 'turn_open'
   | 'turn_unknown'
+  | 'turn_not_waiting'
+  | 'turn_start_not_allowed'
   | 'turn_mode_fixed'
   | 'turn_department'
   | 'no_turnkey_team'

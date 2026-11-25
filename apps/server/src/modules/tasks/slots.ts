@@ -1,6 +1,6 @@
 import { and, asc, eq, isNotNull, isNull, notInArray } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { agents, departments, tasks, turns } from '../../db/schema.js';
+import { agents, departments, tasks, turns, type TURN_STARTS } from '../../db/schema.js';
 import { note, published } from './events.js';
 import { keepWakes } from './outbox.js';
 import { CLOSED, type Task, type Tx, type Wake } from './state.js';
@@ -8,7 +8,11 @@ import { CLOSED, type Task, type Tx, type Wake } from './state.js';
 /* A development department runs its turn in slots, one per developer and five at most: a slot holds one task, and one small
    addition of the same product may join it. A new top-level task that finds every slot busy waits in the department's queue
    for the next turn, which takes the queue in as it opens; the one after next waits behind it, in batches of the slots.
-   Urgent work takes no slot and waits for none. A department with no slot cap gives every task out at once. */
+   Urgent work takes no slot and waits for none. A department with no slot cap gives every task out at once.
+
+   Two states stand a department still, for its ordinary work: a turn that waits for a person to start it (a department that
+   starts its turns only on confirmation, after a release), and a turn whose release branch was cut (the batch is frozen until
+   the tag). In both, a new task waits in the queue however many slots are free, and urgent work goes past. */
 
 export const DEFAULT_SLOT_CAP = 5;
 /* The employees who count as developers: the members that build, outside any sub-unit. */
@@ -16,6 +20,9 @@ const DEVELOPER_ROLES = ['DEV-ENG', 'DEV-BE', 'DEV-FE'];
 
 /* The cap a new department of this template starts with. */
 export const slotCapOfNew = (templateKey: string | null | undefined): number | null => (templateKey === 'development' ? DEFAULT_SLOT_CAP : null);
+
+/* How a new department of this template starts its turns: Development waits for a person to confirm each, any other by itself. */
+export const turnStartOfNew = (templateKey: string | null | undefined): (typeof TURN_STARTS)[number] => (templateKey === 'development' ? 'manual' : 'automatic');
 
 type Db_ = Db | Tx;
 type Piece = Pick<Task, 'productId' | 'small'>;
@@ -55,6 +62,21 @@ export async function slotsApply(db: Db_, task: Pick<Task, 'departmentId'>): Pro
   return task.departmentId ? (await slotCapacity(db, task.departmentId)) !== null : false;
 }
 
+/* Why the department's ordinary work stands: its open turn waits for a person to start it, or its release branch was cut and the
+   batch is frozen until the tag. None when the turn runs. */
+export type Standing = 'waiting' | 'frozen';
+export async function standing(db: Db_, departmentId: string): Promise<Standing | null> {
+  const [open] = await db.select({ confirmedAt: turns.confirmedAt, cutAt: turns.cutAt }).from(turns).where(and(eq(turns.departmentId, departmentId), eq(turns.status, 'open')));
+  return !open ? null : open.confirmedAt === null ? 'waiting' : open.cutAt ? 'frozen' : null;
+}
+
+/* When the turn that opens for this department counts as started: at once for one that starts its turns by itself, none for one
+   that waits for a person to confirm it. */
+export async function startedAtOpening(db: Db_, departmentId: string): Promise<Date | null> {
+  const [department] = await db.select({ turnStart: departments.turnStart }).from(departments).where(eq(departments.id, departmentId));
+  return department?.turnStart === 'manual' ? null : new Date();
+}
+
 const queuedOf = (db: Db_, departmentId: string) =>
   db.select().from(tasks).where(and(eq(tasks.departmentId, departmentId), isNotNull(tasks.queuedAt), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.queuedAt), asc(tasks.number));
 
@@ -63,6 +85,7 @@ const queuedOf = (db: Db_, departmentId: string) =>
 export async function slotVerdict(db: Db_, departmentId: string, piece: Piece & { urgent?: boolean | null }): Promise<'run' | 'queue'> {
   const cap = await slotCapacity(db, departmentId);
   if (cap === null || piece.urgent) return 'run';
+  if (await standing(db, departmentId)) return 'queue';
   const now = await running(db, departmentId);
   const used = slotsUsed(now);
   if (piece.small && slotsUsed([...now, piece]) === used) return 'run';
@@ -70,14 +93,16 @@ export async function slotVerdict(db: Db_, departmentId: string, piece: Piece & 
   return slotsUsed([...now, piece]) <= cap ? 'run' : 'queue';
 }
 
-/* What a person reads of a queued task: how many turns ahead it waits (the next is 1, in batches of the slots), its place in
-   the queue and the department's open turn it waits behind. */
+/* What a person reads of a queued task: how many turns ahead it waits (the next is 1, in batches of the slots; 0 is the open
+   turn itself, which waits for a person to start it), its place in the queue and the department's open turn it waits behind. */
 export async function queueFacts(db: Db_, rows: Pick<Task, 'id' | 'departmentId' | 'queuedAt'>[]): Promise<Map<string, Queued>> {
   const facts = new Map<string, Queued>();
   for (const departmentId of new Set(rows.filter(t => t.queuedAt && t.departmentId).map(t => t.departmentId!))) {
     const cap = (await slotCapacity(db, departmentId)) ?? 1;
     const [open] = await db.select({ number: turns.number }).from(turns).where(and(eq(turns.departmentId, departmentId), eq(turns.status, 'open')));
-    (await queuedOf(db, departmentId)).forEach((t, i) => facts.set(t.id, { position: i + 1, ahead: Math.floor(i / cap) + 1, openTurn: open?.number ?? null }));
+    /* The open turn that waits for a person takes the first batch as it starts, so that batch is not a turn ahead. */
+    const first = (await standing(db, departmentId)) === 'waiting' ? 0 : 1;
+    (await queuedOf(db, departmentId)).forEach((t, i) => facts.set(t.id, { position: i + 1, ahead: Math.floor(i / cap) + first, openTurn: open?.number ?? null }));
   }
   return facts;
 }
@@ -97,7 +122,7 @@ export async function givePlace(tx: Tx, item: { department: string; product?: st
 }
 
 /* The words for the turn a queued task waits for. */
-export const waitsText = (ahead: number): string => (ahead === 1 ? 'waits for the next turn' : ahead === 2 ? 'waits for the turn after next' : `waits ${ahead} turns ahead`);
+export const waitsText = (ahead: number): string => (ahead === 0 ? 'waits until a person starts the turn' : ahead === 1 ? 'waits for the next turn' : ahead === 2 ? 'waits for the turn after next' : `waits ${ahead} turns ahead`);
 
 async function holderOf(tx: Tx, task: Task): Promise<string | null> {
   const [own] = task.executorAgentId ? await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, task.executorAgentId), isNull(agents.removedAt))) : [];
@@ -125,11 +150,12 @@ export async function jumpQueue(tx: Tx, task: Task): Promise<{ task: Task; wakes
 }
 
 /* The turn that opens takes the queue in: in order, as many as the slots hold, each to its named holder or the head, who is
-   woken for it. What does not fit, and what has no one to take it, waits for the turn after. */
+   woken for it. What does not fit, and what has no one to take it, waits for the turn after. A turn that waits for a person to
+   start it takes nothing in until they do. */
 export async function loadQueue(tx: Tx, companyId: string, departmentId: string | null): Promise<{ task: Task; wake: Wake }[]> {
   if (!departmentId) return [];
   const cap = await slotCapacity(tx, departmentId);
-  if (cap === null) return [];
+  if (cap === null || (await standing(tx, departmentId)) === 'waiting') return [];
   const now = await running(tx, departmentId);
   const loaded: { task: Task; wake: Wake }[] = [];
   for (const queued of await queuedOf(tx, departmentId)) {

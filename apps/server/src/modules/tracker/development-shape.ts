@@ -69,7 +69,7 @@ const madeByTemplate = (t: Team): boolean => t.turnkey && t.name === OLD_TEAM.na
 async function makeHotfix(tx: Tx, stock: TeamTemplate, team: Team, move: ShapeMove): Promise<void> {
   await tx.update(teams).set({ name: stock.title.en, about: stock.description.en, turnkey: false, urgentOnly: true }).where(eq(teams.id, team.id));
   const members = await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.teamId, team.id), isNull(agents.removedAt)));
-  move.moved.push('The turnkey team is the Hotfix unit now: it takes urgent work only, and its fix gets its own Security read before its patch release.');
+  move.moved.push('The turnkey team is the Hotfix unit now: it takes urgent work only, and its fix gets its own Security read only when it touches access, secrets or root processes.');
   const brings = stock.members.reduce((n, m) => n + m.count, 0);
   if (members.length > brings) move.review.push(`The Hotfix unit has ${members.length} people and the template brings ${brings}: nobody was removed. Their models were chosen for turnkey work (the strongest tier); change them if you want the department's standard.`);
 }

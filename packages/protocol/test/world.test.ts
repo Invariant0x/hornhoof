@@ -237,7 +237,7 @@ describe('canonical world formulas (single source of truth)', () => {
     ).toBe('active');
   });
 
-  it('classifies all 75 Hornhoof template roles deterministically with head/checker/executor/turnkey/ruler invariants', () => {
+  it('classifies all 76 Hornhoof template roles deterministically with head/checker/executor/turnkey/ruler invariants', () => {
     const rolesDir = join(process.cwd(), '../../templates/roles');
     const diskRoles: string[] = [];
     for (const dept of readdirSync(rolesDir)) {
@@ -246,7 +246,7 @@ describe('canonical world formulas (single source of truth)', () => {
       }
     }
     diskRoles.sort();
-    expect(diskRoles).toHaveLength(75);
+    expect(diskRoles).toHaveLength(76);
     expect([...ALL_HORNHOOF_ROLE_KEYS].sort()).toEqual(diskRoles);
 
     for (const roleKey of diskRoles) {

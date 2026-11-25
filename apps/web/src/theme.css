@@ -2109,6 +2109,14 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .rel-show { max-inline-size: 420px; min-inline-size: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .rel-show label { min-inline-size: 0; min-block-size: 44px; margin: 0; padding: 6px 8px; text-align: center; overflow-wrap: anywhere; }
 .rel-show > legend { margin-block-end: 6px; padding: 0; font-size: 13px; font-weight: 600; }
+/* A turn that waits for a person to start it, or whose release branch was cut: said above its goals, with the start for the people who may. */
+.turn-hold { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--line2); background: var(--surface2); overflow-wrap: anywhere; }
+.turn-hold > b { color: var(--ink); }
+.turn-hold p { margin: 0; }
+.turn-hold .btn { justify-self: start; min-block-size: 44px; }
+.appr-turn-start { max-inline-size: 420px; min-inline-size: 0; }
+.appr-turn-start > legend { margin-block-end: 6px; padding: 0; font-size: 13px; font-weight: 600; }
+.appr-turn-start label { min-inline-size: 0; min-block-size: 44px; margin: 0; text-align: center; overflow-wrap: anywhere; }
 .release-fold { display: grid; gap: 6px; min-width: 0; }
 .release-fold .goal-fold > span { display: flex; flex-wrap: wrap; gap: 0 8px; }
 .release-fold .goal-fold b { color: var(--ink); }

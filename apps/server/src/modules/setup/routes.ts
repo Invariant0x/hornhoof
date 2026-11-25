@@ -22,7 +22,7 @@ import { seedCatalogPipelines } from '../tracker/pipelines.js';
 import { ensureOperations } from '../operations/ensure.js';
 import { placeableSubscriptions, spotIn } from '../tools/staff.js';
 import { isSetupCode, setupNeeded } from './code.js';
-import { slotCapOfNew } from '../tasks/slots.js';
+import { slotCapOfNew, turnStartOfNew } from '../tasks/slots.js';
 
 const roleCodeOf = (template: string) => DEPARTMENT_TEMPLATES.find(t => t.key === template)!.roleCode;
 
@@ -112,7 +112,7 @@ async function templateDepartments(ctx: Ctx, tx: Tx, companyId: string, personId
     const roleCode = roleCodeOf(dept.template);
     const [row] = await tx
       .insert(departments)
-      .values({ companyId, templateKey: dept.template, name: dept.name ?? null, roleCode, position: position++, slotCap: slotCapOfNew(dept.template) })
+      .values({ companyId, templateKey: dept.template, name: dept.name ?? null, roleCode, position: position++, slotCap: slotCapOfNew(dept.template), turnStart: turnStartOfNew(dept.template) })
       .returning();
     await ensureOpenTurn(tx, companyId, row!.id);
     await seedCatalogPipelines(ctx, tx, row!, { personId });
