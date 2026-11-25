@@ -1,10 +1,11 @@
 import { sql } from 'drizzle-orm';
 import pg from 'pg';
-import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { openAgentSql, type AgentSql } from '../../src/db/agent-sql.js';
 import { APP_NAME, KEEPER_NAME, MIGRATE_NAME, migrateDb, openDb, type Db } from '../../src/db/client.js';
 import { notConfirmed } from '../../src/db/confirm.js';
-import { keeperSql, leaseStore, type LeaseStore } from '../../src/modules/keeper/lease-store.js';
+import { LeaseHolder } from '../../src/modules/keeper/lease-holder.js';
+import { keeperSql, leaseOfMachine, leaseStore, type LeaseStore } from '../../src/modules/keeper/lease-store.js';
 import { ENDLESS_LEASE } from '../prepare-environment.js';
 import { until } from '../helpers.js';
 import { poolOf, realDatabase, type RealDatabase } from './pg.js';
@@ -123,6 +124,25 @@ async function commitsGoOn(): Promise<void> {
   }
 }
 
+/* What a session that sets nothing commits under, as a new session of the database reads it. */
+async function sessionsCommitUnder(setting: string): Promise<boolean> {
+  const probe = new pg.Client({ connectionString: real.url });
+  await probe.connect();
+  try {
+    return (await probe.query<{ synchronous_commit: string }>('SHOW synchronous_commit')).rows[0]!.synchronous_commit === setting;
+  } finally {
+    await probe.end();
+  }
+}
+
+/* The server's own setting, as a hand puts it in postgresql.auto.conf. It is the server's, which the next test and the
+   next file share: the reload comes first, and then it is waited for until a new session gets it. */
+async function serverCommitsUnder(setting: string | null): Promise<void> {
+  await real.admin.query(setting ? `ALTER SYSTEM SET synchronous_commit = '${setting}'` : 'ALTER SYSTEM RESET synchronous_commit');
+  await real.admin.query('SELECT pg_reload_conf()');
+  await until(() => sessionsCommitUnder(setting ?? 'on'));
+}
+
 describe("the keeper's lease on real Postgres", () => {
   it("ends the app's and the agents' sessions, and no other", async () => {
     const { lease } = keeper();
@@ -170,6 +190,34 @@ describe("the keeper's lease on real Postgres", () => {
       await commitsWaitForACopy();
       const term = await lease.take('normal', FAR);
       expect(await lease.renew(term, 'normal', FAR, false)).toBe(true);
+    });
+  });
+
+  describe('when the server gives every session synchronous_commit local', () => {
+    beforeEach(() => serverCommitsUnder('local'));
+    afterEach(() => serverCommitsUnder(null));
+
+    it("lets the app's writes commit, since the app asks for on itself", async () => {
+      const db = appDb();
+      const notes = async (): Promise<number | null> => (await real.admin.query('SELECT 1 FROM notebook_notes')).rowCount;
+      const before = await notes();
+      await expect(db.execute(sql.raw(A_NOTE))).resolves.toBeDefined();
+      expect(await notes()).toBe(before! + 1);
+    });
+
+    it('is seen by the keeper, which sets it on, says so and leads', async () => {
+      const lines: string[] = [];
+      const lease = leaseOfMachine({ databaseUrl: real.url, machineId: 'machine-a' }, line => lines.push(line))!;
+      onTestFinished(() => lease.close());
+      expect(await lease.commitSetting()).toEqual({ setting: 'local', source: 'configuration file' });
+      const holder = new LeaseHolder({ lease, updaterBusy: () => false, log: line => lines.push(line) });
+      await holder.tick();
+      await holder.look();
+
+      expect(holder.mode()).toBe('lead');
+      expect(await sessionsCommitUnder('on')).toBe(true);
+      expect(await lease.commitSetting()).toEqual({ setting: 'on', source: 'configuration file' });
+      expect(lines.filter(line => line.includes('"local"'))).toHaveLength(1);
     });
   });
 

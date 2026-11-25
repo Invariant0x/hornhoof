@@ -16,7 +16,7 @@ import { DUNGEON_WORLD_PACK } from '../src/world-packs/dungeon/pack';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 import { SPACE_WORLD_PACK } from '../src/world-packs/space/pack';
 
-/* #1947 item 11, Ivan 23.11: "Placeholders can be plain squares, but not like now: home-made little people and home-made
+/* #1947 item 11, the art order of 23.11: "Placeholders can be plain squares, but not like now: home-made little people and home-made
    construction pieces look shabby and ugly, and they take resources." Without art, a building, a resident or a
    construction shows one flat one-colour shape on the ground and nothing else: no procedural people, lift, parts,
    smoke or dust, in Egypt and in both test packs. */

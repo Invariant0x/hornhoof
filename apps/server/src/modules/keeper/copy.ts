@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { CopyError, CopyState } from '../../db/schema.js';
 import { DB_DOOR_PORT } from '../../net/db-door.js';
+import type { AppliedLed, SavingWait } from './led.js';
 import type { Sql } from './lease-store.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
 import { joinSlot } from './promote.js';
@@ -31,6 +32,20 @@ const SAVE_EVERY_MS = 10_000;
 const RETRY_MS = 600_000;
 /* The longest an attempt waits after attempts were given up in a row, each twice as long as the one before. */
 const RETRY_MAX_MS = 7_200_000;
+/* How many times in one attempt its subscription may be stopped by an error and enabled again, whatever got through
+   between two cuts. A link that cuts this often loads the leader with a new slot and a new snapshot each time, and
+   holds its log back for the copy, so the attempt is given up. */
+export const MAX_CUTS = 30;
+/* How many attempts in a row may be given up before the copy is parked: no more are made, and its slots on the leader
+   are dropped, until someone asks for a new one. */
+export const MAX_GIVEN = 4;
+/* How long a copy must have been whole before the attempts given up ahead of it stop counting. */
+export const STABLE_MS = 3_600_000;
+/* An attempt whose first copy takes no more table through and whose database grows by less than this in this long is
+   given up, though nothing stopped it: a table that starts again and again from its first row, because a link breaks
+   it each time, holds a slot and a snapshot of the leader for as long as it goes on. */
+export const STALL_MS = 7_200_000;
+export const STALL_BYTES = 8 * 2 ** 20;
 const OTHER_VERSION = 'the company server runs another version of the database';
 /* How long the app gets to read that it is off before the databases change places. */
 const OFF_FOR_MS = 2_000;
@@ -61,29 +76,43 @@ export const PASSFILE_THERE = 'SELECT (pg_stat_file($1, true)).size IS NOT NULL 
 /* old.led: the number of the term the old database led the company under, when it did. left: while the first copy is
    made, the leader's slots of its tables whose first copy broke off, for the leader to drop; none said while there are
    none. */
-export type CopyReport = { schema?: SchemaAttempt; state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number; led?: number } | null; left?: string[] };
+export type CopyReport = {
+  schema?: SchemaAttempt; state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number; led?: number } | null; left?: string[];
+  saving?: { waiting: SavingWait; since: string };
+  /* A copy that was given up for good: since when, after how many attempts in a row, and why: it failed again and again,
+     or the path from the leader to this machine is too slow or too late for it. */
+  gaveUp?: { since: string; attempts: number; why: ParkedWhy };
+};
 /* What the leader says of the copy in its view. slot: its slot there. leaderSize: the size of the leader's database.
    migrations: how many the leader's schema has. old: how far the leader is with reading the copy's old database.
    upload: what a machine that stopped holding the data still owes: what it holds, nothing while the leader reads that, or
    its wipe. lastAttempt: the attempt the machine's row names its copy by; null where it never kept one. leader: the
    network id of the leader whose view this is. join: the slot that leader made for this machine when it took the
-   server in a planned switch, for a copy that held everything the leader before had written; none else. A leader of a
-   build before names neither. */
+   server in a planned switch, for a copy that held everything the leader before had written; none else. applied: how
+   far a handover from this machine applied its log on the server. A leader of a build before names none of the last three. */
 export type CopyOrder = {
   slot: 'ok' | 'lost' | 'missing' | null; leaderSize: number | null; migrations: number | null; old: 'waiting' | 'merged' | 'done' | null; upload: 'waiting' | 'received' | 'wipe' | null;
   lastAttempt: number | null;
   leader?: string;
   join?: string | null;
+  applied?: AppliedLed | null;
+  /* The CEO asked for the copy again by hand: a keeper that gave it up makes a new one. */
+  retry?: true;
+  /* The path from the leader to this machine is measured too weak for a copy that is not whole: slow or late. */
+  weak?: 'slow' | 'late';
 };
 
 type Closable = Sql & { close(): Promise<void> };
 const SchemaAttempt = z.object({ attempt: z.number().int().min(1), since: z.iso.datetime() });
 type SchemaAttempt = z.infer<typeof SchemaAttempt>;
 
+const ParkedWhy = z.enum(['failed', 'slow', 'late']);
+type ParkedWhy = z.infer<typeof ParkedWhy>;
+
 const Kept = z.object({
   attempt: z.number().int().min(1),
   database: z.string().regex(/^[a-z_][a-z0-9_]{0,62}$/),
-  phase: z.enum(['schema', 'grant', 'subscribe', 'sync', 'ready', 'detach', 'drop', 'join']),
+  phase: z.enum(['schema', 'grant', 'subscribe', 'sync', 'ready', 'detach', 'drop', 'join', 'parked']),
   /* The slot of the leader this copy joins, with no copy of the data, while the phase is join. */
   slot: z.string().regex(/^copy_[0-9a-f]{16}_[0-9]{1,9}$/).nullable().default(null),
   /* The leader this copy was made on or last joined, by its network id; none in a file of before. */
@@ -106,8 +135,18 @@ const Kept = z.object({
   swap: z.enum(['off', 'disable', 'rename', 'enable', 'drop_sub', 'drop_db', 'read']).nullable().default(null),
   stamp: z.string().regex(/^[0-9]{8}t[0-9]{6}$/).nullable().default(null),
   swapAt: z.string().nullable().default(null),
-  /* How many attempts in a row were given up since the copy was last whole: the next waits the longer. */
+  /* How many attempts in a row were given up since the copy was last whole for an hour: the next waits the longer, and
+     the one at the limit parks the copy. */
   given: z.number().int().min(0).default(0),
+  /* How many times this attempt's subscription was stopped by an error and enabled again. */
+  cuts: z.number().int().min(0).default(0),
+  /* The most a first copy had reached, as tables through and bytes, and when: an attempt that goes no further for two
+     hours is given up. */
+  best: z.object({ ready: z.number().int().min(0), size: z.number().min(0), at: z.string() }).nullable().default(null),
+  /* When the copy last held every table, which starts the hour that clears the attempts given up before. */
+  readyAt: z.string().nullable().default(null),
+  /* The copy was given up for good: since when, and after how many attempts. Nothing more is made until it is asked for. */
+  parked: z.object({ since: z.string(), attempts: z.number().int().min(0), why: ParkedWhy.default('failed') }).nullable().default(null),
 });
 type Kept = z.infer<typeof Kept>;
 type Subscription = { name: string; oid: number; enabled: boolean; slot: string | null };
@@ -128,7 +167,12 @@ export type CopyMakerOptions = {
   /* What saves a database of this machine that led the company, before its copy is made again: asked every ten
      seconds until it is done. state: the term the database led under, and why its dump failed when it did. Without
      it such a database stops the copy, and is never touched. */
-  saver?: { tick(): Promise<void>; done(): boolean; state(): { term: number; failed: string | null } | null; forget(): void };
+  saver?: {
+    tick(applied?: AppliedLed | null): Promise<void>;
+    done(): boolean;
+    state(): { term: number; failed: string | null; skipped?: boolean; waiting?: SavingWait; since?: string } | null;
+    forget(): void;
+  };
   log: (line: string) => void;
   now?: () => Date;
   /* Where the copy's database finds the leader's: the keeper's door, unless a test names the leader itself. */
@@ -161,6 +205,7 @@ export class CopyMaker {
   private busy = false;
   private disabledSince: number | null = null;
   private savedAt: number | null = null;
+  private lastApplied: string | null = null;
   private enabledAt = 0;
   private failing = false;
   private lastOrder: CopyOrder | null = null;
@@ -180,8 +225,10 @@ export class CopyMaker {
   }
 
   /* What its app may do: read once the copy holds every table, also while a new copy is made beside it; nothing before
-     that, and nothing while the two databases change places. */
+     that, and nothing while the two databases change places. A copy that is parked takes nothing more, so what it
+     holds only grows older: its app reads nothing until the copy is asked for again. */
   mode(): 'off' | 'read' {
+    if (this.kept.parked) return 'off';
     if (this.kept.swap) return ['off', 'disable', 'rename'].includes(this.kept.swap) ? 'off' : 'read';
     return this.kept.phase === 'ready' || this.kept.old !== null ? 'read' : 'off';
   }
@@ -355,8 +402,10 @@ export class CopyMaker {
     }
     if (this.kept.phase === 'detach') return this.detach();
     if (this.kept.phase === 'drop') return this.drop();
+    if (this.kept.phase === 'parked') return this.parked(order);
     const sql = this.on(this.kept.database);
-    if (await this.led(sql)) return this.saveLed();
+    if (await this.led(sql)) return this.saveLed(order);
+    if (order?.weak && ['schema', 'grant', 'subscribe', 'sync'].includes(this.kept.phase)) return this.parkWeak(order.weak);
     if (this.kept.phase === 'join') return this.join(sql, order);
     if (this.kept.phase === 'schema') return this.schema(sql);
     if (this.kept.phase === 'grant') return this.grant();
@@ -365,27 +414,48 @@ export class CopyMaker {
     return this.ready(sql, order);
   }
 
+  private saverDue(now: number, applied: AppliedLed | null): boolean {
+    const key = applied ? `${applied.term}:${applied.lsn}` : null;
+    if (key !== null && key !== this.lastApplied) {
+      this.lastApplied = key;
+      return true;
+    }
+    return this.savedAt === null || now - this.savedAt >= SAVE_EVERY_MS;
+  }
+
+  private savingReport(state: ReturnType<NonNullable<CopyMakerOptions['saver']>['state']>): CopyReport {
+    const failed = state?.failed ?? null;
+    if (failed) return this.stopped(/No space left on device/.test(failed) ? 'disk_full' : 'setup');
+    const saving = state?.waiting && state.since ? { saving: { waiting: state.waiting, since: state.since } } : {};
+    return { state: 'saving', progress: null, error: null, at: null, name: this.name(), old: null, ...saving };
+  }
+
   /* The database led the company and no handover ended that: what it holds is saved first, as a backup of the company
-     the keeper that leads records. Then the copy is made again beside it, and it is read until the new one is whole;
-     it goes only once the leader merged it. With nothing to save it by, the copy stops, and the database stays. */
-  private async saveLed(): Promise<void> {
+     the keeper that leads records, unless the leader already applied every WAL byte it wrote. Then the copy is made
+     again beside it, and it is read until the new one is whole; it goes only once the leader merged it. */
+  private async saveLed(order: CopyOrder | null): Promise<void> {
     const saver = this.opts.saver;
     if (!saver) {
       this.said = this.stopped('led');
       return;
     }
+    const applied = order?.applied ?? null;
     if (!saver.done()) {
       const now = this.now();
-      if (this.savedAt === null || now - this.savedAt >= SAVE_EVERY_MS) {
+      if (this.saverDue(now, applied)) {
         this.savedAt = now;
-        await saver.tick();
+        await saver.tick(applied);
       }
-      const failed = saver.state()?.failed ?? null;
-      this.said = failed ? this.stopped(/No space left on device/.test(failed) ? 'disk_full' : 'setup') : { state: 'saving', progress: null, error: null, at: null, name: this.name(), old: null };
+      this.said = this.savingReport(saver.state());
       if (!saver.done()) return;
     }
-    const led = saver.state()?.term;
-    this.opts.log('What this machine did while it led is saved. Its copy is made again; the database that led is read until the new one is whole.');
+    const state = saver.state();
+    const led = state?.term;
+    this.opts.log(
+      state?.skipped
+        ? 'The company server already holds everything this machine did while it led. Its copy is made again; the database that led is read until the new one is whole.'
+        : 'What this machine did while it led is saved. Its copy is made again; the database that led is read until the new one is whole.',
+    );
     this.keep({ old: { attempt: this.kept.attempt, migrations: this.kept.migrations, ...(led === undefined ? {} : { led }) }, attempt: this.kept.attempt + 1, database: NEXT_DB, phase: 'detach', migrations: null, notBefore: null, seen: false, missing: 0 });
     this.disabledSince = null;
   }
@@ -426,7 +496,7 @@ export class CopyMaker {
     const { host, port } = this.publisher();
     await joinSlot(sql, { name: slot, conninfo: `host=${host} port=${port} dbname=${LEADER_DB} user=${REPLICA_ROLE} passfile=${passfile}` });
     this.disabledSince = null;
-    this.keep({ phase: 'ready', slot: null, migrations: order?.migrations ?? this.kept.migrations, seen: false, missing: 0, moved: null, ...(order?.leader === undefined ? {} : { leader: order.leader }) });
+    this.keep({ phase: 'ready', readyAt: new Date(this.now()).toISOString(), cuts: 0, slot: null, migrations: order?.migrations ?? this.kept.migrations, seen: false, missing: 0, moved: null, ...(order?.leader === undefined ? {} : { leader: order.leader }) });
   }
 
   private firstSchema(): SchemaAttempt {
@@ -500,7 +570,7 @@ export class CopyMaker {
       );
     }
     this.disabledSince = null;
-    this.keep({ phase: 'sync', seen: false, missing: 0 });
+    this.keep({ phase: 'sync', seen: false, missing: 0, best: null });
   }
 
   /* A subscription that stopped is enabled again once a minute. How long it has been stopped for, in a row: one that was
@@ -518,6 +588,7 @@ export class CopyMaker {
       this.enabledAt = now;
       await this.freeOrigins(sql, sub.oid);
       await sql.query(`ALTER SUBSCRIPTION ${ident(this.name())} ENABLE`);
+      this.keep({ cuts: this.kept.cuts + 1 });
     }
     return now - this.disabledSince;
   }
@@ -551,15 +622,27 @@ export class CopyMaker {
     if (!elsewhere && (await this.otherSchema(sql, order))) return this.schemaChanged();
     const tables = await this.tables(sql, sub.oid);
     const stopped = await this.stoppedFor(sql, sub);
-    if (elsewhere ? elsewhere.moved : order?.slot === 'lost' || stopped >= ENABLE_FOR_MS) return this.giveUp();
+    if (elsewhere ? elsewhere.moved : order?.slot === 'lost' || stopped >= ENABLE_FOR_MS || this.kept.cuts >= MAX_CUTS) return this.giveUp();
     if (tables.total > 0 && tables.ready === tables.total) {
-      this.keep({ phase: 'ready', given: 0 });
+      this.keep({ phase: 'ready', cuts: 0, readyAt: new Date(this.now()).toISOString() });
       return this.ready(sql, order);
     }
     const size = Number((await this.one<{ size: number }>(sql, 'SELECT pg_database_size(current_database())::float8 AS size'))?.size ?? 0);
+    if (this.stalled(tables.ready, size)) return this.giveUp();
     const progress = order?.leaderSize ? Math.min(99, Math.floor((size * 100) / order.leaderSize)) : 0;
     /* While it is made again, the copy that is read says how far it reaches. */
     this.said = { ...this.making(progress, this.kept.old ? await this.oldPulse() : null), ...(await this.leftSlots(sql, sub.oid)) };
+  }
+
+  /* Whether the first copy went no further for STALL_MS: no table more through, and the database no bigger by STALL_BYTES.
+     What it reached at best is written down when it moves on. */
+  private stalled(ready: number, size: number): boolean {
+    const { best } = this.kept;
+    if (!best || ready > best.ready || size >= best.size + STALL_BYTES) {
+      this.keep({ best: { ready: Math.max(ready, best?.ready ?? 0), size: Math.max(size, best?.size ?? 0), at: new Date(this.now()).toISOString() } });
+      return false;
+    }
+    return this.now() - Date.parse(best.at) >= STALL_MS;
   }
 
   /* The leader's slots of tables whose first copy broke off, to name in the report; nothing when there are none. */
@@ -637,6 +720,8 @@ export class CopyMaker {
      did not fit. One that was made again says which old attempt waits for the leader, and changes places with it once
      the leader has read it. */
   private async ready(sql: Sql, order: CopyOrder | null): Promise<void> {
+    /* A copy that held every table for an hour has not been failing: the attempts given up before it count no more. */
+    if (this.kept.given > 0 && !this.kept.old && this.kept.readyAt !== null && this.now() - Date.parse(this.kept.readyAt) >= STABLE_MS) this.keep({ given: 0 });
     /* The server moved in a planned switch, and the new leader made this copy a slot: written down first, then joined. */
     const joining = this.kept.old ? null : this.joinOf(order);
     if (joining) {
@@ -675,23 +760,87 @@ export class CopyMaker {
     }
   }
 
+  /* How long the next attempt waits after the ones given up in a row: ten minutes, twice as long after each, two hours at
+     most; soon: none, when no attempt was given up before. */
+  private wait(soon: boolean): number {
+    const { given } = this.kept;
+    return soon && given === 0 ? 0 : Math.min(RETRY_MS * 2 ** given, RETRY_MAX_MS);
+  }
+
+  /* The attempt that was just given up was the last the copy gets: the count of them in a row, when it is at the limit. */
+  private parking(): { since: string; attempts: number; why: 'failed' } | null {
+    return this.kept.given + 1 >= MAX_GIVEN ? { since: new Date(this.now()).toISOString(), attempts: this.kept.given + 1, why: 'failed' } : null;
+  }
+
   /* A copy that broke is made again beside the old one: the next attempt, in a database of its own. Written down
-     first; the old subscription is parted from its slot on the next ticks, so the leader drops that slot. */
+     first; the old subscription is parted from its slot on the next ticks, so the leader drops that slot. It counts as
+     an attempt given up, so one that breaks again and again waits longer each time, and is parked at the limit. */
   private remake(why: string): void {
+    const parked = this.parking();
     this.opts.log(`This machine's copy is made again: ${why}. The old one is read until the new one is whole.`);
-    this.keep({ old: { attempt: this.kept.attempt, migrations: this.kept.migrations }, attempt: this.kept.attempt + 1, database: NEXT_DB, phase: 'detach', migrations: null, notBefore: null, seen: false, missing: 0 });
+    const wait = this.wait(true);
+    this.keep({
+      old: { attempt: this.kept.attempt, migrations: this.kept.migrations }, attempt: this.kept.attempt + 1, database: NEXT_DB, phase: 'detach', migrations: null,
+      notBefore: wait === 0 || parked ? null : new Date(this.now() + wait).toISOString(), seen: false, missing: 0, given: this.kept.given + 1, cuts: 0, best: null, readyAt: null, parked,
+    });
     this.disabledSince = null;
+    if (parked) this.parkLine(parked.attempts);
   }
 
   /* An attempt is given up whole before the next begins: the next number and the phase are written down first, so a
      keeper that starts in the middle goes on with what is left. The next asks for its schema ten minutes later, twice
-     as long after each attempt given up in a row, two hours at most; soon: at once, when none was given up before. */
+     as long after each attempt given up in a row, two hours at most; soon: at once, when none was given up before. The
+     one that is at the limit is the last: the copy is parked, with its slots dropped as any given up. */
   private giveUp(soon = false): void {
-    const { given } = this.kept;
-    const wait = soon && given === 0 ? 0 : Math.min(RETRY_MS * 2 ** given, RETRY_MAX_MS);
-    this.keep({ attempt: this.kept.attempt + 1, phase: 'drop', notBefore: wait === 0 ? null : new Date(this.now() + wait).toISOString(), seen: false, missing: 0, given: given + 1 });
+    const parked = this.parking();
+    const wait = this.wait(soon);
+    this.keep({ attempt: this.kept.attempt + 1, phase: 'drop', notBefore: wait === 0 || parked ? null : new Date(this.now() + wait).toISOString(), seen: false, missing: 0, given: this.kept.given + 1, cuts: 0, parked });
+    this.disabledSince = null;
+    if (parked) this.parkLine(parked.attempts);
+    this.said = parked ? this.parkedReport() : this.making(0);
+  }
+
+  /* The leader measured the path to this machine as too weak for a copy that is not whole: what it made is dropped with its
+     slots as an attempt given up, and nothing is made while the path stays so. It counts for no attempt given up. */
+  private parkWeak(why: 'slow' | 'late'): void {
+    this.opts.log(
+      why === 'slow'
+        ? "The path from the company server to this machine is measured too slow for a copy of the company's database, so none is made over it. What was made is dropped, with its slots on the company server."
+        : "The path from the company server to this machine answers too late for a copy of the company's database, so none is made over it. What was made is dropped, with its slots on the company server.",
+    );
+    this.keep({ attempt: this.kept.attempt + 1, phase: 'drop', notBefore: null, seen: false, missing: 0, cuts: 0, best: null, parked: { since: new Date(this.now()).toISOString(), attempts: this.kept.given, why } });
+    this.disabledSince = null;
+    this.said = this.parkedReport();
+  }
+
+  private parkLine(attempts: number): void {
+    this.opts.log(
+      `This machine's copy of the company's database could not be made in ${attempts} attempts in a row, so this machine gives up this copy. Nothing more is made until it is asked for, and what it held on the company server is dropped.`,
+    );
+  }
+
+  /* A copy that was given up makes nothing, until the CEO asks for it again by hand: then the attempt begins in the empty
+     database that was made for it, with the count of attempts given up in a row starting over. */
+  private parked(order: CopyOrder | null): void {
+    /* One parked for its path goes on by itself once the leader no longer says the path is too weak. */
+    const pathMended = this.kept.parked?.why !== 'failed' && order !== null && order.weak === undefined;
+    if (!order?.retry && !pathMended) {
+      this.said = this.parkedReport();
+      return;
+    }
+    this.opts.log(order?.retry ? "The CEO asked for this machine's copy of the company's database again: it is made anew." : "The path from the company server to this machine carries a copy now: it is made.");
+    this.keep({ phase: 'schema', parked: null, given: order?.retry ? 0 : this.kept.given, cuts: 0, best: null, readyAt: null, notBefore: null, schema: null, seen: false, missing: 0 });
     this.disabledSince = null;
     this.said = this.making(0);
+  }
+
+  /* What a parked copy says: stopped, for good, and the old database that still waits to be merged. */
+  private parkedReport(): CopyReport {
+    const { old, parked } = this.kept;
+    return {
+      state: 'stopped', progress: null, error: 'apply', at: null, name: this.name(), old: old ? { attempt: old.attempt, ...(old.led === undefined ? {} : { led: old.led }) } : null,
+      ...(parked ? { gaveUp: parked } : {}),
+    };
   }
 
   /* Each subscription of a database is given up: disabled, parted from its slot, which the leader then drops, and
@@ -741,7 +890,7 @@ export class CopyMaker {
      that once led the company. */
   private async drop(): Promise<void> {
     const { database } = this.kept;
-    this.said = this.making(0, this.said.at);
+    this.said = this.kept.parked ? this.parkedReport() : this.making(0, this.said.at);
     if (await this.exists(database)) {
       const sql = this.on(database);
       if (await this.led(sql)) {
@@ -753,7 +902,7 @@ export class CopyMaker {
       await this.opts.admin.query(`DROP DATABASE ${ident(database)} WITH (FORCE)`);
     }
     await this.opts.admin.query(`CREATE DATABASE ${ident(database)}`);
-    this.keep({ phase: 'schema', migrations: null });
+    this.keep({ phase: this.kept.parked ? 'parked' : 'schema', migrations: null });
   }
 
   /* The copy that was made again takes the place of the old one. Each step is written down before it runs, and each
@@ -807,6 +956,6 @@ export class CopyMaker {
     /* The role's rights are per database, so they are made in full on the one that is read now. */
     await ensureReplica(() => this.opts.db(FIRST_DB), this.opts.password);
     if (this.kept.old?.led !== undefined) this.opts.saver?.forget();
-    this.keep({ swap: null, stamp: null, swapAt: null, old: null, database: FIRST_DB, phase: 'ready' });
+    this.keep({ swap: null, stamp: null, swapAt: null, old: null, database: FIRST_DB, phase: 'ready', readyAt: new Date(this.now()).toISOString(), cuts: 0 });
   }
 }

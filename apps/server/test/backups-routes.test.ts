@@ -276,9 +276,9 @@ describe('the backups routes', () => {
     const dan = await invitePerson(c.app, c.ceo, { name: 'Dan', email: 'dan@acme.com', access: { departments: [dev!.id], teams: [] } });
     const worker = await c.worker('mac');
     const patch = (payload: object, token: string) => c.app.inject({ method: 'PATCH', url: `/api/machines/${worker}`, payload, ...as(token) });
-    expect((await patch({ keepsBackups: false }, c.ceo)).json()).toEqual({ lendsTests: true, keepsBackups: false });
-    expect((await patch({ keepsBackups: true }, zed)).json()).toEqual({ lendsTests: true, keepsBackups: true });
-    expect((await patch({ lendsTests: false }, c.ceo)).json()).toEqual({ lendsTests: false, keepsBackups: true });
+    expect((await patch({ keepsBackups: false }, c.ceo)).json()).toEqual({ lendsTests: true, keepsBackups: false, fileStoreLimitBytes: null });
+    expect((await patch({ keepsBackups: true }, zed)).json()).toEqual({ lendsTests: true, keepsBackups: true, fileStoreLimitBytes: null });
+    expect((await patch({ lendsTests: false }, c.ceo)).json()).toEqual({ lendsTests: false, keepsBackups: true, fileStoreLimitBytes: null });
     expect((await patch({ keepsBackups: false }, dan)).statusCode).toBe(403);
     expect((await patch({}, c.ceo)).statusCode).toBe(400);
     expect((await patch({ keepsBackups: false, more: true }, c.ceo)).statusCode).toBe(400);

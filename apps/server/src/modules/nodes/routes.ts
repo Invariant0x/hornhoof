@@ -18,8 +18,10 @@ import { buildSoon, type LeaderBuild } from '../network/follow.js';
 import { companyFolder, isServerComputer, issueTicket } from '../network/join.js';
 import { seenAccess } from '../computer/seen.js';
 import { replicasOf } from '../copies/measured.js';
+import { areaOf } from '../files/area.js';
 import { askMove, cancelMove, moveView } from '../copies/move.js';
 import { setPriority } from '../copies/priority.js';
+import { askCopyRetry } from '../copies/retry.js';
 import { holding } from '../copies/view.js';
 import { upsertJoinedMachine } from '../network/server-machine.js';
 import { findThisMachine } from '../network/store.js';
@@ -75,10 +77,20 @@ const buildLine = (image: string, build: LeaderBuild): string => `build ${build.
 const IdParams = z.object({ id: z.uuid() });
 export const LendBody = z.object({ lendsTests: z.boolean() }).strict();
 /* The ticks of a machine's card: whether it takes the company's test runs, and whether it keeps the company's backups. */
+/* The ticks of a machine's card, and the area of its disk the company's files may take: bytes, 0 for none, or null for
+   the default. */
 const TicksBody = z
-  .object({ lendsTests: z.boolean().optional(), keepsBackups: z.boolean().optional() })
+  .object({ lendsTests: z.boolean().optional(), keepsBackups: z.boolean().optional(), fileStoreLimitBytes: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional() })
   .strict()
-  .refine(ticks => ticks.lendsTests !== undefined || ticks.keepsBackups !== undefined, 'Say which tick to change.');
+  .refine(ticks => ticks.lendsTests !== undefined || ticks.keepsBackups !== undefined || ticks.fileStoreLimitBytes !== undefined, 'Say which setting to change.');
+
+/* The area a machine gives the company's files, what they take there and what the disk they lie on has free; none for a
+   machine without a keeper, which keeps none. */
+const STORE_COLUMNS = { id: machines.id, networkId: machines.networkId, fileStoreLimitBytes: machines.fileStoreLimitBytes, fileStoreUsedBytes: machines.fileStoreUsedBytes, filesDiskFree: machines.filesDiskFree, diskFree: machines.diskFree };
+type StoreRow = { id: string; networkId: string | null; fileStoreLimitBytes: number | null; fileStoreUsedBytes: number; filesDiskFree: number | null; diskFree: number | null };
+function storeCard(m: StoreRow) {
+  return m.networkId ? { id: m.id, limitBytes: m.fileStoreLimitBytes, areaBytes: areaOf(m.fileStoreLimitBytes), usedBytes: m.fileStoreUsedBytes, diskFree: m.filesDiskFree ?? m.diskFree } : null;
+}
 const PlanBody = z.object({ subscription: z.uuid() }).strict();
 /* A machine's place by hand: null for none, 'none' to keep it from the server, or the place, from 2. */
 const PriorityBody = z.object({ pin: z.union([z.null(), z.literal('none'), z.number().int().min(2).max(999)]) }).strict();
@@ -259,7 +271,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const live = and(eq(machines.companyId, me.companyId), isNull(machines.revokedAt), shownMachine(config));
     const rows = await db
-      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, networkId: machines.networkId, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups, role: machines.role, uploadState: machines.uploadState })
+      .select({ ...STORE_COLUMNS, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups, role: machines.role, uploadState: machines.uploadState })
       .from(machines)
       .innerJoin(people, eq(people.id, machines.personId))
       .where(me.scopeKind === 'company' ? live : and(live, eq(machines.personId, me.id)))
@@ -289,6 +301,10 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const seenLately = (machineId: string) => on(machineId).some(n => n.lastSeenAt !== null && Date.now() - n.lastSeenAt.getTime() < CORE_OFFER_MS);
     const needsCore = (m: (typeof rows)[number]) => m.ownerId === me.id && m.kind === 'computer' && !m.networkId && !isServerComputer(config, m.machineKey) && seenLately(m.id);
     const serverMachine = me.scopeKind === 'company' ? programHost : null;
+    /* The server's own row, which no card shows, keeps the files it holds: its area is on the card of the computer it runs
+       on, or on the built-in card where it runs on none. */
+    const [ownStoreRow] = ownRow ? await db.select(STORE_COLUMNS).from(machines).where(and(eq(machines.id, ownRow.id), eq(machines.companyId, me.companyId))) : [];
+    const ownStore = ownStoreRow ? storeCard(ownStoreRow) : null;
     /* Who holds the company's data, and each machine's part in it: for those who see the whole company. The card of
        the computer the server itself runs on says what the server's own row says. */
     const held = me.scopeKind === 'company' ? await holding(ctx) : null;
@@ -335,6 +351,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
               webPort: ownRow?.webPort ?? null,
               refusedBy,
               access: accessOf(ownRow?.id),
+              fileStore: serverMachine ? null : ownStore,
             }
           : null,
       machines: rows.map(m => ({
@@ -361,6 +378,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         /* Whether it keeps the company's backups, and how many it holds; none of either without the core. */
         keepsBackups: m.networkId ? m.keepsBackups : null,
         heldBackups: m.networkId ? m.heldBackups.length : null,
+        fileStore: serverMachine?.id === m.id && ownStore ? ownStore : storeCard(m),
         drain: machineDrain(ctx, machineProgramNodes(on(m.id).map(n => n.id), m.id, programHost, own, m.networkId)),
         /* Its plans' nodes, its own built-in node when it keeps a copy of the data, and the server's when the server runs
            on it. */
@@ -414,6 +432,17 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.code(204).send();
   });
 
+  /* The CEO's request for a new copy on a machine whose keeper gave its copy up. His alone, by himself or through the
+     orchestrator. */
+  app.post('/api/machines/:id/copy/retry', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    if (!me.isOwner || me.viaHead) throw notCeo();
+    const { id } = IdParams.parse(req.params);
+    await ownMachine(me, id);
+    askCopyRetry(ctx, id);
+    return reply.code(204).send();
+  });
+
   /* The CEO's request to move the server to this machine, and its taking off. His alone, by himself or through the
      orchestrator. */
   app.post('/api/machines/:id/move', async (req, reply) => {
@@ -439,9 +468,27 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.patch('/api/machines/:id', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    const ticks = TicksBody.parse(req.body);
-    await ownMachine(me, id);
-    const [now] = await db.update(machines).set(ticks).where(eq(machines.id, id)).returning({ lendsTests: machines.lendsTests, keepsBackups: machines.keepsBackups });
+    const { fileStoreLimitBytes: limit, ...ticks } = TicksBody.parse(req.body);
+    const area = limit === undefined ? {} : { fileStoreLimitBytes: limit };
+    /* What a machine gives the company's files is its owner's decision or the CEO's, never one a head carries out. */
+    if (limit !== undefined && me.viaHead) throw notCeo();
+    const said = { lendsTests: machines.lendsTests, keepsBackups: machines.keepsBackups, fileStoreLimitBytes: machines.fileStoreLimitBytes };
+    /* The server's own row, which no card shows, takes only its area, and only from the CEO, by himself or through the
+       orchestrator. */
+    const own = await findThisMachine(db, config);
+    if (own?.id === id) {
+      const [row] = await db.select(idOnly(machines)).from(machines).where(and(eq(machines.id, id), eq(machines.companyId, me.companyId)));
+      if (!row || limit === undefined || Object.keys(ticks).length > 0) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
+      if (!me.isOwner) throw notCeo();
+      return (await db.update(machines).set(area).where(eq(machines.id, id)).returning(said))[0];
+    }
+    const machine = await ownMachine(me, id);
+    if (limit !== undefined) {
+      if (!machine.networkId) throw new ApiError(400, 'validation', "This machine has no keeper, so it keeps none of the company's files.");
+      /* More room on another person's machine is the CEO's to give; less, anyone who may change the machine gives. */
+      if (areaOf(limit) > areaOf(machine.fileStoreLimitBytes) && machine.personId !== me.id && !me.isOwner) throw notCeo();
+    }
+    const [now] = await db.update(machines).set({ ...ticks, ...area }).where(eq(machines.id, id)).returning(said);
     if (ticks.lendsTests) await pumpTests(ctx);
     return now;
   });

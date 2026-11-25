@@ -578,7 +578,7 @@ const CARRY_ANIMATIONS: ReadonlySet<ResidentAnimationId> = new Set(['carry', 'ca
 const WALKED_DIRECTIONS: readonly Direction8[] = ['NE', 'SE', 'SW', 'NW'];
 const LARGE_ITEM_DIRECTIONS: Readonly<Partial<Record<ResidentAnimationId, readonly Direction8[]>>> = { walk: WALKED_DIRECTIONS, idle: ['SE', 'SW'] };
 
-/* Order v3 4.4 (Ivan, 23.11): a carry, and the walk of a look with a large item, draw every way a resident walks on
+/* Order v3 4.4 (23.11): a carry, and the walk of a look with a large item, draw every way a resident walks on
    screen, NE, SE, SW and NW, and that look's idle SE and SW, so no mirrored row moves the item to the other hand.
    Other sheets keep their drawn rows and a mirror. */
 function heldItemRule(people: NonNullable<WorldArtCatalog['people']>, look: string, anim: ResidentAnimationId, path: string): HeldItemRule | undefined {

@@ -13,7 +13,8 @@ const VERSION = { version: '0.5.0', commit: 'abc1234' };
 const WIDTHS = [375, 1440];
 
 /* What a person cannot read on the page: the page scrolls sideways, a text is cut with an ellipsis, or a box that hides
-   its overflow holds more than it shows. A map or a canvas moves its content on purpose and is left out. */
+   its overflow holds more than it shows. A map or a canvas moves its content on purpose and is left out, and so is the line
+   of what happened, which ends in an ellipsis on its one row on purpose, its whole text in its title (#2102). */
 const clipped = (page: Page, scope: string) => page.locator(scope).first().evaluate((root: HTMLElement) => {
   const found: string[] = [];
   const sideways = document.documentElement.scrollWidth - window.innerWidth;
@@ -21,7 +22,7 @@ const clipped = (page: Page, scope: string) => page.locator(scope).first().evalu
   const name = (el: Element) => `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.split(' ').join('.')}` : ''}`;
   for (const el of [root, ...root.querySelectorAll<HTMLElement>('*')]) {
     /* Text kept for a screen reader is clipped to nothing on purpose. */
-    if (el.closest('svg, canvas, .world, .map, .tr-map, .sr, [aria-hidden="true"]') || !el.getClientRects().length) continue;
+    if (el.closest('svg, canvas, .world, .map, .tr-map, .sr, .ticker, [aria-hidden="true"]') || !el.getClientRects().length) continue;
     const style = getComputedStyle(el);
     if (style.visibility === 'hidden' || style.display === 'none') continue;
     const own = [...el.childNodes].some(node => node.nodeType === Node.TEXT_NODE && /\p{L}/u.test(node.textContent ?? ''));

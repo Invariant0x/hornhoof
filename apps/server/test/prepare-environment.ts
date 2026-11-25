@@ -90,6 +90,15 @@ export function readPgliteTemplate(path: string, options: Omit<PgliteTemplateOpt
     return metadata.dumpDigest === sha(dump) ? dump : null;
   } catch { return null; }
 }
+/* The initdb dump a machine's template keeps beside the migrated one (warm/pglite-build.ts) depends only on the PGlite that
+   made it. */
+export function templateInitdb(path: string, options: Pick<PgliteTemplateOptions, 'pgliteVersion'> = {}): string | null {
+  try {
+    const metadata = JSON.parse(readFileSync(join(path, 'READY.json'), 'utf8')) as TemplateMetadata;
+    const file = join(path, 'initdb.tar');
+    return metadata.format === FORMAT && metadata.pgliteVersion === (options.pgliteVersion ?? pgliteVersion()) && existsSync(file) ? file : null;
+  } catch { return null; }
+}
 async function preparePostgres(): Promise<void> {
   if (!process.env.DATABASE_URL) throw new Error('PostgreSQL preparation requires the generated DATABASE_URL');
   const [

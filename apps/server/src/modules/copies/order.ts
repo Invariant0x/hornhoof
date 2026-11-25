@@ -11,6 +11,7 @@ import { moveTargetRow } from './move.js';
 import { SERVER_KEY } from '../nodes/nodes.js';
 import { onlineShares } from '../network/join.js';
 import { findThisMachine } from '../network/store.js';
+import { weakPath } from './path.js';
 import { REPORT_FRESH_MS, seesAll, unfit, type Candidate } from './qualify.js';
 import { afterLeave, cutReplication, leaveData, type Leaving } from './scope.js';
 import { ALWAYS_SHARE, NEWCOMER_MS, placePins, scoreOf, settle, whyOf, type Measured, type Scored, type WhyContext } from './score.js';
@@ -264,13 +265,16 @@ async function place(ctx: Ctx, now: Date, opts: { rescore?: boolean; ceo?: boole
     /* A live copy awaiting a wipe still occupies disk even after its role changed to worker. */
     const releasing = before.filter(row => row.id !== leader.id && (row.uploadState !== null || places.get(row.id)?.leave)).map(row => row.id);
     const pinOf = new Map(all.map(m => [m.id, m.pin]));
+    /* A path measured too weak for a copy gives none: the machine keeps its place in the order, and gets no data. */
+    const [sized] = await q<{ size: number }>('SELECT pg_database_size(current_database())::float8 AS size');
+    const size = sized ? Number(sized.size) : null;
     const { ready, sync } = readyCopies(ctx, holding, now);
     for (const row of holding) if (row.copyState !== 'ready') ready.delete(row.id);
     const numbered = ranked.flatMap(one => (one.number !== null && one.number >= 2 ? [{ id: one.id, number: one.number }] : []));
     const roles = planRoles({
       numbered,
       data: holding.map(row => ({ id: row.id, number: places.get(row.id)?.number ?? null, out: pinOf.get(row.id) === 'none' })),
-      eligible: new Set(others.filter(m => unfit(m, fit) === null && !m.owes && m.reportAt !== null && now.getTime() - m.reportAt.getTime() <= REPORT_FRESH_MS).map(m => m.id)),
+      eligible: new Set(others.filter(m => unfit(m, fit) === null && !m.owes && m.reportAt !== null && now.getTime() - m.reportAt.getTime() <= REPORT_FRESH_MS && weakPath(m, size) === null).map(m => m.id)),
       releasing, ready, sync,
       handoverAt: kept?.handover_at ? new Date(kept.handover_at) : null,
       now, ceo: Boolean(opts.ceo),

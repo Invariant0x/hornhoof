@@ -228,7 +228,9 @@ async function readSourceFiles(
 ): Promise<Map<string, Map<string, Row | null>>> {
   const files = new Map<string, Map<string, Row | null>>();
   for (const t of facts.tables.values()) {
-    if (fileColumns(t).length === 0) continue;
+    /* A table the facts show no file column of still brings the rows the merge asked for whole, as attachments do while
+       the source keeps bytes the store has not taken yet. */
+    if (fileColumns(t).length === 0 && !requested.has(t.name)) continue;
     const rows = candidateTableRows(t.name, journal, compared);
     const extra = requested.get(t.name) ?? new Map<string, Record<string, unknown>>();
     files.set(t.name, await loadTableFiles(leader, src, t, rows, extra));
