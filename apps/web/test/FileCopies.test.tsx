@@ -53,6 +53,44 @@ describe('File copies in Settings', () => {
     expect(select).toHaveValue('2');
   });
 
+  it('shows where the backup is, what it keeps and how far back it reaches, and sets the days it keeps a deleted file', async () => {
+    const backup = { machineId: 'm-2', apart: true, away: false, files: 12, bytes: 2.5 * GB, waiting: 3, keptAt: '2026-11-24T10:00:00.000Z', oldestAt: '2026-10-25T09:00:00.000Z', keepDays: 30 };
+    const calls = mockApi({
+      'GET /api/company/file-store': [200, viewOf({ backup })],
+      'PATCH /api/company/file-store': body => [200, viewOf({ backup: { ...backup, keepDays: (body as { backupKeepDays: number }).backupKeepDays } })],
+    });
+    shown();
+    const days = await screen.findByRole('combobox', { name: 'Days the backup keeps a deleted file' });
+    expect(days).toHaveValue('30');
+    expect(screen.getByText('The backup is on a machine that keeps no live copy.')).toBeInTheDocument();
+    expect(screen.getByText('It keeps 12 files, 2.5 GB.')).toBeInTheDocument();
+    expect(screen.getByText('3 files are still to reach it.')).toBeInTheDocument();
+    expect(screen.getByText(/^It last took a file in on /)).toBeInTheDocument();
+    expect(screen.getByText(/^It can put files back as they were as early as /)).toBeInTheDocument();
+    expect(screen.queryByText(/has been away/)).not.toBeInTheDocument();
+
+    await userEvent.selectOptions(days, '90');
+    await waitFor(() => expect(calls.find(call => call.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/company/file-store', body: { backupKeepDays: 90 } }));
+    await waitFor(() => expect(days).toHaveValue('90'));
+  });
+
+  it("says when the backup's machine keeps live copies too, and when it is away, and keeps days set outside the list", async () => {
+    const backup = { machineId: 'm-2', apart: false, away: true, files: 0, bytes: 0, waiting: 5, keptAt: null, oldestAt: null, keepDays: 45 };
+    mockApi({ 'GET /api/company/file-store': [200, viewOf({ backup })] });
+    shown();
+    expect(await screen.findByText('The backup is on a machine that keeps live copies too.')).toBeInTheDocument();
+    expect(screen.getByText('The machine with the backup has been away for over a day. New files wait to reach it.')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Days the backup keeps a deleted file' })).toHaveValue('45');
+    expect(screen.queryByText(/^It last took a file in/)).not.toBeInTheDocument();
+  });
+
+  it('shows no backup on a server from before it', async () => {
+    mockApi({ 'GET /api/company/file-store': [200, viewOf()] });
+    shown();
+    await screen.findByRole('combobox', { name: 'File copies across machines' });
+    expect(screen.queryByRole('combobox', { name: 'Days the backup keeps a deleted file' })).not.toBeInTheDocument();
+  });
+
   it('shows nothing on a server from before the store', async () => {
     mockApi({});
     const { container } = shown();
