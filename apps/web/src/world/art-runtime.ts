@@ -36,10 +36,12 @@ export type GreyReader = (url: string) => Promise<GreyPicture>;
 async function greyOfBlob(blob: Blob | null): Promise<GreyPicture> {
   if (!blob) throw new Error('no mask');
   const bitmap = await createImageBitmap(blob);
-  const ctx = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d')!;
+  /* A closed bitmap reads 0 by 0, so its size is taken first. */
+  const { width: w, height: h } = bitmap;
+  const ctx = new OffscreenCanvas(w, h).getContext('2d')!;
   ctx.drawImage(bitmap, 0, 0);
   bitmap.close();
-  return { data: greyOf(ctx.getImageData(0, 0, bitmap.width, bitmap.height).data), w: bitmap.width, h: bitmap.height };
+  return { data: greyOf(ctx.getImageData(0, 0, w, h).data), w, h };
 }
 
 /* A picture as a texture the way the PixiJS loader makes one: alpha premultiplied on upload, mipmaps for far zooms. */

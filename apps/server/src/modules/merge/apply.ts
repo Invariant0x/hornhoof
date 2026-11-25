@@ -15,7 +15,7 @@ import {
 import type { MergeSource } from './source.js';
 import type { Files } from '../files/files.js';
 import { nameOf, valueWords } from './words.js';
-import { fingerprintMask, maskCompanyRows, maskJson, maskRow, type Fingerprint, type Mask } from '../tasks/hide-secret.js';
+import { fingerprintMask, maskCompanyRows, maskJson, maskRow, type Fingerprint, type Mask, type StoredTexts } from '../tasks/hide-secret.js';
 
 export type { CodeLine } from './snapshot.js';
 
@@ -499,6 +499,7 @@ class Merge {
     private readonly merge: { id: string; label: string; kept: boolean; companyId: string },
     private readonly onUnit?: (n: number) => void | Promise<void>,
     private readonly store?: StoreBytes,
+    private readonly texts?: StoredTexts,
   ) {}
 
   async run(): Promise<Omit<MergeResult, 'heldMs'>> {
@@ -527,7 +528,7 @@ class Merge {
     await this.backups();
     /* A value hidden there and new here is looked for once in this side's own rows of the company, in this transaction. */
     const fresh = fingerprintMask(brought);
-    if (fresh) await maskCompanyRows(q, this.facts, merge.companyId, fresh);
+    if (fresh) await maskCompanyRows(q, this.facts, merge.companyId, fresh, this.texts);
     const tasks = await this.record(carried);
     const code = await this.codeOf(tasks);
     const [from, to] = await this.span(row.source);
@@ -939,7 +940,7 @@ const refuseMerge = (reason: string): never => {
 
 /* The store of this side, where the bytes of a file from a source of before the store go; without it, such a file is
    refused. */
-export type MergeFiles = Pick<Files, 'putBytes'>;
+export type MergeFiles = Pick<Files, 'putBytes' | 'bytes'>;
 type StoreBytes = (bytes: Buffer) => Promise<string>;
 type RunOptions = { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number; clock?: () => number; files?: MergeFiles };
 
@@ -957,8 +958,11 @@ async function runPreparedMerge(
     try {
       /* Read committed so the deferred fence trigger at commit sees live lease renewals (and any fence) committed while this merge ran. */
       return await db.transaction(tx => {
-        const store = opts.files ? async (bytes: Buffer) => (await opts.files!.putBytes(tx, bytes)).sha256 : undefined;
-        return new Merge(queryOf(tx as unknown as Db), prepared, merge, opts.onUnit, store).run();
+        const files = opts.files;
+        const store = files ? async (bytes: Buffer) => (await files.putBytes(tx, bytes)).sha256 : undefined;
+        /* The text files of this side, as a value hidden there and new here leaves them. */
+        const texts: StoredTexts | undefined = files && { read: sha256 => files.bytes(tx, sha256), write: bytes => files.putBytes(tx, bytes) };
+        return new Merge(queryOf(tx as unknown as Db), prepared, merge, opts.onUnit, store, texts).run();
       });
     } catch (err) {
       /* A session outside the gate held a table for longer than the merge waits: nothing was changed, and it is tried

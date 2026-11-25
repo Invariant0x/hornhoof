@@ -9,15 +9,17 @@ import { hasCode } from '../../db/errors.js';
 import { hasOldBytes, oldBytesGone, oldPieces } from './legacy.js';
 import { approvedRows, listMoved, noteCleared, noteRoomBack, reconcile, unlist, type Listed, type Reconciliation } from './move.js';
 import { SealRefused } from './seal.js';
+import { StoreRefused } from './store.js';
 
 /* Moves the bytes an older Hornhoof kept in Postgres, and the big files it kept on the disk of the machine that took
    them, into the store, while the app leads and the server goes on serving. The state is in the rows: a row that names no
-   content yet is not moved yet. A row is named by its content only in an update that proves its bytes are the bytes the
-   store keeps, and only once they stand on as many of the company's machines as they want (place.ts), whether or not
-   those machines are online this minute; it keeps its bytes. They are cleared
-   only once the CEO said yes to the reconciliation that lists the row (move.ts), again only in an update that proves they
-   are the bytes stored. A crash or a restart goes on from the next row: what was stored already is found there again.
-   Once no row holds a byte, the column goes and the table gives its room back. */
+   content yet is not moved yet. A row is named by its content only once the store's copy opened to bytes of its sha256,
+   only in an update that proves its bytes are the bytes the store keeps, and only once they stand on as many of the
+   company's machines as they want (place.ts), whether or not those machines are online this minute; it keeps its bytes.
+   They are cleared only once the CEO said yes to the reconciliation that lists the row (move.ts), only while the store of
+   the machine that clears them opens its copy to them again, and only in an update that proves they are the bytes
+   stored. A crash or a restart goes on from the next row: what was stored already is found there again. Once no row holds
+   a byte, the column goes and the table gives its room back. */
 
 /* Rows looked at a time. */
 const MOVE_BATCH = 5;
@@ -77,15 +79,15 @@ async function sourceOf(ctx: Mover, row: Row): Promise<{ input: Readable; disk: 
   return file ? { input: file.createReadStream(), disk: true } : null;
 }
 
-/* The store's copy opens to bytes of the hash it was stored under. One that does not open is no copy: its row keeps its
-   bytes, and the round goes on with the next row. */
+/* The store's copy opens to bytes of the hash it was stored under. One that does not open, or is not in the store of this
+   machine, is no copy: its row keeps its bytes, and the round goes on with the next row. */
 async function opensTo(ctx: Mover, sha256: string): Promise<boolean> {
   const key = await ctx.files.key(ctx.db);
   const hash = createHash('sha256');
   try {
     for await (const chunk of ctx.files.store().open(sha256, key)) hash.update(chunk as Buffer);
   } catch (err) {
-    if (err instanceof SealRefused) return false;
+    if (err instanceof SealRefused || (err instanceof StoreRefused && err.reason === 'missing')) return false;
     throw err;
   }
   return hash.digest('hex') === sha256;
@@ -133,8 +135,26 @@ async function notCleared(tx: Pick<Ctx['db'], 'execute'>, row: Listed, column: b
   if (rowsOf(await tx.execute(sql`SELECT 1 AS one FROM attachments WHERE id = ${row.id} AND sha256 = ${row.sha256}`)).length === 0) await unlist(tx, row.id);
 }
 
-/* A listed row of a reconciliation the CEO said yes to gives up its bytes and leaves the list; then its disk file goes. */
+/* A listed row whose content the store of this machine does not keep whole, as on a machine that leads after another
+   moved it, or one whose copy a fault of the disk spoiled: where its bytes are here, it is named no more, so it is read
+   from them and moves again, for a reconciliation of its own. One whose bytes are not here either stays as it is. */
+async function notKeptHere(ctx: Mover, row: Listed, column: boolean): Promise<void> {
+  if (!(row.disk ? existsSync(join(ctx.config.filesDir!, row.id)) : column)) return;
+  await ctx.db.transaction(async tx => {
+    await tx.execute(
+      row.disk
+        ? sql`UPDATE attachments SET sha256 = NULL WHERE id = ${row.id} AND sha256 = ${row.sha256}`
+        : sql`UPDATE attachments SET sha256 = NULL WHERE id = ${row.id} AND sha256 = ${row.sha256} AND bytes IS NOT NULL`,
+    );
+    if (rowsOf(await tx.execute(sql`SELECT 1 AS one FROM attachments WHERE id = ${row.id} AND sha256 = ${row.sha256}`)).length === 0) await unlist(tx, row.id);
+  });
+}
+
+/* A listed row of a reconciliation the CEO said yes to gives up its bytes and leaves the list; then its disk file goes.
+   Only once the store of this machine keeps the copy whole, which is then the only one: the store's round removes no
+   content a row names, and the clearing holds its record. */
 async function clearRow(ctx: Mover, row: Listed, column: boolean): Promise<boolean> {
+  if (!(await opensTo(ctx, row.sha256))) return notKeptHere(ctx, row, column).then(() => false);
   const cleared = await ctx.db.transaction(async tx => {
     if (rowsOf(await tx.execute(clearing(row, column))).length !== 1) return notCleared(tx, row, column).then(() => false);
     await unlist(tx, row.id);

@@ -240,12 +240,18 @@ describe('the room for task files', () => {
     expect(plain.ctx.config.taskFilesBytes).toBe(2 * 1024 * 1024 * 1024);
   });
 
-  it("gives a person's first picture the company's whole room, and counts each content once", async () => {
-    const { app, companyId, task, counted } = await company({ TASK_FILES_MB: '3' });
+  it("gives a person's first picture the company's whole room, and counts each file by its own size", async () => {
+    const { app, companyId, task, counted, bruno, turn, attach } = await company({ TASK_FILES_MB: '3' });
     const limit = 3 * 1024 * 1024;
     expect((await checkPictureRoom(app.ctx, companyId, 10)).bytes).toBe(limit);
     await counted(task.id, 1000);
     expect((await checkPictureRoom(app.ctx, companyId, 10)).bytes).toBe(limit - 1000);
+    /* The same bytes a second time count again: a room that grew by less would tell whoever sends them that a file of
+       those very bytes is kept somewhere in the company. */
+    const same = Buffer.from('the same bytes kept twice');
+    const token = await turn(bruno);
+    for (const name of ['one.txt', 'two.txt']) expect((await attach(token, `task=${task.number}&name=${name}`, same)).statusCode).toBe(201);
+    expect((await checkPictureRoom(app.ctx, companyId, 10)).bytes).toBe(limit - 1000 - 2 * same.length);
   });
 
   it('lets go of the files of a turn closed 30 days ago, and keeps the rest', async () => {

@@ -743,6 +743,7 @@ export type MachineAwayCard = {
 
 /* A machine whose database copy is still waiting for its schema. */
 export type CopySchemaFailureCard = { id: string; hostname: string; since: string; attempt: number };
+export type CopyGaveUpCard = { id: string; hostname: string; since: string; attempts: number; why: 'failed' | 'slow' | 'late' };
 
 /* A machine short of disk space, whose node takes no new checks or builds since: for its owner and the CEO, gone by itself
    once the node has room again or is off the line. */
@@ -769,6 +770,7 @@ export type Decisions = {
   merges?: MergeDecision[];
   machinesAway?: MachineAwayCard[];
   copySchemaFailures?: CopySchemaFailureCard[];
+  copyGaveUp?: CopyGaveUpCard[];
   /* A server from before nodes said how full their disk is sends none. */
   machinesLow?: MachineLowCard[];
   githubLimits?: GitHubLimitCard[];
@@ -983,7 +985,7 @@ export type CopyLine =
   | { line: 'ready' | 'catching_up' }
   | { line: 'behind'; minutes: number }
   | { line: 'asleep'; since: string | null }
-  | { line: 'stopped'; why: 'disk_full' | 'setup' | 'gave_up' | null; since?: string; attempts?: number };
+  | { line: 'stopped'; why: 'disk_full' | 'setup' | 'gave_up' | 'path_slow' | 'path_late' | null; since?: string; attempts?: number };
 
 /* A machine's place in the order of who holds the company's data, why it holds no copy, how its copy does, when it
    stopped holding the data, and, for the machine the server last moved from, until when it ran the server, once its

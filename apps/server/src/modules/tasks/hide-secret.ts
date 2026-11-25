@@ -12,8 +12,9 @@ import { factsOf, type Facts, type Query, type TableFacts } from '../merge/facts
 import { queryOf, quote } from '../merge/leader.js';
 import { loadTask, taskSpot, type Task } from './state.js';
 import { note } from './events.js';
-import { fileBytes } from './attachments.js';
+import { fileBytes } from './file-bytes.js';
 import { idOnly } from '../../db/selections.js';
+import { StoreRefused } from '../files/store.js';
 
 type Row = Record<string, unknown>;
 /* What a mask does to one text: the hidden value, wherever it stands, becomes HIDDEN. */
@@ -175,10 +176,18 @@ const jsonOf = (columns: string[], alias: string): string => `jsonb_build_object
    one it was goes from the machines at once, unless a row still names it. */
 export type StoredTexts = { read: (sha256: string) => Promise<Buffer>; write: (bytes: Buffer) => Promise<{ sha256: string; size: number }> };
 
+/* A file the store has no copy of any more, as on a machine that leads after another kept it, has nothing left to mask:
+   it stops no value from being hidden everywhere else. */
+function unlessLost(err: unknown): null {
+  if ((err instanceof ApiError && err.reason === 'file_lost') || (err instanceof StoreRefused && err.reason === 'missing')) return null;
+  throw err;
+}
+
 /* A text file of the store as the mask leaves it: its new hash and size, or null when the mask changes nothing. */
 async function maskStored(row: Row, mask: Mask, texts: StoredTexts | undefined): Promise<Row | null> {
   if (!texts || !textFile(row.media_type) || typeof row.sha256 !== 'string') return null;
-  const bytes = await texts.read(row.sha256);
+  const bytes = await texts.read(row.sha256).catch(unlessLost);
+  if (!bytes) return null;
   const text = bytes.toString('utf8');
   if (!Buffer.from(text, 'utf8').equals(bytes)) return null;
   const masked = mask(text);
@@ -221,7 +230,7 @@ export async function maskCompanyRows(q: Query, facts: Facts, company: string, m
       }
     });
   }
-  for (const t of tables) changed += await maskCopies(q, t, company, mask);
+  for (const t of tables) changed += await maskCopies(q, t, company, mask, texts, left);
   changed += await maskParked(q, company, mask);
   /* The text as it was leaves the machines at the next look, not after the day an unused file waits. */
   for (const sha256 of left) await q('UPDATE net.files SET drop_at = now() WHERE sha256 = $1 AND NOT EXISTS (SELECT 1 FROM public.attachments WHERE sha256 = $1)', [sha256]);
@@ -240,8 +249,18 @@ const patched = (t: TableFacts, image: Row | null, mask: Mask, also: Row = {}): 
   return kept && Object.keys(kept).length > 0 ? { ...image, ...kept } : null;
 };
 
+/* A side of a merge's conflict as the mask leaves it: its prose, and the text file it names, which a pick would bring
+   back, kept again as it reads now. The text it named is noted in left, to leave the store. */
+async function patchedSide(t: TableFacts, image: Row | null, mask: Mask, also: Row, texts: StoredTexts | undefined, left: Set<string>): Promise<Row | null> {
+  const masked = patched(t, image, mask, also);
+  const stored = image && t.name === 'attachments' ? await maskStored({ ...also, ...image }, mask, texts) : null;
+  if (!stored) return masked;
+  left.add(image!.sha256 as string);
+  return { ...(masked ?? image), ...stored };
+}
+
 /* The journal's old values of the company's rows, here or deleted since, and what merges kept of them. */
-async function maskCopies(q: Query, t: TableFacts, company: string, mask: Mask): Promise<number> {
+async function maskCopies(q: Query, t: TableFacts, company: string, mask: Mask, texts: StoredTexts | undefined, left: Set<string>): Promise<number> {
   const scope = scopeOf(t, company)!;
   const name = t.name.replaceAll("'", "''");
   const keys = `SELECT ${jsonOf(t.key, 't')} FROM public.${quote(t.name)} t WHERE ${scope.rows}
@@ -267,11 +286,14 @@ async function maskCopies(q: Query, t: TableFacts, company: string, mask: Mask):
       changed += 1;
     }
   });
-  await eachBatch(q, `SELECT jsonb_build_object('id', c.id, 'here', c.here, 'there', c.there, 'value', c.value, 'why', c.why) AS row FROM net.merge_conflicts c
+  const sideMedia = t.name === 'attachments' ? ", 'media_type', (SELECT a.media_type FROM public.attachments a WHERE a.id = (c.key->>'id')::uuid)" : '';
+  await eachBatch(q, `SELECT jsonb_build_object('id', c.id, 'here', c.here, 'there', c.there, 'value', c.value, 'why', c.why${sideMedia}) AS row FROM net.merge_conflicts c
     WHERE c.tbl = '${name}' AND (c.key IN (${keys}) OR ${scope.image('c.here')} OR ${scope.image('c.there')}
       OR c.task_id IN (SELECT id FROM public.tasks WHERE company_id = '${company}'::uuid))`, async rows => {
     for (const row of rows) {
-      const [here, there, value] = [patched(t, row.here as Row | null, mask), patched(t, row.there as Row | null, mask), patched(t, row.value as Row | null, mask)];
+      const also = { media_type: row.media_type };
+      const side = (image: unknown) => patchedSide(t, image as Row | null, mask, also, texts, left);
+      const [here, there, value] = [await side(row.here), await side(row.there), await side(row.value)];
       const why = typeof row.why === 'string' && mask(row.why) !== row.why ? mask(row.why) : null;
       if (!here && !there && !value && !why) continue;
       await q('UPDATE net.merge_conflicts SET here = coalesce($1::jsonb, here), there = coalesce($2::jsonb, there), value = coalesce($3::jsonb, value), why = coalesce($4, why) WHERE id = $5::uuid',
@@ -333,7 +355,7 @@ export async function hideTaskSecret(ctx: Pick<Ctx, 'db' | 'bus' | 'config' | 'f
     const archiveIds = log.flatMap(e => Array.isArray(e.data?.fullTexts) ? e.data.fullTexts.flatMap((ref: unknown) => ref && typeof ref === 'object' && 'id' in ref && typeof ref.id === 'string' ? [ref.id] : []) : []);
     const archives = archiveIds.length ? await tx.select(idOnly(attachments)).from(attachments).where(and(eq(attachments.companyId, person.companyId), eq(attachments.taskId, task.id), eq(attachments.mediaType, 'text/plain'), inArray(attachments.id, archiveIds))) : [];
     const read = { db: tx as unknown as Db, config: ctx.config, files: ctx.files };
-    const archived = await Promise.all(archives.map(async file => (await fileBytes(read, file.id)).toString('utf8')));
+    const archived = await Promise.all(archives.map(async file => (await fileBytes(read, file.id).catch(unlessLost))?.toString('utf8') ?? ''));
     const texts = [current.title, current.brief, current.body, ...log.map(e => e.text), ...evidence, ...archived];
     if (!texts.some(text => text.includes(value))) throw invalid();
     await hideSecretIn(tx as unknown as Db, person.companyId, person.id, value, storedTexts(ctx, tx));

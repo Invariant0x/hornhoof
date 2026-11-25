@@ -5,6 +5,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, approvalPolicies, departments, jobs, people, requests, taskEvents, tasks, teams } from '../src/db/schema.js';
 import { createTask, loadTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import type { CiAt } from '../src/modules/testruns/github-ci.js';
+import { NAME_IT } from '../src/modules/testruns/github-workflow.js';
 import { company } from './department-owner-fixture.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { as, listen, mcp } from './helpers.js';
@@ -26,7 +27,7 @@ async function releaseFixture(options: { product?: boolean } = {}) {
   const departmentId = head.departmentId!;
   await db.insert(approvalPolicies).values({ companyId: head.companyId, departmentId, channel: 'commit', mode: 'every' });
   /* Without the product, the work is of the department itself, which releases turns: its main approval comes at the release. */
-  const [product] = options.product === false ? [] : await db.insert(departments).values({ companyId: head.companyId, name: 'Shop app', parentId: departmentId, roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop-app.git' }).returning();
+  const [product] = options.product === false ? [] : await db.insert(departments).values({ companyId: head.companyId, name: 'Shop app', parentId: departmentId, roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop-app.git', repoReleaseWorkflow: '.github/workflows/release.yml' }).returning();
   const productId = product?.id ?? null;
   if (productId) await db.update(tasks).set({ productId }).where(eq(tasks.id, f.task.id));
 
@@ -112,12 +113,14 @@ async function releaseFixture(options: { product?: boolean } = {}) {
     app.inject({ method: 'GET', url: `/api/autonomous-releases${query}`, ...as(token) });
 
   /* What the repository's CI says of each commit, as its host answers the server: a commit nobody set says its checks are still
-     under way, so nothing is approved on it. greenCi sets a green answer of four checks, ciSays any other one. */
+     under way, so nothing is approved on it. greenCi sets a green answer of four checks, ciSays any other one. As the host's
+     reader does, a repository that keeps CI but is asked without its release workflow named says so, and nothing counts. */
   const ciOf = new Map<string, CiAt>();
   const asked: string[] = [];
-  ctx.readCi = async (_repo, commit) => {
+  ctx.readCi = async (repo, commit) => {
     asked.push(commit);
-    return ciOf.get(commit) ?? { state: 'pending', check: 'test (1)', url: 'https://github.com/acme/shop-app/actions/runs/1', outcome: 'in_progress' };
+    const said: CiAt = ciOf.get(commit) ?? { state: 'pending', check: 'test (1)', url: 'https://github.com/acme/shop-app/actions/runs/1', outcome: 'in_progress' };
+    return said.state !== 'none' && productId && !repo.releaseWorkflow?.trim() ? { state: 'unnamed', why: NAME_IT } : said;
   };
   const ciSays = (commit: string, said: CiAt) => void ciOf.set(commit, said);
   const greenCi = (commit: string) => ciSays(commit, { state: 'green', checks: 4 });
