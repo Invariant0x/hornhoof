@@ -154,9 +154,10 @@ describe('Measures', () => {
         await measures.sample();
       }
     };
-    await take(11 * HOUR_SAMPLES, 3);
     await take(13 * HOUR_SAMPLES, 500);
+    await take(11 * HOUR_SAMPLES, 3);
     expect(measures.snapshot().fsyncP99Ms).toBe(500);
+    /* Two more quick hours, and the day it keeps holds more quick hours than slow ones. */
     await take(2 * HOUR_SAMPLES, 3);
     expect(measures.snapshot().fsyncP99Ms).toBe(3);
   });

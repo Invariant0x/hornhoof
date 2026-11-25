@@ -33,13 +33,16 @@ const between = (value: number, nothing: number, full: number): number => Math.m
 const roundTrip = (ms: number | null): number => (ms === null ? 0 : between(ms, 300, 20));
 const throughput = (mbps: number | null): number => (mbps === null ? 0 : between(mbps, 5, 100));
 
+/* The share of the disk's points: a disk measured at 50 ms earns nothing, one at 2 ms everything, none measured nothing. */
+const diskShare = (fsyncP99Ms: number | null): number => (fsyncP99Ms === null ? 0 : between(fsyncP99Ms, 50, 2));
+
 export function scoreOf(m: Measured): { points: number; parts: Parts } {
   const parts: Parts = {
     online: 40 * Math.min(1, Math.max(0, m.share ?? 0)),
     /* How fast the leader sends to a machine is known only once it has sent it something: none yet scores half. */
     link: 10 * roundTrip(m.linkRttMs) + (m.linkMbps === null ? 5 : 10 * throughput(m.linkMbps)),
     internet: 5 * roundTrip(m.internetRttMs) + 5 * throughput(m.internetMbps),
-    disk: m.fsyncP99Ms === null ? 0 : 20 * between(m.fsyncP99Ms, 50, 2),
+    disk: 20 * diskShare(m.fsyncP99Ms),
     memory: m.memory === null ? 0 : 5 * between(m.memory / GIB, 4, 16),
     cores: m.cores === null ? 0 : 5 * Math.min(1, Math.max(0, m.cores / 8)),
   };
@@ -85,6 +88,9 @@ export function placePins<T extends { id: string }>(free: T[], pinned: { item: T
   free.forEach((item, at) => places.set(left[at]!, item));
   return Array.from({ length: last - 1 }, (_, at) => places.get(at + 2)!);
 }
+
+/* Whether a machine's disk is poor, which the line says as slow_disk when it is its weakest part. */
+export const diskPoor = (m: Pick<Measured, 'fsyncP99Ms'>): boolean => diskShare(m.fsyncP99Ms) < POOR_PART;
 
 /* What the line compares a machine with: over the machines numbered from 2, the least memory and the best share of
    the link's points. */

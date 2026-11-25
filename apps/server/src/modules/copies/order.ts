@@ -14,7 +14,7 @@ import { findThisMachine } from '../network/store.js';
 import { weakPath } from './path.js';
 import { REPORT_FRESH_MS, seesAll, unfit, type Candidate } from './qualify.js';
 import { afterLeave, cutReplication, leaveData, type Leaving } from './scope.js';
-import { ALWAYS_SHARE, NEWCOMER_MS, placePins, scoreOf, settle, whyOf, type Measured, type Scored, type WhyContext } from './score.js';
+import { ALWAYS_SHARE, diskPoor, NEWCOMER_MS, placePins, scoreOf, settle, whyOf, type Measured, type Scored, type WhyContext } from './score.js';
 
 /* The machines after the leader that hold a copy: numbers 2 and 3. */
 const COPIES = 2;
@@ -256,7 +256,11 @@ async function place(ctx: Ctx, now: Date, opts: { rescore?: boolean; ceo?: boole
     const left = others.some(m => m.number != null && !mayTake(m, fit));
     const moved = all.find(m => m.id === leader.id)?.number !== 1;
     const day = !kept?.rescored_at || now.getTime() - new Date(kept.rescored_at).getTime() >= RESCORE_EVERY_MS;
-    const scored = Boolean(opts.rescore) || day || cleared.length > 0 || joined || left || moved;
+    /* A machine its slow disk kept low whose disk is not slow any more, as after a burst of writes: scored now, not the
+       next day. */
+    const said = new Map(before.map(row => [row.id, row.serverWhy]));
+    const recovered = others.some(m => said.get(m.id)?.endsWith('.slow_disk') === true && !diskPoor(m));
+    const scored = Boolean(opts.rescore) || day || cleared.length > 0 || joined || left || moved || recovered;
     const ranked = rankOf(all, { leader: leader.id, ...fit, now, rescore: scored });
     const places = new Map(ranked.map(one => [one.id, one]));
 

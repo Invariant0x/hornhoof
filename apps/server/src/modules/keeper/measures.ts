@@ -7,6 +7,8 @@ import type { Sql } from './lease-store.js';
 
 export const SAMPLE_MS = 20_000;
 export const KEEP_SAMPLES = 4320;
+/* An hour of samples at SAMPLE_MS; KEEP_SAMPLES holds a day of them. */
+export const HOUR_SAMPLES = 3_600_000 / SAMPLE_MS;
 const PROBE_FILE = 'fsync-probe';
 const PROBE_BYTES = 4096;
 const FEWEST_SAMPLES = 10;
@@ -23,6 +25,19 @@ export function fsyncP99(samples: readonly number[]): number | null {
   const sorted = [...samples].sort((a, b) => a - b);
   const rank = Math.ceil((sorted.length * 99) / 100);
   return sorted[Math.min(rank, sorted.length - 1) - 1]!;
+}
+
+/* What the machine reports of its disk: the p99 of each hour of samples, the newest first and the oldest as many as there
+   are, and of those the middle one, the higher of two. A quarter of an hour of slow writes then moves one hour of a
+   day, not the day: a disk is reported slow while it is slow for most of its hours, and quick again once most are quick. */
+export function reportedP99(samples: readonly number[]): number | null {
+  const hours: number[] = [];
+  for (let end = samples.length; end > 0; end -= HOUR_SAMPLES) {
+    const p99 = fsyncP99(samples.slice(Math.max(0, end - HOUR_SAMPLES), end));
+    if (p99 !== null) hours.push(p99);
+  }
+  if (!hours.length) return null;
+  return hours.sort((a, b) => a - b)[Math.floor(hours.length / 2)]!;
 }
 
 export function keepLatest(samples: readonly number[], ms: number): number[] {
@@ -117,9 +132,9 @@ export class Measures {
     if (!before && !(this.opts.busy?.() ?? false)) this.samples = keepLatest(this.samples, ms);
   }
 
-  /* The fsync p99 of the disk as the machine reports it, none before there are enough samples. */
+  /* The fsync p99 of the disk as the machine reports it, the middle one of its hours; none before there are enough samples. */
   fsyncP99(): number | null {
-    return fsyncP99(this.samples);
+    return reportedP99(this.samples);
   }
 
   /* The fsync p99 the lease's statements go by: of every sample, so a disk slow under the machine's own dumps is slow for
@@ -131,7 +146,7 @@ export class Measures {
   /* Throws when the folder is gone: there is no honest number for free space then. */
   snapshot(): MachineMeasures {
     const { bavail, bsize } = statfsSync(this.opts.dir);
-    return { uptimeS: Math.floor(uptime()), fsyncP99Ms: fsyncP99(this.samples), diskFree: bavail * bsize, memory: totalmem(), cores: availableParallelism(), ...this.filesDisk() };
+    return { uptimeS: Math.floor(uptime()), fsyncP99Ms: this.fsyncP99(), diskFree: bavail * bsize, memory: totalmem(), cores: availableParallelism(), ...this.filesDisk() };
   }
 
   /* The room of the disk FILES_DIR lies on; nothing where there is none or it cannot be read, and the server keeps what
