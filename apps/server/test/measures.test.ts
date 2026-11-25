@@ -253,6 +253,14 @@ describe('the commit probe of the machine\'s database', () => {
     expect(locked).toEqual([]);
   });
 
+  it('counts a commit that took the whole time of its session as a sample of that long, and one refused sooner as none', async () => {
+    vi.useFakeTimers({ toFake: ['performance'] });
+    const slow = commitProbe({ query: async () => { vi.advanceTimersByTime(50); throw new Error('statement timeout'); } }, 50);
+    expect(await slow.time()).toBeGreaterThanOrEqual(50);
+    const down = commitProbe({ query: async () => { vi.advanceTimersByTime(5); throw new Error('connection refused'); } }, 50);
+    await expect(down.time()).rejects.toThrow('connection refused');
+  });
+
   it('closes the session it times on', async () => {
     const close = vi.fn(async () => undefined);
     await commitProbe({ query: async () => ({ rows: [] }), close }).close?.();
