@@ -11,7 +11,7 @@ import { openBundle, type BundleSecrets } from '../src/modules/backups/bundle.js
 import { certificates } from '../src/db/schema.js';
 import { bundleRow, bundleRows } from '../src/modules/backups/records.js';
 import { FORK_KEEP_MS, REPORT_MAX, REPORTED_BUNDLES } from '../src/modules/backups/types.js';
-import { BackupKeeper, BUNDLE_EVERY_MS, BUNDLES_DIR, DUMP_GAP_MS, DUMP_LIFE_MS, type Ask } from '../src/modules/keeper/backups.js';
+import { BackupKeeper, BUNDLE_EVERY_MS, BUNDLES_DIR, DUMP_BUSY_MS, DUMP_GAP_MS, DUMP_LIFE_MS, type Ask } from '../src/modules/keeper/backups.js';
 import { bundleSecrets } from '../src/modules/keeper/keeper.js';
 import { saveLink } from '../src/modules/link/link.js';
 import { issueCertificate } from '../src/modules/network/authority.js';
@@ -94,6 +94,32 @@ async function stand(over: { secrets?: () => BundleSecrets } = {}) {
 }
 
 describe('the keeper of backups', () => {
+  it('says the disk is busy with a backup while a dump is asked for, written or sealed, and not once that stood still a while', async () => {
+    const seen: boolean[] = [];
+    let keeper: BackupKeeper | null = null;
+    const s = await stand({ secrets: () => { seen.push(keeper!.dumping()); return SECRETS; } });
+    keeper = s.keeper;
+    expect(s.keeper.dumping()).toBe(false);
+    await s.keeper.round();
+    expect(s.wanted()).not.toBeNull();
+    utimesSync(s.request, new Date(s.now()), new Date(s.now()));
+    expect(s.keeper.dumping()).toBe(true);
+    /* A request nobody takes stops counting, so an updater that is gone never holds the measures back for long. */
+    s.advance(DUMP_BUSY_MS + 1);
+    expect(s.keeper.dumping()).toBe(false);
+    /* The updater writes the dump. */
+    const id = s.updater();
+    expect(id).not.toBeNull();
+    expect(s.keeper.dumping()).toBe(true);
+    /* A whole dump the keeper seals keeps the disk busy while it seals it, however long ago the updater wrote it. */
+    s.advance(DUMP_BUSY_MS + 1);
+    expect(s.keeper.dumping()).toBe(false);
+    await s.keeper.round();
+    expect(seen).toContain(true);
+    expect(s.waiting()).toEqual([]);
+    expect(s.keeper.dumping()).toBe(false);
+  });
+
   it('makes a bundle at once, then every 6 hours', async () => {
     const s = await stand();
     await s.keeper.round();
