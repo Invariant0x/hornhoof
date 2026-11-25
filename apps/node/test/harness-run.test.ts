@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -361,6 +362,31 @@ describe('a manual command', () => {
     expect(part, part.log).toMatchObject({ ok: true, exitCode: 0 });
     expect(part.log).toContain('tests started without installing');
     expect(await installed(f)).toBe(0);
+  });
+
+  it('ends its harness with one plain line when the transfer timed out and the build here did not finish in its window', async () => {
+    const marks = await mkdtemp(join(tmpdir(), 'hh-fallback-'));
+    onTestFinished(() => rm(marks, { recursive: true, force: true }));
+    const started = join(marks, 'started');
+    /* The build here begins and does not end by itself, as a slow install on a loaded machine. */
+    const f = await fixture(manifest => { manifest.dependencies.install = [sh(`require('fs').writeFileSync(${JSON.stringify(started)}, ''); setInterval(() => {}, 1000)`)]; });
+    const remote: HarnessRemote = {
+      claim: async (unit: HarnessUnit) => ({ state: 'ready', companyId: unit.repositoryScope.companyId, attempt: '33333333-3333-4333-8333-333333333333', digest: 'b'.repeat(64), size: 10, partBytes: 10 }),
+      download: async () => { throw new Error('The bundle transfer from Hornhoof did not finish within 5 min (0 bytes of 10 bytes, 0%).'); },
+      upload: async () => undefined,
+      failed: async () => undefined,
+    };
+    /* The window of the harness ends when the test says so, once the build here has begun. */
+    const window = new AbortController();
+    const one = { ...machine(f, 'one', remote), harnessClock: { timeout: () => window.signal } };
+    const running = runTests(manualPart(f, 'echo the command ran'), one);
+    await until(() => existsSync(started));
+    window.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+    const part = await running;
+    expect(part, part.log).toMatchObject({ ok: true, exitCode: 0 });
+    expect(part.log).toContain('the command ran');
+    expect(part.log).not.toContain('aborted due to timeout');
+    expect(part.log).toMatch(/The command starts without the prepared harness: it was not in place within 10 min\. The prepared dependencies [0-9a-f]{12} could not be taken from Hornhoof: The bundle transfer from Hornhoof did not finish within 5 min .*\. It was built here instead, and that build did not finish in the time left\. What to do: /);
   });
 
   it('runs even when its harness cannot be built, as it may install for itself', async () => {

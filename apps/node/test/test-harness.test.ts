@@ -500,6 +500,34 @@ describe('the registry over HTTP', () => {
     expect(await readFile(join(entry.path, 'payload', 'node_modules', 'dep'), 'utf8')).toBe('locked');
   });
 
+  it('says each minute how long it builds a unit here after its transfer failed, and tells why it builds it', async () => {
+    const fellBack: string[] = [];
+    const remote: HarnessRemote = {
+      claim: async () => ({ state: 'ready', ...LEASE, digest: 'b'.repeat(64), size: 10_000, partBytes: 10_000 }),
+      download: async () => { throw new Error('The bundle transfer from Hornhoof did not finish within 5 min (2.4 KB of 9.8 KB, 25%).'); },
+      upload: failing('nothing goes to Hornhoof'),
+      failed: async () => undefined,
+    };
+    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), said: string[] = [];
+    const build = deferred<void>();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    onTestFinished(() => { build.resolve(); vi.useRealTimers(); });
+    const preparing = prepareCache(here.dir, KEY, INPUT, { ...here, log: line => said.push(line) }, async () => { await build.promise; return source; },
+      harnessShare(remote, UNIT, { fellBack: why => fellBack.push(why) }));
+    await eventually(() => said.some(line => line.includes('so it is built here')));
+    expect(fellBack).toEqual([expect.stringContaining('did not finish within 5 min')]);
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    expect(said.filter(line => line.startsWith('Building the prepared dependencies'))).toEqual([
+      `Building the prepared dependencies ${KEY.slice(0, 12)} here: 1 min so far.`,
+      `Building the prepared dependencies ${KEY.slice(0, 12)} here: 2 min so far.`,
+    ]);
+    build.resolve();
+    expect(await preparing).toMatchObject({ hit: false, fetched: false });
+    /* Once it is built, no more lines come. */
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    expect(said.filter(line => line.startsWith('Building the prepared dependencies'))).toHaveLength(2);
+  });
+
   it('bounds a trickling relay transfer that keeps moving below the quiet window, logs the reason, and falls back to building locally', async () => {
     const total = 10_000;
     let stream: ServerResponse<IncomingMessage> | undefined;
