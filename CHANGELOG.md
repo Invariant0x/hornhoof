@@ -13,6 +13,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Changed
 
+- Before you update: a server installed by hand rather than from `compose.yaml` needs `FILES_DIR` set to a folder that stays, as `compose.yaml` sets `/files`. A server in production, or one behind a keeper whatever `NODE_ENV` says, with no `FILES_DIR` no longer starts, and says why in each language the server has, as it would keep its files in a folder that the next restart loses; development and tests keep that folder.
 - Files leave the database: every file of a task, a message, a run or a person's picture goes into the company's file store on the server's disk (`FILES_DIR`, the `files` volume), sealed and named by its sha256, and the database keeps only what describes it, so copies of the database and backups no longer grow with files. After the update the server copies the files of 0.43 into the store while it serves, checks each one by its hash, and clears their bytes from the database only after the CEO, or the orchestrator for him, says yes to the reconciliation it writes (`GET /api/files/move`, `POST /api/files/move/approve` with its digest); then it drops the old column and runs `VACUUM FULL`. A server in production does not start without `FILES_DIR`. `hh-fetch` downloads a file it has already only when Hornhoof has other bytes.
 
 ## [0.44.0] - 2026-11-24
