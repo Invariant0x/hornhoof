@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,3 +59,31 @@ it('gives a run a socket address and its prefix, and drops only what its tests m
 it('refuses a piece that is not one of the node\'s names', async () => {
   await expect(service('drop', "x' OR 1=1 --")).rejects.toThrow(/Not a piece/);
 });
+
+it('answers on a short socket of its own when the machine keeps it in a long folder, as a data folder on macOS can be', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'hh-warm-pg-long-'));
+  const long = join(base, 'x'.repeat(60), 'postgres-0123456789abcdef-1000', 'service');
+  mkdirSync(long, { recursive: true });
+  const at = (what: string, ...args: string[]) => run(process.execPath, [SCRIPT, what, long, ...args], { encoding: 'utf8' });
+  const cluster = spawn(process.execPath, [SCRIPT, 'start', long], { stdio: 'inherit', detached: true });
+  let host = '';
+  try {
+    for (;;) {
+      if (await at('ready').then(() => true, () => false)) break;
+      if (cluster.exitCode !== null) throw new Error(`The cluster ended with ${cluster.exitCode}.`);
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    const given = env((await at('create', '', PIECE)).stdout);
+    host = new URL(given.TEST_DATABASE_URL!).searchParams.get('host')!;
+    expect(Buffer.byteLength(join(host, '.s.PGSQL.5432'))).toBeLessThanOrEqual(100);
+    const admin = new pg.Pool({ connectionString: given.TEST_DATABASE_URL, max: 1 });
+    try { expect((await admin.query('SELECT 1 AS one')).rows[0]).toEqual({ one: 1 }); } finally { await admin.end(); }
+  } finally {
+    const ended = new Promise(resolve => cluster.once('exit', resolve));
+    process.kill(-cluster.pid!, 'SIGTERM');
+    await ended;
+    rmSync(base, { recursive: true, force: true });
+    if (host && !host.startsWith(base)) rmSync(host, { recursive: true, force: true });
+  }
+});
+

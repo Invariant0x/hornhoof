@@ -4,13 +4,28 @@
    prefix: the databases and roles its tests make carry it (test/postgres/helpers.ts), and dropping the piece drops them.
    The migrated templates the tests copy stay, one for each set of migrations, so no run migrates what an earlier one did. */
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const [what, state, ...rest] = process.argv.slice(2);
 const USER = 'hornhoof';
 const PIECE = /^hh_[0-9a-f]{12}$/;
 const data = join(state ?? '', 'data');
+
+/* The folder of the cluster's socket: {state}, unless its socket's path would pass the 104 bytes macOS holds (108 on Linux),
+   as a long data folder makes it. Then a short folder of the same name for the same {state}, which must be this user's
+   own and no one else's, as a folder in a shared temp dir may have been made by another. */
+function socketFolder() {
+  if (Buffer.byteLength(join(state ?? '', '.s.PGSQL.5432')) <= 100) return state;
+  const dir = join(tmpdir(), `hh-pg-${createHash('sha256').update(state).digest('hex').slice(0, 12)}`);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const seen = lstatSync(dir);
+  if (!seen.isDirectory() || seen.uid !== process.getuid?.() || (seen.mode & 0o077) !== 0) throw new Error(`${dir} is not this user's own folder.`);
+  return dir;
+}
+const socket = socketFolder();
 
 /* Where PostgreSQL 17's programs are: HH_PG_BIN, pg_config's, or where Debian and Homebrew put them. */
 function bin() {
@@ -24,7 +39,7 @@ function bin() {
   throw new Error('PostgreSQL 17 was not found: install it, or name its bin folder in HH_PG_BIN.');
 }
 
-const psql = (sql) => execFileSync(join(bin(), 'psql'), ['-h', state, '-U', USER, '-d', 'postgres', '-XAtq', '-v', 'ON_ERROR_STOP=1', '-c', sql], { encoding: 'utf8' });
+const psql = (sql) => execFileSync(join(bin(), 'psql'), ['-h', socket, '-U', USER, '-d', 'postgres', '-XAtq', '-v', 'ON_ERROR_STOP=1', '-c', sql], { encoding: 'utf8' });
 const quoted = (name) => `"${name.replaceAll('"', '""')}"`;
 function piece() {
   const [name] = rest.slice(-1);
@@ -38,7 +53,7 @@ switch (what) {
       execFileSync(join(bin(), 'initdb'), ['-D', data, '-U', USER, '-A', 'trust', '-E', 'UTF8', '--locale=C.UTF-8', '--no-sync'], { stdio: ['ignore', 'inherit', 'inherit'] });
     }
     /* Test data need not outlive a crash, and the sessions of five runs at once fit. */
-    const server = spawn(join(bin(), 'postgres'), ['-D', data, '-k', state, '-c', 'listen_addresses=', '-c', 'unix_socket_permissions=0700',
+    const server = spawn(join(bin(), 'postgres'), ['-D', data, '-k', socket, '-c', 'listen_addresses=', '-c', 'unix_socket_permissions=0700',
       '-c', 'fsync=off', '-c', 'synchronous_commit=off', '-c', 'full_page_writes=off', '-c', 'max_connections=400', '-c', 'max_locks_per_transaction=256'], { stdio: 'inherit' });
     /* Stopped, it ends its sessions at once instead of waiting for them. */
     for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => server.kill('SIGINT'));
@@ -46,13 +61,13 @@ switch (what) {
     break;
   }
   case 'ready':
-    try { execFileSync(join(bin(), 'pg_isready'), ['-h', state, '-U', USER, '-d', 'postgres', '-q']); }
+    try { execFileSync(join(bin(), 'pg_isready'), ['-h', socket, '-U', USER, '-d', 'postgres', '-q']); }
     catch { process.exit(1); }
     break;
   case 'create': {
     const name = piece();
     const url = new URL(`postgresql://${USER}@localhost/postgres`);
-    url.searchParams.set('host', state);
+    url.searchParams.set('host', socket);
     process.stdout.write(`TEST_DATABASE_URL=${url}\nHH_TEST_PG_PIECE=${name}\n`);
     break;
   }
