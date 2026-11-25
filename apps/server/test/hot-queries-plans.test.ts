@@ -290,7 +290,8 @@ describe('hot-path query plans and correctness', () => {
     const failureSql = allSql.slice(mark);
     expect(states.size).toBe(s.extraAgents.length);
     expect(states.get(s.extraAgents[3]!)?.retry).toMatchObject({ attempt: 2, kind: 'network' });
-    expect(states.get(s.extraAgents[3]!)?.failure).toMatchObject({ kind: 'network', text: 'Socket closed.' });
+    /* A failed turn whose continuation waits goes on by itself, so the card shows its retry and no failure (#1953). */
+    expect(states.get(s.extraAgents[3]!)?.failure).toBeNull();
     const failureIndexes = new Set<string>();
     for (const q of failureSql.filter(q => /\bfrom\s+"?jobs"?\b/i.test(q.sql))) {
       const { nodes } = await explainSql(s.client, q.sql, q.params);
