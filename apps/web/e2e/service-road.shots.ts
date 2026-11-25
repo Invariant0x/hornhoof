@@ -36,12 +36,17 @@ const ANSWERS: Record<State | 'up', (route: Route) => Promise<void>> = {
   updating: route => route.fulfill({ status: 503, json: MAINTENANCE, headers: { 'retry-after': '10' } }),
 };
 
+type Server = { state: State | null };
+
+const answerFor = (server: Server) => (route: Route) => ANSWERS[server.state ?? 'up'](route);
+const updatesFor = (server: Server) => (route: Route) => (server.state === 'updating' ? route.fulfill({ json: RUNNING }) : route.fallback());
+
 /* The server as the state holds it. An update that holds it still tells its panel how far it is, so that answer comes first. */
 async function serveState(page: Page) {
-  const server = { state: null as State | null };
+  const server: Server = { state: null };
   await serveApi(page);
-  await page.route('**/api/**', route => ANSWERS[server.state ?? 'up'](route));
-  await page.route('**/api/updates', route => (server.state === 'updating' ? route.fulfill({ json: RUNNING }) : route.fallback()));
+  await page.route('**/api/**', answerFor(server));
+  await page.route('**/api/updates', updatesFor(server));
   return server;
 }
 
