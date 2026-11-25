@@ -11,19 +11,28 @@ import { agySteps, LineTail } from '../src/terminal/transcripts.js';
 import { Tmux } from '../src/terminal/tmux.js';
 
 const realSetTimeout = setTimeout;
+const realClearTimeout = clearTimeout;
 const realMoment = () => new Promise<void>(resolve => { realSetTimeout(resolve, 1); });
 /* Moves the fake clock until the work ends. The code under test also waits on real file reads, which land in real time and
    later on a loaded machine, so every tick leaves a real moment for them: a clock that stops after a number of ticks leaves the
-   work waiting for a timer that no one moves any more, and a test with no time limit then waits for ever. The work's own
-   timeout runs on the same clock, so work that really never ends still ends by it. */
-async function untilSettled<T>(work: Promise<T>): Promise<T> {
+   work waiting for a timer that no one moves any more. An Antigravity turn has no deadline of its own, and these tests have no
+   time limit, so a limit in real time ends the wait for work that never settles: the test then fails by name instead of
+   holding the run for ever. */
+async function untilSettled<T>(work: Promise<T>, limitMs = 30_000): Promise<T> {
   let settled = false;
+  let late = false;
   const mark = () => { settled = true; };
   work.then(mark, mark);
-  while (!settled) {
-    await vi.advanceTimersByTimeAsync(50);
-    await realMoment();
+  const limit = realSetTimeout(() => { late = true; }, limitMs);
+  try {
+    while (!settled && !late) {
+      await vi.advanceTimersByTimeAsync(50);
+      await realMoment();
+    }
+  } finally {
+    realClearTimeout(limit);
   }
+  expect(settled, `the work did not settle within ${limitMs / 1000} s of real time`).toBe(true);
   return work;
 }
 
@@ -65,6 +74,13 @@ describe('the fake clock of these tests', () => {
       return 'done';
     })();
     expect(await Promise.race([untilSettled(work), new Promise(resolve => { realSetTimeout(() => resolve('stuck'), 5000); })])).toBe('done');
+  });
+
+  it('fails by name when the work never settles, as a turn whose end never comes, instead of waiting for ever', async () => {
+    vi.useFakeTimers();
+    const never = new Promise<never>(() => {});
+    const outcome = untilSettled(never, 300).then(() => 'settled', (error: Error) => error.message);
+    expect(await Promise.race([outcome, new Promise(resolve => { realSetTimeout(() => resolve('stuck'), 5000); })])).toMatch(/did not settle/);
   });
 });
 
