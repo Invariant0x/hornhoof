@@ -105,6 +105,27 @@ function checkOpens(fd: number, key: Buffer, sha256: string): void {
   checkEnds(key, head, tail, last.n, sha256);
 }
 
+/* Whether the file at this path opens under its name with this key, from its head and its last chunk. One gone is not
+   kept either. */
+function opensAt(path: string, key: Buffer, sha256: string): boolean {
+  let fd: number;
+  try {
+    fd = openSync(path, 'r');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw err;
+  }
+  try {
+    checkOpens(fd, key, sha256);
+    return true;
+  } catch (err) {
+    if (err instanceof SealRefused) return false;
+    throw err;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /* Writes what comes into a file of its own, made safe on the disk before it ends. */
 async function intoFile(path: string): Promise<Writable> {
   const handle = await open(path, 'wx', 0o600);
@@ -220,8 +241,9 @@ export class FileStore {
     }
   }
 
-  /* Writes a part, which names itself once written, and links it under that name. True when it was not there yet. */
-  private async publish(write: (part: string) => Promise<string>): Promise<{ name: string; fresh: boolean }> {
+  /* Writes a part, which names itself once written, and links it under that name. True when it was not there yet. A file
+     there already that keep refuses is replaced by the part at once. */
+  private async publish(write: (part: string) => Promise<string>, keep?: (path: string, name: string) => boolean): Promise<{ name: string; fresh: boolean }> {
     await mkdir(this.tmp(), { recursive: true, mode: 0o700 });
     const part = join(this.tmp(), `${randomUUID()}.part`);
     this.parts.add(part);
@@ -232,8 +254,10 @@ export class FileStore {
         await link(part, this.path(name));
         return { name, fresh: true };
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'EEXIST') return { name, fresh: false };
-        throw err;
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+        if (!keep || keep(this.path(name), name)) return { name, fresh: false };
+        await rename(part, this.path(name));
+        return { name, fresh: true };
       }
     } finally {
       this.parts.delete(part);
@@ -242,7 +266,8 @@ export class FileStore {
   }
 
   /* Seals a file from its plain bytes as they come, and keeps it under their hash. A file that was here already stays
-     as it was, and its own sealed facts are answered. */
+     as it was, and its own sealed facts are answered; one that does not open under its name with this key, as a folder a
+     database before left or a fault of the disk, is no copy of these bytes and gives way to the one sealed now. */
   async put(input: Readable | AsyncIterable<Buffer>, key: Buffer, room?: StoreRoom): Promise<StoredFile & { fresh: boolean }> {
     const plain = counter();
     const sealedCount = counter();
@@ -252,7 +277,7 @@ export class FileStore {
       const source = input instanceof Readable ? input : Readable.from(input);
       await pipeline(source, guard(room, this.idleMs), plain, seal(key, () => plain.digest(), salt), sealedCount, await intoFile(part));
       return plain.digest();
-    });
+    }, (path, name) => opensAt(path, key, name));
     const facts = fresh ? { sealedSha256: sealedCount.digest(), sealedSize: sealedCount.bytes, salt: salt.toString('hex') } : await this.sealedFacts(name);
     return { sha256: name, size: plain.bytes, ...facts, fresh };
   }

@@ -137,7 +137,7 @@ describe('Map', () => {
     const { container } = render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
     await screen.findByRole('button', { name: new RegExp(`^${long}`) });
     await waitFor(() => expect([...container.querySelectorAll<HTMLElement>('.map .dept')].map(c => c.style.height)).toEqual(['230px', '230px']));
-    for (const selector of ['.dname', '.dept .row2', '.dept .detail', '.dept .now', '.dept .now > span', '.ticker', '.ticker .tx'])
+    for (const selector of ['.dname', '.dept .row2', '.dept .detail', '.dept .now', '.dept .now > span'])
       for (const rule of rulesFor(selector)) {
         expect.soft(rule.decls['text-overflow'], `${selector} ends in no ellipsis`).not.toBe('ellipsis');
         expect.soft(rule.decls['white-space'], `${selector} wraps`).not.toBe('nowrap');

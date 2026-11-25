@@ -231,6 +231,7 @@ export type ErrorReason =
   | 'not_recovering'
   | 'no_authority'
   | 'not_owner_session'
+  | 'copy_not_given_up'
   | 'question_changed'
   | 'merge_pending'
   | `bundle_${'format' | 'authority' | 'role' | 'time' | 'signature' | 'company' | 'size' | 'hash' | 'content' | 'key' | 'room' | 'idle'}`

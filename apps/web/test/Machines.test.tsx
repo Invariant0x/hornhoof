@@ -726,6 +726,38 @@ describe('Machines', () => {
     expect(within(card('given-up')).getByText(words(4, clock(language, iso)!))).toBeInTheDocument();
   });
 
+  it('lets the CEO ask for a copy again once it was given up, and offers that for no other stop', async () => {
+    const iso = '2026-11-24T19:30:00.000Z';
+    const rows = [
+      { ...MACHINES[0]!, id: 'g1', hostname: 'given-up', data: held({ number: 2, copy: { line: 'stopped', why: 'gave_up', attempts: 4, since: iso } }) },
+      { ...MACHINES[0]!, id: 'g2', hostname: 'weak-link', data: held({ number: 3, copy: { line: 'stopped', why: 'path_slow', attempts: 0, since: iso } }) },
+      { ...MACHINES[0]!, id: 'g3', hostname: 'late-link', data: held({ number: 4, copy: { line: 'stopped', why: 'path_late', attempts: 0, since: iso } }) },
+      { ...MACHINES[0]!, id: 'g4', hostname: 'full-disk', data: held({ number: 5, copy: { line: 'stopped', why: 'disk_full' } }) },
+    ];
+    const { calls } = shown('en', rows, { 'POST /api/machines/g1/copy/retry': [204] });
+    const user = userEvent.setup();
+    const gone = await openCard('given-up');
+    await user.click(within(gone).getByRole('button', { name: 'Try again' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'POST' && c.path.endsWith('/copy/retry')).map(c => c.path)).toEqual(['/api/machines/g1/copy/retry']));
+    const slow = await openCard('weak-link');
+    expect(within(slow).getByText('Copy: not made: the connection between this machine and the company server is too slow for it')).toBeInTheDocument();
+    const late = await openCard('late-link');
+    expect(within(late).getByText('Copy: not made: the connection between this machine and the company server answers too late for it')).toBeInTheDocument();
+    const full = await openCard('full-disk');
+    for (const card of [slow, late, full]) expect(within(card).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
+  it('writes in Russian that a copy is not made over a path too weak for it', async () => {
+    shown('ru', [
+      { ...MACHINES[0]!, id: 'g2', hostname: 'weak-link', data: held({ number: 3, copy: { line: 'stopped', why: 'path_slow', attempts: 0, since: '2026-11-24T19:30:00.000Z' } }) },
+      { ...MACHINES[0]!, id: 'g3', hostname: 'late-link', data: held({ number: 4, copy: { line: 'stopped', why: 'path_late', attempts: 0, since: '2026-11-24T19:30:00.000Z' } }) },
+    ]);
+    const slow = await openCard('weak-link');
+    expect(within(slow).getByText('Копия: не делается: связь этой машины с сервером компании слишком медленная для нее')).toBeInTheDocument();
+    const late = await openCard('late-link');
+    expect(within(late).getByText('Копия: не делается: связь этой машины с сервером компании отвечает слишком поздно для нее')).toBeInTheDocument();
+  });
+
   const names = () => screen.getAllByRole('button', { name: /^Open the card of / }).map(button => button.getAttribute('aria-label')!.replace('Open the card of ', ''));
   const four = (over: object[] = []) => [
     { number: 1, why: 'server' }, { number: 2, why: 'always.best_link' }, { number: 3, why: 'mostly.good_link' }, { number: 4, why: 'next' },

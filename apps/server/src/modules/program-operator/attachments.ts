@@ -8,7 +8,7 @@ import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import type { ToolJob } from '../tools/job.js';
-import { fileBytes } from '../tasks/attachments.js';
+import { fileBytes } from '../tasks/file-bytes.js';
 import { ofOperations } from './staff.js';
 
 const MAX_PICTURE_BYTES = 3 * 1024 * 1024;

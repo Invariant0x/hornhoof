@@ -82,4 +82,8 @@ export const ru: ServerWords = {
   },
 };
 
+/* What a node from before refusals had a word of their own wrote as the first line of a refused part's log. The server reads
+   old logs for it, so it is kept as the node wrote it, here with the Russian words and not in code. */
+export const OLD_NODE_REFUSAL_MARK = 'запусти через run_tests';
+
 export default ru;
