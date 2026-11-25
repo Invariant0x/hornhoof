@@ -510,11 +510,14 @@ describe('the registry over HTTP', () => {
     };
     const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), said: string[] = [];
     const build = deferred<void>();
+    let building = false;
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     onTestFinished(() => { build.resolve(); vi.useRealTimers(); });
-    const preparing = prepareCache(here.dir, KEY, INPUT, { ...here, log: line => said.push(line) }, async () => { await build.promise; return source; },
+    const preparing = prepareCache(here.dir, KEY, INPUT, { ...here, log: line => said.push(line) }, async () => { building = true; await build.promise; return source; },
       harnessShare(remote, UNIT, { fellBack: why => fellBack.push(why) }));
-    await eventually(() => said.some(line => line.includes('so it is built here')));
+    void preparing.catch(() => {});
+    await eventually(() => building);
+    expect(said.some(line => line.includes('so it is built here'))).toBe(true);
     expect(fellBack).toEqual([expect.stringContaining('did not finish within 5 min')]);
     await vi.advanceTimersByTimeAsync(2 * 60_000);
     expect(said.filter(line => line.startsWith('Building the prepared dependencies'))).toEqual([

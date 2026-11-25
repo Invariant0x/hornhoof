@@ -17,7 +17,8 @@ export type HarnessRemote = {
 };
 type UnitInfo = Omit<HarnessUnit, 'key'>;
 /* waitMs: how long a part waits for a unit another machine builds before it builds the unit itself. */
-type ShareOptions = { renewMs?: number; tail?: () => string; waitMs?: number; progressMs?: number; transferMs?: number };
+/* fellBack: told why a unit is built here after all, when it could not come from another machine. */
+type ShareOptions = { renewMs?: number; tail?: () => string; waitMs?: number; progressMs?: number; transferMs?: number; fellBack?: (why: string) => void };
 
 /* A claim lasts a few minutes and a build may take longer, so it is said again until it ends. */
 const RENEW_MS = 60_000;
@@ -79,11 +80,26 @@ async function fetched(remote: HarnessRemote, unit: HarnessUnit, entry: CacheEnt
     return { ...entry, hit: true, fetched: true, ready: await unpackBundle(file, entry, context) };
   } catch (error) {
     checkCacheContext(context);
-    context.log(`The prepared ${key} could not be taken from Hornhoof, so it is built here: ${error instanceof Error ? error.message : String(error)}`);
+    const reason = error instanceof Error ? error.message : String(error);
+    context.log(`The prepared ${key} could not be taken from Hornhoof, so it is built here: ${reason}`);
+    options.fellBack?.(`The prepared ${unit.unit} ${key} could not be taken from Hornhoof: ${reason}`);
     return null;
   } finally {
     clearInterval(progress);
     await rm(file, { force: true });
+  }
+}
+
+/* A unit built here after it could not come from another machine, with a line each PROGRESS_MS while it builds, as a
+   transfer has, so a slow build is not taken for a hang. */
+async function builtInstead(named: string, context: CacheContext, options: ShareOptions, publish: () => Promise<CacheReady>): Promise<CacheReady> {
+  const began = Date.now();
+  const progress = setInterval(() => { context.log(`Building ${named} here: ${span(Date.now() - began)} so far.`); }, options.progressMs ?? PROGRESS_MS);
+  progress.unref();
+  try {
+    return await publish();
+  } finally {
+    clearInterval(progress);
   }
 }
 
@@ -150,7 +166,7 @@ export function harnessShare(remote: HarnessRemote, info: UnitInfo, options: Sha
       switch (claim.state) {
         case 'ready': {
           const taken = await fetched(remote, unit, entry, claim, context, options);
-          return taken ?? { ...entry, fetched: false, ready: await publish() };
+          return taken ?? { ...entry, fetched: false, ready: await builtInstead(named, context, options, publish) };
         }
         case 'build': return builtHere(remote, unit, entry, claim, context, publish, options);
         case 'local': return { ...entry, fetched: false, ready: await publish() };
@@ -160,7 +176,8 @@ export function harnessShare(remote: HarnessRemote, info: UnitInfo, options: Sha
           const left = waiting + waitMs - Date.now();
           if (left <= 0) {
             context.log(`Another machine did not finish ${named} within ${span(waitMs)}, so it is built here.`);
-            return { ...entry, fetched: false, ready: await publish() };
+            options.fellBack?.(`Another machine did not finish ${named} within ${span(waitMs)}`);
+            return { ...entry, fetched: false, ready: await builtInstead(named, context, options, publish) };
           }
           await sleep(Math.min(claim.afterMs, left), context);
         }

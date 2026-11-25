@@ -55,6 +55,8 @@ type Options = {
   prepareRepoBrowser?: (repoDir: string) => Promise<void>;
   /* Where a harness unit this machine lacks comes from. None: what a part needs is built here. */
   harness?: HarnessRemote;
+  /* What ends the window a manual part's harness has; a test's clock ends it when the test says so. */
+  harnessClock?: { timeout(ms: number): AbortSignal };
   /* The machine's programs as it found them when it started, so a part need not ask them again. */
   runtimes?: RuntimeCapability[] | undefined;
 };
@@ -558,8 +560,10 @@ const SHARED_OK = (msg: TestRun, options: Options) => msg.kind !== 'work' && !!m
 async function manualHarness(msg: TestRun, options: Options, part: { root: string; repo: string; out: Output; base: Record<string, string>; deadline: number }): Promise<Record<string, string>> {
   if (!SHARED_OK(msg, options)) return {};
   const started = performance.now();
+  const window = (options.harnessClock ?? AbortSignal).timeout(MANUAL_HARNESS_MS);
+  const deadline = Math.min(part.deadline, Date.now() + MANUAL_HARNESS_MS);
+  const state: PreparationState = { ...productUser(options.user), ...part, deadline, signal: AbortSignal.any([productSignal(options.signal, part.deadline), window]), options };
   try {
-    const deadline = Math.min(part.deadline, Date.now() + MANUAL_HARNESS_MS), state: PreparationState = { ...productUser(options.user), ...part, deadline, signal: productSignal(options.signal, deadline), options };
     const context = preparationContext(state, '', productSecrets(msg, options.hidden));
     const description = await readTestEnvironment(msg.repo!, msg.repositoryScope!, msg.commitSha!, context);
     if (description.manifest.dependencies.cache === 'none') {
@@ -572,9 +576,16 @@ async function manualHarness(msg: TestRun, options: Options, part: { root: strin
     return env;
   } catch (error) {
     options.signal?.throwIfAborted();
-    part.out.line(`The command starts without the prepared harness: ${error instanceof Error ? error.message : String(error)}`);
+    part.out.line(`The command starts without the prepared harness: ${window.aborted ? windowEnded(state.fellBack) : error instanceof Error ? error.message : String(error)}`);
     return {};
   }
+}
+
+/* What a manual part says when its harness was not in place within its window: and, where a unit was built here after it
+   could not come from another machine, that this build is what ran out of time. */
+function windowEnded(fellBack: string | undefined): string {
+  const built = fellBack ? ` ${fellBack.replace(/\.$/, '')}. It was built here instead, and that build did not finish in the time left.` : '';
+  return `it was not in place within ${MANUAL_HARNESS_MS / 60_000} min.${built} What to do: let the command install what it needs itself, or run it on a machine with a faster way to Hornhoof.`;
 }
 
 /* An agent's worktree gets the prepared dependencies of its commit before its program starts, so the agent's first check finds
@@ -709,9 +720,10 @@ const partDeadline = (msg: TestRun): number =>
 /* index: the suite's place in the part; shared: its report is the one report of suites that ran as one command. */
 type SuiteReport = { suiteId: string; selected: string[]; path: string; failed: boolean; index: number; shared?: true };
 /* builder: the user its builds run as, when not the one of test runs. */
+/* fellBack: why a unit of the harness was built here after all, when it could not come from another machine. */
 type PreparationState = {
   root: string; repo: string; out: Output; user: JobUser; nodeOwner: JobUser; deadline: number; signal: AbortSignal;
-  base: Record<string, string>; options: Options; builder?: string;
+  base: Record<string, string>; options: Options; builder?: string; fellBack?: string;
 };
 type ProductState = PreparationState & { receipt: TestEnvironmentReceipt; exitCode: number | null; reports: SuiteReport[]; files: FileOutcome[]; failed: FailedTest[]; kept: KeptFiles };
 type ProductOperation = { kind: 'suite'; suiteId: string; files: string[]; shard?: { index: number; count: number } } | { kind: 'command'; command: Command };
@@ -789,7 +801,7 @@ async function closeBuilder(user: JobUser, root: string, proc = '/proc'): Promis
 const BUILD_TAIL = 4000;
 function preparationContext(state: PreparationState, profile: string, hidden: string[]): PreparationContext {
   const { harness } = state.options;
-  const share: PreparationContext['share'] = harness && ((unit, description) => harnessShare(harness, { repositoryScope: description.repositoryScope, version: harnessVersion(description), unit, commitSha: description.commitSha, platform: harnessPlatform() }, { tail: () => redact(stripEscapes(state.out.text()), hidden).slice(-BUILD_TAIL) }));
+  const share: PreparationContext['share'] = harness && ((unit, description) => harnessShare(harness, { repositoryScope: description.repositoryScope, version: harnessVersion(description), unit, commitSha: description.commitSha, platform: harnessPlatform() }, { tail: () => redact(stripEscapes(state.out.text()), hidden).slice(-BUILD_TAIL), fellBack: why => { state.fellBack = why; } }));
   const context: PreparationContext = {
     cacheRoot: join(state.options.dir, 'cache'), checkout: state.repo, profile, attemptRoot: state.root, nodeOwner: state.nodeOwner, jobUser: state.user,
     deadline: state.deadline, signal: state.signal, env: state.base, log: line => state.out.line(line), registerSecrets: values => { hidden.push(...values); },
