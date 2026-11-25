@@ -12,7 +12,7 @@ import { STOPPED_ON_PURPOSE } from '../conversation/constants.js';
 import { dropOldConnections, serverStarted } from '../nodes/connections.js';
 import { tellOfCopySchemaFailures } from '../copies/schema-failures.js';
 import { tellOfMachinesAway } from '../nodes/machine-away.js';
-import { tellOfMachinesLow } from '../nodes/machine-low.js';
+import { tellOfMachinesLow } from '../nodes/machine-low-signal.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { storeRound } from '../files/sweep.js';
 import { moveOldFiles, type MoveRound } from '../files/mover.js';
