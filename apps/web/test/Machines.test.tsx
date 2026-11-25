@@ -1140,6 +1140,25 @@ describe('Machines', () => {
     expect(screen.getByText(only(clock(language as 'en' | 'ru', since)!))).toBeInTheDocument();
   });
 
+  it.each([
+    ['en', "The company's database takes 1.3 GB.", 'The largest tables in it: net.journal 0.8 GB, public.agent_events 0.4 GB'],
+    ['ru', 'База данных компании занимает 1,3 ГБ.', 'Больше всего места в ней занимают таблицы: net.journal 0,8 ГБ, public.agent_events 0,4 ГБ'],
+  ])('says how big the company database is and what takes the most of it in %s', async (language, size, tables) => {
+    localStorage.setItem('hh-lang', language);
+    const database = { bytes: 1.3 * GIB, line: 2 * GIB, tables: [{ name: 'net.journal', bytes: 0.8 * GIB }, { name: 'public.agent_events', bytes: 0.4 * GIB }] };
+    lists({ 'GET /api/machines': [200, { machines: MACHINES, builtin: null, database }] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    expect(await screen.findByText(size)).toBeInTheDocument();
+    expect(screen.getByText((_text, node) => node?.tagName === 'P' && node.textContent === tables)).toBeInTheDocument();
+  });
+
+  it('says nothing of the database where the server tells none', async () => {
+    lists({ 'GET /api/machines': [200, { machines: MACHINES, builtin: null, database: null }] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    expect(await screen.findByText('dev-laptop')).toBeInTheDocument();
+    expect(screen.queryByText(/company's database takes/)).not.toBeInTheDocument();
+  });
+
   it('says nothing of copies where the server tells none', async () => {
     shown('en', [MACHINES[0]!]);
     const mac = await openCard('dev-laptop');

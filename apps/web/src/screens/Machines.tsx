@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { NodeLoad } from '@hornhoof/protocol';
 import { ApiFailure, api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { BuiltinView, CopiesView, DataView, MachineView, Me, MoveView, SubView, TlsView, Unfit } from '../types';
+import type { BuiltinView, CopiesView, DatabaseSize, DataView, MachineView, Me, MoveView, SubView, TlsView, Unfit } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar, Share } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
@@ -140,12 +140,12 @@ const HELD_MACHINES = 3;
 
 type BodyProps = {
   me: Me; shown: MachineView[] | null; load: Load; builtin: BuiltinView | null; pool: ReturnType<typeof machinePool>; copies: CopiesView | null;
-  held: number; columns: TableColumn<MachineRow>[]; search: TableSearch<MachineRow>; table: ReactNode;
+  database: DatabaseSize | null; held: number; columns: TableColumn<MachineRow>[]; search: TableSearch<MachineRow>; table: ReactNode;
 };
 
 /* The machines once they came: the pool, the table or that there are none, where Hornhoof keeps copies, and the phones.
    While they come, the pool's frame and the table are held in their place (style book 1.5, section 4; Design #1656). */
-function MachinesBody({ me, shown, load, builtin, pool, copies, held, columns, search, table }: BodyProps) {
+function MachinesBody({ me, shown, load, builtin, pool, copies, database, held, columns, search, table }: BodyProps) {
   const t = useT();
   if (!shown) return <><HeldPool /><HeldTable load={load} columns={columns} search={search} rows={held} /></>;
   return <>
@@ -153,6 +153,7 @@ function MachinesBody({ me, shown, load, builtin, pool, copies, held, columns, s
     {shown.length === 0 && !builtin ? <p className="muted">{t.machines.noMachines}</p> : table}
     {/* Under the table: it comes with the machines, so nothing above them moves when they come. */}
     {copies && <div className="machines-copies"><CopiesLine copies={copies} /></div>}
+    {database && <div className="machines-copies"><DatabaseLine database={database} /></div>}
     <Phones me={me} machines={shown} />
   </>;
 }
@@ -738,6 +739,17 @@ function CopiesLine({ copies }: { copies: CopiesView }) {
   </>;
 }
 
+/* How big the company's database is and what takes the most of it, under who holds it. */
+function DatabaseLine({ database }: { database: DatabaseSize }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const d = t.machines.database;
+  return <>
+    <p className="muted">{d.size(gigabytes(language, database.bytes))}</p>
+    {database.tables.length > 0 && <p className="muted">{d.largest}{' '}{database.tables.map((table, i) => <Fragment key={table.name}>{i > 0 && ', '}<bdi>{table.name}</bdi> {d.tableSize(gigabytes(language, table.bytes))}</Fragment>)}</p>}
+  </>;
+}
+
 /* The second block: whose machine it is and what system it runs, where the company opens on it, its agent programs
    and its computer access. */
 function SystemBlock({ row, editable, controls }: { row: MachineRow; editable: boolean; controls: MachineControls }) {
@@ -805,6 +817,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const [machines, setMachines] = useState<MachineView[] | null>(null);
   const [builtin, setBuiltin] = useState<BuiltinView | null>(null);
   const [copies, setCopies] = useState<CopiesView | null>(null);
+  const [database, setDatabase] = useState<DatabaseSize | null>(null);
   /* Whether this person sees the order the server passes on in. */
   const [priority, setPriority] = useState(false);
   const [moving, setMoving] = useState<Moving>({ move: null, canMove: false });
@@ -835,7 +848,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
     const fresh = askMachines();
     try {
       const [hosts, list] = await Promise.all([
-        api.get<{ machines: MachineView[]; builtin?: BuiltinView | null; copies?: CopiesView | null; priority?: boolean; move?: MoveView | null; canMove?: boolean }>('/api/machines'),
+        api.get<{ machines: MachineView[]; builtin?: BuiltinView | null; copies?: CopiesView | null; database?: DatabaseSize | null; priority?: boolean; move?: MoveView | null; canMove?: boolean }>('/api/machines'),
         api.get<{ subscriptions: SubView[] }>('/api/subscriptions'),
         loadMachineCommands(live, commandChanges, setCommand, setAddCommands, setCoreCommands),
       ]);
@@ -843,6 +856,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       setMachines(hosts.machines);
       setBuiltin(hosts.builtin ?? null);
       setCopies(hosts.copies ?? null);
+      setDatabase(hosts.database ?? null);
       setPriority(hosts.priority === true);
       setMoving({ move: hosts.move ?? null, canMove: hosts.canMove === true });
       setSubs(list.subscriptions);
@@ -989,7 +1003,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       <LoadFailure failure={machines ? loadFailure : null} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       {certificateEnds && <CertificateWarning ends={certificateEnds} />}
-      <MachinesBody me={me} shown={shown} load={machinesLoad} builtin={builtin} pool={pool} copies={copies} held={heldMachines} columns={columns} search={search} table={(
+      <MachinesBody me={me} shown={shown} load={machinesLoad} builtin={builtin} pool={pool} copies={copies} database={database} held={heldMachines} columns={columns} search={search} table={(
         <SortTable
           rows={rows}
           selectedId={selected}

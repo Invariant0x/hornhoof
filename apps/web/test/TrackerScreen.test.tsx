@@ -1132,6 +1132,20 @@ it.each([
 });
 
 it.each([
+  ['en', 'Task lists', 'Failures', "The company's database is larger than 2 GB", 'It takes 2.5 GB now.', 'The largest tables: net.journal 1.2 GB, public.agent_events 0.9 GB.'],
+  ['ru', 'Списки задач', 'Сбои', 'База данных компании больше 2 ГБ', 'Сейчас она занимает 2,5 ГБ.', 'Больше всего места занимают таблицы: net.journal 1,2 ГБ, public.agent_events 0,9 ГБ.'],
+])('shows the company database past its line among the failures, with its largest tables, and counts it there (%s)', async (language, lists, failures, title, now, tables) => {
+  localStorage.setItem('hh-lang', language);
+  const databaseLarge = { bytes: 2.5 * GIB, line: 2 * GIB, tables: [{ name: 'net.journal', bytes: 1.2 * GIB }, { name: 'public.agent_events', bytes: 0.9 * GIB }] };
+  shell('/tasks?show=failures&view=list', { 'GET /api/requests': [200, { ...decisions([]), databaseLarge }] });
+  const card = await screen.findByRole('region', { name: title });
+  expect(card).toHaveTextContent(now);
+  expect(card).toHaveTextContent(tables);
+  const side = screen.getByRole('navigation', { name: lists });
+  expect(within(side).getByRole('button', { name: `${failures} 1` })).toBeInTheDocument();
+});
+
+it.each([
   ['en', 'Task lists', 'Failures', 'The copy of the company\'s data on home-box was given up', "Making it failed 4 times in a row, and its machine stopped trying", 'press "Try again" on its card in Machines'],
   ['ru', 'Списки задач', 'Сбои', 'Копия данных компании на машине home-box оставлена', 'Попытки сделать ее подряд не удались (всего 4), и машина перестала пробовать', 'нажмите «Попробовать снова» на ее карточке'],
 ])('shows a copy its machine gave up among the failures, with what to do, and counts it there (%s)', async (language, lists, failures, title, why, action) => {

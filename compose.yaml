@@ -130,6 +130,8 @@ services:
       # What machines share of products' test harnesses: its folder here, and how many MB it may take; 20480 when empty.
       HARNESS_DIR: /harness
       HARNESS_MB: ${HARNESS_MB:-}
+      # Past how many megabytes the company's database is a card for the CEO; 2048 when empty.
+      DATABASE_WARN_MB: ${DATABASE_WARN_MB:-}
       # Where a file over 50 MB lives on this machine, in no copy of the database and no backup: 30 days, and lost if the
       # machine goes.
       FILES_DIR: /files

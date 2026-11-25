@@ -73,6 +73,8 @@ export type Config = {
   /* Where the bundles of products' test harnesses lie, and how much they may take. No folder: each machine builds its own. */
   harnessDir?: string;
   harnessBytes: number;
+  /* Past this size the company's database is a card for the CEO: it holds metadata and text, and its files lie in the store. */
+  databaseWarnBytes: number;
   /* Where a file over 50 MB lives, on this machine's disk. No folder: such a file is turned away. */
   filesDir?: string;
   /* The ACME directory the link's certificate comes from; null with certificates off. */
@@ -152,6 +154,7 @@ const Env = z.object({
   HARNESS_DIR: z.preprocess(unset, z.string().min(1).optional()),
   FILES_DIR: z.preprocess(unset, z.string().min(1).optional()),
   HARNESS_MB: wholeNumber(1, 100_000_000, 'HARNESS_MB must be a whole number of megabytes, like 20480.'),
+  DATABASE_WARN_MB: wholeNumber(1, 100_000_000, 'DATABASE_WARN_MB must be a whole number of megabytes, like 2048.'),
   ACME_DIRECTORY: z.preprocess(
     unset,
     z.union([z.literal(CERTIFICATES_OFF), z.url({ protocol: /^https$/, error: 'ACME_DIRECTORY must be off or an https:// ACME directory address.' })]).optional(),
@@ -175,7 +178,11 @@ const acmeDirectoryOf = (set: string | undefined): string | null => (set === CER
 const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
 const migrationCount = (): number => readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).length;
 
-const harnessSettings = (set: z.infer<typeof Env>): Pick<Config, 'harnessDir' | 'harnessBytes'> => ({ ...(set.HARNESS_DIR ? { harnessDir: set.HARNESS_DIR } : {}), harnessBytes: (set.HARNESS_MB ?? 20_480) * 1024 * 1024 });
+const harnessSettings = (set: z.infer<typeof Env>): Pick<Config, 'harnessDir' | 'harnessBytes' | 'databaseWarnBytes'> => ({
+  ...(set.HARNESS_DIR ? { harnessDir: set.HARNESS_DIR } : {}),
+  harnessBytes: (set.HARNESS_MB ?? 20_480) * 1024 * 1024,
+  databaseWarnBytes: (set.DATABASE_WARN_MB ?? 2048) * 1024 * 1024,
+});
 
 /* Where Google answers: its own addresses, unless the environment puts stand-ins in their place. */
 const googleUrls = (set: { GOOGLE_TOKEN_URL?: string; GOOGLE_SHEETS_URL?: string; GOOGLE_DRIVE_URL?: string }) => ({

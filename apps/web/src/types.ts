@@ -759,6 +759,10 @@ export type MachineLowCard = {
 
 export type GitHubLimitCard = { repository: string; resetAt: number | null };
 
+/* The company's database where the app runs: its size, the line past which it is a card for the CEO, and its largest
+   tables, the largest first. */
+export type DatabaseSize = { bytes: number; line: number; tables: { name: string; bytes: number }[] };
+
 /* Everything that waits for people as /api/requests shows it to this person, and the counts of all of it: per owner, per
    asking agent and in total. */
 export type Decisions = {
@@ -773,6 +777,8 @@ export type Decisions = {
   copyGaveUp?: CopyGaveUpCard[];
   /* A server from before nodes said how full their disk is sends none. */
   machinesLow?: MachineLowCard[];
+  /* The company's database past its line, for the CEO; a server from before it was measured sends none. */
+  databaseLarge?: DatabaseSize | null;
   githubLimits?: GitHubLimitCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };

@@ -13,6 +13,7 @@ import { dropOldConnections, serverStarted } from '../nodes/connections.js';
 import { tellOfCopySchemaFailures } from '../copies/schema-failures.js';
 import { tellOfMachinesAway } from '../nodes/machine-away.js';
 import { tellOfMachinesLow } from '../nodes/machine-low.js';
+import { tellOfDatabaseSize } from '../copies/database-size.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { storeRound } from '../files/sweep.js';
 import { moveOldFiles, type MoveRound } from '../files/mover.js';
@@ -150,6 +151,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     tellOfCopySchemaFailures(ctx, now).catch(failed('telling of copy schema failures failed')),
     tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
     tellOfMachinesLow(ctx).catch(failed('telling of machines short of disk space failed')),
+    tellOfDatabaseSize(ctx).catch(failed('telling of the database size failed')),
   ]);
 }
 

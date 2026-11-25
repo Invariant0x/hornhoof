@@ -1196,6 +1196,11 @@ export const ru: Messages = {
     online: 'В сети',
     lastSeen: ago => `Была в сети ${ago}`,
     lastSeenNow: 'Была в сети только что',
+    database: {
+      size: gb => `База данных компании занимает ${gb} ГБ.`,
+      largest: 'Больше всего места в ней занимают таблицы:',
+      tableSize: gb => `${gb} ГБ`,
+    },
     copy: {
       making: percent => `Копия: создается, ${percent}%`,
       remaking: percent => `Копия: создается заново, ${percent}%`,
@@ -2111,6 +2116,10 @@ export const ru: Messages = {
     machineLowKeptRow: (task, gb, why) => `${task === null ? '' : `задача ${task}, `}${gb} ГБ, ${why}`,
     machineLowKeptWhy: { uncommitted: 'изменения не закоммичены', unpushed: 'коммиты не отправлены', ignored: 'игнорируемые файлы без копии в репозитории' },
     machineLowDo: 'Что сделать: удалите с этой машины ненужные файлы или дайте Docker больше места на диске.',
+    databaseLarge: line => `База данных компании больше ${line} ГБ`,
+    databaseLargeNow: gb => `Сейчас она занимает ${gb} ГБ. В ней только записи и текст, а файлы лежат в хранилище файлов, так что она должна оставаться намного меньше этой границы.`,
+    databaseLargeTables: tables => `Больше всего места занимают таблицы: ${tables}.`,
+    databaseLargeDo: 'Что сделать: попросите Операции найти, что продолжает расти. Карточка уйдет сама, когда база снова станет меньше границы.',
     someone: 'этого человека',
     nothingFor: name => `От ${name} решений сейчас не ждут.`,
     asks: agent => `${agent} спрашивает`,

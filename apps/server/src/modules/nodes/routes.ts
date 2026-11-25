@@ -17,6 +17,7 @@ import { linkOf, publicUrl } from '../link/link.js';
 import { buildSoon, type LeaderBuild } from '../network/follow.js';
 import { companyFolder, isServerComputer, issueTicket } from '../network/join.js';
 import { seenAccess } from '../computer/seen.js';
+import { databaseSize } from '../copies/database-size.js';
 import { replicasOf } from '../copies/measured.js';
 import { areaOf } from '../files/area.js';
 import { askMove, cancelMove, moveView } from '../copies/move.js';
@@ -390,6 +391,8 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       ...(held ? { copies: held.copies } : {}),
       /* Whether this person sees the order the server passes on in. */
       priority: held !== null,
+      /* How big the company's database is and its largest tables, for those who see the whole company. */
+      database: me.scopeKind === 'company' ? await databaseSize(ctx) : null,
       /* The request to move the server, for everyone who sees machines, and whether this person may ask for one: the CEO
          or the orchestrator acting for him, while this app leads. */
       move: await moveView(db),

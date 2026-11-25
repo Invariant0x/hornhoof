@@ -1197,6 +1197,12 @@ export const en = {
     online: 'Online',
     lastSeen: (ago: string) => `Last seen ${ago}`,
     lastSeenNow: 'Last seen a moment ago',
+    /* The company's database where the app runs, under who holds it: its size and the tables that take the most of it. */
+    database: {
+      size: (gb: string) => `The company's database takes ${gb} GB.`,
+      largest: 'The largest tables in it:',
+      tableSize: (gb: string) => `${gb} GB`,
+    },
     /* A machine's part in holding the company's data: its copy, its place, why it holds none, and who holds the company. */
     copy: {
       making: (percent: number) => `Copy: being made, ${percent}%`,
@@ -2116,6 +2122,11 @@ export const en = {
     machineLowKeptRow: (task: number | null, gb: string, why: string) => `${task === null ? '' : `task ${task}, `}${gb} GB, ${why}`,
     machineLowKeptWhy: { uncommitted: 'changes not committed', unpushed: 'commits not pushed', ignored: 'ignored files not on a remote' },
     machineLowDo: 'What to do: remove files you no longer need from this machine, or give Docker more disk space.',
+    /* The company's database past its line, for the CEO: nothing waits for an answer, and the card goes by itself. */
+    databaseLarge: (line: string) => `The company's database is larger than ${line} GB`,
+    databaseLargeNow: (gb: string) => `It takes ${gb} GB now. It holds only records and text, as its files lie in the file store, so it should stay well under the line.`,
+    databaseLargeTables: (tables: string) => `The largest tables: ${tables}.`,
+    databaseLargeDo: 'What to do: ask Operations to find what keeps growing. The card goes by itself once the database is under the line again.',
     someone: 'this person',
     nothingFor: (name: string) => `Nothing waits for a decision from ${name}.`,
     asks: (agent: string) => `${agent} asks`,

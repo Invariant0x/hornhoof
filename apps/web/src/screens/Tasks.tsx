@@ -13,6 +13,7 @@ import { DepartmentMark, PersonMark } from '../ui/TrackerMarks';
 import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
 import { Busy, Hold, LoadState, noneYet, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
 import { CopyGaveUps, CopySchemaFailures, MachineAway } from '../ui/MachineAway';
+import { DatabaseLarge } from '../ui/DatabaseLarge';
 import { MachineLow } from '../ui/MachineLow';
 import { MergeCard } from '../ui/MergeCard';
 import { namedReadOnly, Requests, wordsAnswer } from '../ui/Requests';
@@ -650,6 +651,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const copySchemaFailures = schemaFailures(decisions);
   const copyGaveUp = gaveUpCopies(decisions);
   const machinesLow = lowMachines(decisions);
+  const databaseLarge = decisions?.databaseLarge ?? null;
   const githubLimits = failureCards(decisions);
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
   /* The department where the person is: its work, or its goals. */
@@ -792,7 +794,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
         counts={{
           waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf)), waitsOnWho, keptShown(kept, decisionsOf)),
           people: peopleCount(decisions, waitsOnPeople, company),
-          failures: failures.length + machinesAway.filter(machine => !machine.back).length + copySchemaFailures.length + copyGaveUp.length + machinesLow.length + githubLimits.length,
+          failures: failures.length + machinesAway.filter(machine => !machine.back).length + copySchemaFailures.length + copyGaveUp.length + machinesLow.length + (databaseLarge ? 1 : 0) + githubLimits.length,
           mine: own.tasks.length,
           working: working.length,
         }}
@@ -865,6 +867,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
                   <CopySchemaFailures cards={copySchemaFailures} />
                   <CopyGaveUps cards={copyGaveUp} />
                   <MachineLow machines={machinesLow} />
+                  <DatabaseLarge size={databaseLarge} />
                   <GitHubLimitCards limits={githubLimits} />
                 </>
               )}
