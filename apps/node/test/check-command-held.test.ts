@@ -6,12 +6,13 @@ import { configureCheckCommands, serveCheckCommand } from '../src/check-command-
 import { setCheckClient } from '../src/check-queue.js';
 import { eventually } from '../../../test-support/eventually.mjs';
 
-const { assertGroup, clean } = vi.hoisted(() => ({ assertGroup: vi.fn(), clean: vi.fn() }));
-vi.mock('../src/check-group.js', () => ({ assertCheckGroup: assertGroup, checkGroupMembers: vi.fn(), signalCheckGroup: vi.fn(), cleanCheckGroup: clean, checkGroupProcess: vi.fn() }));
+const { assertGroup, clean, processOf } = vi.hoisted(() => ({ assertGroup: vi.fn(), clean: vi.fn(), processOf: vi.fn() }));
+vi.mock('../src/check-group.js', () => ({ assertCheckGroup: assertGroup, checkGroupMembers: vi.fn(), signalCheckGroup: vi.fn(), cleanCheckGroup: clean, checkGroupProcess: processOf }));
 const KEY = '10000000-0000-4000-8000-000000000021';
 const GROUP = { pid: 4242, started: '100' };
 const WAIT = Buffer.from(JSON.stringify({ command: ['recorded-tool'], cwd: '/tmp', env: {}, wait: true, group: GROUP }));
-beforeEach(() => { configureCheckCommands({ uid: 20000, gid: 20000 }); assertGroup.mockResolvedValue(undefined); });
+/* No check of these runs inside another's slot (#2063): its caller has no process of a held group above it. */
+beforeEach(() => { configureCheckCommands({ uid: 20000, gid: 20000 }); assertGroup.mockResolvedValue(undefined); processOf.mockResolvedValue(null); });
 afterEach(() => { setCheckClient(null); configureCheckCommands(null); vi.resetAllMocks(); });
 
 function shell() {

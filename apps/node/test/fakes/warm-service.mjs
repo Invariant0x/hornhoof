@@ -46,8 +46,8 @@ switch (what) {
   case 'drop': {
     const [piece] = rest;
     if (existsSync(at('drop-fails'))) { process.stderr.write('cannot drop now\n'); process.exit(1); }
-    appendFileSync(at('dropped'), `${piece}\n`);
     rmSync(join(at('pieces'), piece), { recursive: true, force: true });
+    appendFileSync(at('dropped'), `${piece}\n`);
     break;
   }
   case 'list':

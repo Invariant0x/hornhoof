@@ -9,8 +9,8 @@ import { eventually } from '../../../test-support/eventually.mjs';
 /* #2091: a check that needs a warm service gets a piece of it with its slot, and the piece goes with the slot; one that needs
    none gets its slot at once, whatever the service does. */
 
-const { assertGroup, clean } = vi.hoisted(() => ({ assertGroup: vi.fn(), clean: vi.fn() }));
-vi.mock('../src/check-group.js', () => ({ assertCheckGroup: assertGroup, checkGroupMembers: vi.fn(), signalCheckGroup: vi.fn(), cleanCheckGroup: clean, checkGroupProcess: vi.fn() }));
+const { assertGroup, clean, processOf } = vi.hoisted(() => ({ assertGroup: vi.fn(), clean: vi.fn(), processOf: vi.fn() }));
+vi.mock('../src/check-group.js', () => ({ assertCheckGroup: assertGroup, checkGroupMembers: vi.fn(), signalCheckGroup: vi.fn(), cleanCheckGroup: clean, checkGroupProcess: processOf }));
 const KEY = '10000000-0000-4000-8000-000000000031';
 const waiting = (command: string[], pid: number) => Buffer.from(JSON.stringify({ command, cwd: '/repo/apps/server', env: {}, wait: true, group: { pid, started: '100' } }));
 const VITEST = ['node', '/repo/node_modules/vitest/vitest.mjs', 'run', 'test/a.test.ts'];
@@ -49,7 +49,8 @@ function warm() {
   return { pieceFor, drop, release };
 }
 
-beforeEach(() => { assertGroup.mockResolvedValue(undefined); clean.mockResolvedValue(undefined); });
+/* No check of these holds a slot already: none is nested in another's (#2063). */
+beforeEach(() => { assertGroup.mockResolvedValue(undefined); clean.mockResolvedValue(undefined); processOf.mockResolvedValue(null); });
 afterEach(() => { setCheckClient(null); configureCheckCommands(null); vi.resetAllMocks(); });
 
 it('gives a check that needs a service its piece with the slot, and drops the piece as the slot ends', async () => {
