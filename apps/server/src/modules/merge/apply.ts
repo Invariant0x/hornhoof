@@ -15,6 +15,7 @@ import {
 import type { MergeSource } from './source.js';
 import type { Files } from '../files/files.js';
 import { nameOf, valueWords } from './words.js';
+import { archivedIds } from '../events/archive.js';
 import { fingerprintMask, maskCompanyRows, maskJson, maskRow, type Fingerprint, type Mask, type StoredTexts } from '../tasks/hide-secret.js';
 
 export type { CodeLine } from './snapshot.js';
@@ -624,11 +625,13 @@ class Merge {
     const both = pairs.map(pair => ({ ...pair, y: pair.x ? here(pair.x) : (ys?.get(pair.text) ?? null) }));
     this.ours(t, both.flatMap(pair => [pair.x, pair.y]));
     if (t.name === 'map_returns') await withNamedKeys(this.q, both.map(pair => pair.y));
+    const archived = await this.archivedHere(t, both.flatMap(pair => (pair.x && !pair.y ? [pair.x] : [])));
     for (const { key, text, x, y } of both) {
       const mine = histories.get(text)!;
-      const outcome = addsOnly(rule, journalOutcome(t, x, y, mine, rule.kind === 'log' ? undefined : theirs?.get(text)));
+      const kept = x !== null && y === null && archived.has(String(x.id));
+      const outcome: Outcome = kept ? { do: 'equal' } : addsOnly(rule, journalOutcome(t, x, y, mine, rule.kind === 'log' ? undefined : theirs?.get(text)));
       const alone = mine.a.length === 0 && mine.old.length === 0;
-      const left = alone && x !== null && (y === null || (rule.kind === 'rows' && differing(t, x, y).length > 0));
+      const left = !kept && alone && x !== null && (y === null || (rule.kind === 'rows' && differing(t, x, y).length > 0));
       this.unit(t, rule, { key, x, y, outcome, rows: [...mine.a, ...mine.old], skipped: mine.s, left });
     }
   }
@@ -639,8 +642,11 @@ class Merge {
       const ys = page.map(x => here(x));
       this.ours(t, [...page, ...ys]);
       if (t.name === 'map_returns') await withNamedKeys(this.q, ys);
+      const archived = await this.archivedHere(t, page);
       for (const [index, x] of page.entries()) {
         let outcome = addsOnly(rule, compareOutcome(t, x, ys[index]!));
+        /* An event the leader moved into an archive of its old history is no row it lacks. */
+        if (outcome.do === 'add' && archived.has(String(x.id))) outcome = { do: 'equal' };
         /* A difference this side made itself is nothing to settle: an earlier merge took this very row from another
            database that held it the same, as a copy and the database it followed do, and wrote these columns its own
            way, as when it ended a turn nobody ran any more. */
@@ -651,6 +657,12 @@ class Merge {
         else this.unit(t, rule, { key: keyOf(t, x), x, y: ys[index]!, outcome, rows: [], skipped: [], left: false });
       }
     }
+  }
+
+  /* The ids of these rows of agent_events that an archive of the leader's old history holds (#2126); none of another table. */
+  private async archivedHere(t: TableFacts, xs: Row[]): Promise<Set<string>> {
+    if (t.name !== 'agent_events' || !this.facts.tables.has('agent_event_archives')) return new Set();
+    return archivedIds(this.q, xs.map(x => String(x.id)));
   }
 
   /* Whether every column the source's row differs in is one an earlier merge wrote its own way on this side, from a

@@ -5,6 +5,7 @@ import { queryOf } from './leader.js';
 import { differing } from './plan.js';
 import { backupsOf, parkedOf, horizonOf, journalIds, journalRows, keyText, netTables, nonEmptyTables, openConflicts, restoresOf, rowsByKeys, rowsOf, type Row } from './read.js';
 import { ruleOf } from './rules.js';
+import { archivedIds } from '../events/archive.js';
 import type { MergeSource } from './source.js';
 
 /* How many rows that nothing accounts for are named. */
@@ -90,6 +91,8 @@ export async function complete(db: Db, mergeId: string, source: MergeSource): Pr
     for await (const page of rowsOf(src, t)) {
       const found = await rowsByKeys(q, t, page.map(lookedUpBy), by);
       const ys = page.map(x => found.get(keyText(lookedUpBy(x))) ?? null);
+      /* An event the leader moved into an archive of its old history is there (#2126). */
+      const archived = name === 'agent_events' && facts.tables.has('agent_event_archives') ? await archivedIds(q, page.flatMap((x, index) => (ys[index] ? [] : [String(x.id)]))) : new Set<string>();
       if (name === 'map_returns') {
         await withNamedKeys(src, page);
         await withNamedKeys(q, ys);
@@ -97,6 +100,7 @@ export async function complete(db: Db, mergeId: string, source: MergeSource): Pr
       for (const [index, x] of page.entries()) {
         const y = ys[index]!;
         if (y && rule.kind !== 'rows') continue;
+        if (!y && archived.has(String(x.id))) continue;
         const key = named(x);
         records ??= await recordsOf(q, name);
         const written = records.rewritten.get(keyText(key));

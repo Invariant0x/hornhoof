@@ -15,6 +15,7 @@ import { note } from './events.js';
 import { fileBytes } from './file-bytes.js';
 import { idOnly } from '../../db/selections.js';
 import { StoreRefused } from '../files/store.js';
+import { archiveBytes, archivedOf } from '../events/archive.js';
 
 type Row = Record<string, unknown>;
 /* What a mask does to one text: the hidden value, wherever it stands, becomes HIDDEN. */
@@ -230,10 +231,13 @@ export async function maskCompanyRows(q: Query, facts: Facts, company: string, m
       }
     });
   }
+  const archives = facts.tables.has('agent_event_archives');
+  if (archives) changed += await maskArchives(q, company, mask, texts, left);
   for (const t of tables) changed += await maskCopies(q, t, company, mask, texts, left);
   changed += await maskParked(q, company, mask);
   /* The text as it was leaves the machines at the next look, not after the day an unused file waits. */
-  for (const sha256 of left) await q('UPDATE net.files SET drop_at = now() WHERE sha256 = $1 AND NOT EXISTS (SELECT 1 FROM public.attachments WHERE sha256 = $1)', [sha256]);
+  const stillNamed = archives ? ' AND NOT EXISTS (SELECT 1 FROM public.agent_event_archives WHERE sha256 = $1)' : '';
+  for (const sha256 of left) await q(`UPDATE net.files SET drop_at = now() WHERE sha256 = $1 AND NOT EXISTS (SELECT 1 FROM public.attachments WHERE sha256 = $1)${stillNamed}`, [sha256]);
   /* The store's backup keeps neither: a row of a file as it was, which may name the secret, is no name to put back, and
      with no name left of the text as it was, the backup's next round lets it go at once. A file's row as it is now is
      named again. */
@@ -298,6 +302,28 @@ async function maskCopies(q: Query, t: TableFacts, company: string, mask: Mask, 
       if (!here && !there && !value && !why) continue;
       await q('UPDATE net.merge_conflicts SET here = coalesce($1::jsonb, here), there = coalesce($2::jsonb, there), value = coalesce($3::jsonb, value), why = coalesce($4, why) WHERE id = $5::uuid',
         [here && JSON.stringify(here), there && JSON.stringify(there), value && JSON.stringify(value), why, row.id]);
+      changed += 1;
+    }
+  });
+  return changed;
+}
+
+/* The archives of the company's old agent history (#2126): an archive whose events hold the value is kept again as a new
+   file without it, its row names that one, and the file it was goes from the machines with the other texts left. With
+   no store to read, as with no texts given, there is no file to mask. */
+async function maskArchives(q: Query, company: string, mask: Mask, texts: StoredTexts | undefined, left: Set<string>): Promise<number> {
+  if (!texts) return 0;
+  let changed = 0;
+  await eachBatch(q, `SELECT jsonb_build_object('id', x.id, 'sha256', x.sha256) AS row FROM public.agent_event_archives x WHERE x.company_id = '${company}'::uuid`, async rows => {
+    for (const row of rows) {
+      const bytes = await texts.read(String(row.sha256)).catch(unlessLost);
+      if (!bytes) continue;
+      const events = archivedOf(bytes);
+      const masked = events.map(event => ({ ...event, data: maskJson(event.data, mask) }));
+      if (JSON.stringify(masked) === JSON.stringify(events)) continue;
+      const kept = await texts.write(archiveBytes(masked));
+      await q('UPDATE public.agent_event_archives SET sha256 = $1 WHERE id = $2::uuid', [kept.sha256, row.id]);
+      left.add(String(row.sha256));
       changed += 1;
     }
   });

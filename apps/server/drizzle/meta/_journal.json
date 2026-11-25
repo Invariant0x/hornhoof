@@ -1198,6 +1198,13 @@
       "when": 1795631214986,
       "tag": "0172_hot_query_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "7",
+      "when": 1795635532711,
+      "tag": "0173_agent_event_archives",
+      "breakpoints": true
     }
   ]
 }

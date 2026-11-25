@@ -16,6 +16,7 @@ import { tellOfMachinesLow } from '../nodes/machine-low-signal.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { storeRound } from '../files/sweep.js';
 import { moveOldFiles, type MoveRound } from '../files/mover.js';
+import { pacedArchiveRound } from '../events/archive.js';
 import { reconcile, waitsOnPurpose } from '../tasks/reconcile.js';
 import { retryCallBatches } from '../calls/calls.js';
 import { wakeLeftBehind } from '../tasks/wake.js';
@@ -135,7 +136,7 @@ const MINUTE_ROUND_CONCURRENCY = 3;
 
 /* What Hornhoof does every minute: due rounds, turns that task moves kept and nobody queued, turns left waiting though
    their agent is free, department turns their release tags close and turns that hold nothing for a release, files of turns closed a month ago, the old history of node connections, test run times, and Codex plans
-   to move; and files an older Hornhoof kept in the database, a few at a time, into the store. */
+   to move; files an older Hornhoof kept in the database, a few at a time, into the store; and agents' old history there too. */
 export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) => (err: unknown) => void): Promise<void> {
   ctx.githubLimits.expire();
   await checkExternalWaits(ctx, now).catch(failed('ending external task waits failed'));
@@ -154,6 +155,9 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     () => moveOldFiles(ctx)
       .then(round => tellMoveRound(ctx, round))
       .catch(failed('moving files from the database into the store failed')),
+    () => pacedArchiveRound(ctx, now)
+      .then(round => round && round.archived + round.cleared > 0 && ctx.log.info({ archived: round.archived, cleared: round.cleared }, "Agents' old history moved from the database into the file store."))
+      .catch(failed("moving agents' old history into the file store failed")),
     () => dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
     () => checkTestTimes(ctx).catch(failed('checking test run times failed')),
     () => harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),

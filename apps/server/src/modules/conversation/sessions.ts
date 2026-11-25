@@ -105,7 +105,7 @@ export async function startsClean(ctx: Ctx, agent: Agent, last: SavedSession | u
 }
 
 export async function catchUpFor(ctx: Ctx, agent: Agent): Promise<string | null> {
-  const talk = await earlierTalk(ctx.db, agent.id);
+  const talk = await earlierTalk(ctx.db, agent.id, undefined, ctx.files);
   return talk.length ? preface(talk, agent.kind === 'orchestrator' ? 'Orchestrator' : agent.name) : null;
 }
 

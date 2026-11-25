@@ -248,6 +248,9 @@ export const en = {
     backupWaiting: (n: number) => `${n} ${n === 1 ? 'file is' : 'files are'} still to reach it.`,
     backupKeptAt: (when: string) => `It last took a file in on ${when}.`,
     backupOldest: (when: string) => `It can put files back as they were as early as ${when}.`,
+    historyTitle: "Agents' old work",
+    historyHint: "What agents did and answered in a turn stays in the database for these days after the turn ends, then moves into the file store. The agent window and first answers still show it from there. Messages and the marks Hornhoof checks stay in the database.",
+    historyDays: "Days agents' work stays in the database",
   },
   backups: {
     title: 'Backups',

@@ -99,6 +99,9 @@ export const companies = pgTable('companies', {
   trackerDue: boolean('tracker_due').notNull().default(false),
   /* Single company-wide UI theme or active world pack id, chosen by the CEO in company settings. */
   theme: text('theme').notNull().default('cyberpunk'),
+  /* The days the text, tool, tool_result and todo events of an ended job stay in agent_events before they move into the
+     file store, as the CEO set them in Settings. */
+  historyDays: integer('history_days').notNull().default(14),
   createdAt: createdAt(),
 });
 
@@ -895,6 +898,8 @@ export const jobs = pgTable(
     index('jobs_agent_conversation_ended').on(t.companyId, t.agentId, sql`coalesce(${t.finishedAt}, ${t.createdAt})`, t.createdAt).where(sql`${t.kind} = 'conversation' and ${t.status} in ('done', 'failed')`),
     index('jobs_agent_conversation_retry_waiting').on(t.companyId, t.agentId, t.createdAt).where(sql`${t.kind} = 'conversation' and ${t.status} = 'queued' and ${t.notBefore} is not null and ${t.continueOf} is not null`),
     index('jobs_agent_conversation_obsolete').on(t.companyId, t.agentId, sql`coalesce(${t.finishedAt}, ${t.createdAt})`, t.createdAt).where(sql`${t.kind} = 'conversation' and ${t.status} = 'obsolete'`),
+    /* The ended jobs whose old history the archive round looks at, the latest that ended before its window first. */
+    index('jobs_ended').on(t.companyId, sql`coalesce(${t.finishedAt}, ${t.createdAt})`).where(sql`${t.status} in ('done', 'failed', 'obsolete')`),
     check('jobs_builtin_machine', sql`builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'`),
   ],
 );
@@ -1032,6 +1037,38 @@ export const agentEvents = pgTable(
     index('agent_events_operator_instance').on(t.agentId, sql`(data->'operatorEvidence'->>'instance')`).where(sql`data->>'operatorEvidenceId' is not null`),
     index('agent_events_operator_delivery').on(t.agentId, t.jobId, sql`(data->'operatorDelivery'->>'id')`).where(sql`data->'operatorDelivery'->>'id' is not null`),
     index('agent_events_operator_evidence_delivery').on(t.agentId, sql`(data->'operatorEvidence'->>'deliveryId')`).where(sql`data->'operatorEvidence'->>'deliveryId' is not null`),
+  ],
+);
+
+/* An agent's old history, moved out of agent_events into the file store: the text, tool, tool_result and todo events of
+   jobs that ended before the company's window, as one gzipped file of JSON lines in the order of their seq. The row
+   names the file, so the store keeps, copies and backs it up as it does a file a row names. The events it holds leave
+   agent_events once the file stands on its copies, when cleared_at is set, and the readers of an agent's history take
+   them back from the file by their seq. A row changes only when a hidden secret is masked out of its file, which gives
+   it another sha256. */
+export const agentEventArchives = pgTable(
+  'agent_event_archives',
+  {
+    id: id(),
+    companyId: companyId(),
+    agentId: uuid('agent_id').notNull().references(() => agents.id),
+    sha256: text('sha256').notNull(),
+    firstSeq: bigint('first_seq', { mode: 'number' }).notNull(),
+    lastSeq: bigint('last_seq', { mode: 'number' }).notNull(),
+    events: integer('events').notNull(),
+    jobIds: uuid('job_ids').array().notNull(),
+    eventIds: uuid('event_ids').array().notNull(),
+    firstAt: timestamp('first_at', { withTimezone: true }).notNull(),
+    lastAt: timestamp('last_at', { withTimezone: true }).notNull(),
+    clearedAt: timestamp('cleared_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  t => [
+    index('agent_event_archives_agent_seq').on(t.agentId, t.firstSeq, t.lastSeq),
+    index('agent_event_archives_sha256').on(t.sha256),
+    index('agent_event_archives_job_ids').using('gin', t.jobIds),
+    index('agent_event_archives_event_ids').using('gin', t.eventIds),
+    index('agent_event_archives_pending').on(t.companyId).where(sql`cleared_at is null`),
   ],
 );
 

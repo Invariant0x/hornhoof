@@ -17,6 +17,8 @@ export type FileStoreView = {
   stuckBytes: number;
   /* The store's own backup; none on a server from before it. */
   backup?: StoreBackupView;
+  /* The days an ended job's history stays in the database before it moves into the store; none on a server from before. */
+  historyDays?: number;
 };
 
 /* Where the store's backup is and how it stands: whether its machine keeps no live copy and whether it is away, what it
@@ -36,6 +38,7 @@ export type StoreBackupView = {
 
 const COPIES = [1, 2, 3, 4, 5];
 const KEEP_DAYS = [7, 14, 30, 60, 90, 180, 365];
+const HISTORY_DAYS = [3, 7, 14, 30, 60, 90, 180, 365];
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
 const amount = (t: Messages, bytes: number): string => (bytes >= GB ? t.fileCopies.gb((bytes / GB).toFixed(1)) : t.tasks.fileMb(Math.max(1, Math.ceil(bytes / MB))));
@@ -55,7 +58,7 @@ export function FileCopies() {
     api.get<FileStoreView>('/api/company/file-store').then(setView, (err: unknown) => (err instanceof ApiFailure && err.status === 404 ? setAbsent(true) : setFailure(err)));
   }, []);
 
-  async function choose(change: { copies: number } | { backupKeepDays: number }) {
+  async function choose(change: { copies: number } | { backupKeepDays: number } | { historyDays: number }) {
     setBusy(true);
     setFailure(null);
     try {
@@ -102,6 +105,18 @@ export function FileCopies() {
               {view.backup.waiting > 0 && <p className="update-note">{t.fileCopies.backupWaiting(view.backup.waiting)}</p>}
               {view.backup.keptAt && <p>{t.fileCopies.backupKeptAt(when(language, view.backup.keptAt))}</p>}
               {view.backup.oldestAt && <p>{t.fileCopies.backupOldest(when(language, view.backup.oldestAt))}</p>}
+            </>
+          )}
+          {view.historyDays !== undefined && (
+            <>
+              <h4 id={`${id}-history`}>{t.fileCopies.historyTitle}</h4>
+              <p id={`${id}-history-hint`} className="muted">{t.fileCopies.historyHint}</p>
+              <label htmlFor={`${id}-history-days`}>{t.fileCopies.historyDays}</label>
+              <div className="select-wrap">
+                <select id={`${id}-history-days`} className="lang-select" aria-describedby={`${id}-history-hint`} value={view.historyDays} disabled={busy} onChange={e => void choose({ historyDays: Number(e.target.value) })}>
+                  {[...new Set([...HISTORY_DAYS, view.historyDays])].sort((a, b) => a - b).map(n => <option key={n} value={n}>{t.fileCopies.days(n)}</option>)}
+                </select>
+              </div>
             </>
           )}
         </>

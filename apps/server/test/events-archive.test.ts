@@ -80,7 +80,7 @@ describe('the old history of agents', () => {
     const all = await s.events('?after=0');
     const last = await s.events('?last=500');
     /* "Earlier" in the agent window: the page before the first event of the recent job, which holds archived events. */
-    const earlier = await s.events(`?last=6&before=${recent.kept[0]!.seq}`);
+    const earlier = await s.events(`?last=8&before=${recent.kept[0]!.seq}`);
     const catchUp = await earlierTalk(s.db, s.agent.id, 20, s.ctx.files);
     expect(earlier.some(e => e.kind === 'tool_result')).toBe(true);
 
@@ -97,7 +97,7 @@ describe('the old history of agents', () => {
 
     expect(await s.events('?after=0')).toEqual(all);
     expect(await s.events('?last=500')).toEqual(last);
-    expect(await s.events(`?last=6&before=${recent.kept[0]!.seq}`)).toEqual(earlier);
+    expect(await s.events(`?last=8&before=${recent.kept[0]!.seq}`)).toEqual(earlier);
     expect(await s.events(`?after=${old.kept[0]!.seq}`)).toEqual(all.filter(e => e.seq > old.kept[0]!.seq));
     expect(await s.events(`?last=2&before=${old.archived.at(-1)!.seq}`)).toEqual(all.filter(e => e.seq < old.archived.at(-1)!.seq).slice(-2));
     expect(await earlierTalk(s.db, s.agent.id, 20, s.ctx.files)).toEqual(catchUp);

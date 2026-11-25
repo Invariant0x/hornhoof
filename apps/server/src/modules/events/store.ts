@@ -9,6 +9,8 @@ import { idOnly } from '../../db/selections.js';
 import { HORNHOOF, agentParty, incomingEnvelope, messageData, readMessage, type MessageEnvelope, type MessageParty } from './parties.js';
 import { notStep } from '../tools/steps.js';
 import { privateTurn } from '../tools/private-turns.js';
+import type { Files } from '../files/files.js';
+import { archivedEvents, type ArchivedEvent, type ArchivedRange } from './archive.js';
 import { saying } from '../../locales/index.js';
 
 export type EventView = { seq: number; kind: AgentEventKind; data: unknown; message?: MessageEnvelope; jobId: string | null; person: { id: string; name: string } | null; at: string };
@@ -21,6 +23,7 @@ type EventValues = typeof agentEvents.$inferInsert;
 export type WithEvent = (tx: Tx, stored: { seq: number; createdAt: Date }) => Promise<void>;
 
 const columns = {
+  id: agentEvents.id,
   seq: agentEvents.seq,
   kind: agentEvents.kind,
   data: agentEvents.data,
@@ -30,7 +33,26 @@ const columns = {
   createdAt: agentEvents.createdAt,
 };
 
-type Row = { seq: number; kind: AgentEventKind; data: unknown; jobId: string | null; personId: string | null; personName: string | null; createdAt: Date };
+type Row = { id: string; seq: number; kind: AgentEventKind; data: unknown; jobId: string | null; personId: string | null; personName: string | null; createdAt: Date };
+
+/* Where an agent's old history is read from besides the table: the file store, whose archives hold it (#2126). */
+type History = { db: Db; files: Pick<Files, 'bytes'> };
+/* The store the archives are read from, for a reader that shows an agent's old history; none reads the table alone. */
+type Archives = Pick<Files, 'bytes'>;
+
+/* The archived events a reader wants, as rows of the table, with the names of the people they name. */
+async function archivedRows(history: History, range: ArchivedRange): Promise<Row[]> {
+  const events = await archivedEvents(history, range);
+  const named = [...new Set(events.flatMap(event => (event.personId ? [event.personId] : [])))];
+  const names = new Map(named.length ? (await history.db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, named))).map(p => [p.id, p.name]) : []);
+  return events.map((event: ArchivedEvent) => ({ ...event, personName: event.personId ? (names.get(event.personId) ?? null) : null, createdAt: new Date(event.createdAt) }));
+}
+
+/* The rows of the table with those of the archives, each event once, the table's own first, in the order asked. */
+function together(rows: Row[], archived: Row[], newest: boolean, limit: number): Row[] {
+  const here = new Set(rows.map(row => row.id));
+  return [...rows, ...archived.filter(row => !here.has(row.id))].sort((a, b) => (newest ? b.seq - a.seq : a.seq - b.seq)).slice(0, limit);
+}
 
 /* Conversation events keep their older join-code guard as well as the shared prose mask. The join code goes first: a
    password label in front of it would otherwise take the flag alone and leave the code open. */
@@ -132,7 +154,7 @@ export async function appendOutgoing(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>,
 }
 
 /* An agent's events after seq, oldest first. A program's evidence is the operator's record, said to nobody. */
-export async function listEvents(db: Db, agentId: string, after: number, limit = 500): Promise<EventView[]> {
+export async function listEvents(db: Db, agentId: string, after: number, limit = 500, files?: Archives): Promise<EventView[]> {
   const rows = await db
     .select(columns)
     .from(agentEvents)
@@ -140,12 +162,16 @@ export async function listEvents(db: Db, agentId: string, after: number, limit =
     .where(and(eq(agentEvents.agentId, agentId), gt(agentEvents.seq, after), sql`${agentEvents.data}->>'operatorEvidenceId' is null`))
     .orderBy(asc(agentEvents.seq))
     .limit(limit);
-  return rows.map(view);
+  if (!files) return rows.map(view);
+  /* What the archives hold of the stretch the table's rows reach, or of all after once the table has fewer. */
+  const reach = rows.length === limit ? rows.at(-1)!.seq : undefined;
+  const archived = await archivedRows({ db, files }, { agentId, after, before: reach, newest: false, limit });
+  return together(rows, archived, false, limit).map(view);
 }
 
 /* An agent's newest events, or the newest before seq, oldest first: a window keeps only its last ones and reads further back
    when asked. */
-export async function lastEvents(db: Db, agentId: string, last: number, before?: number): Promise<EventView[]> {
+export async function lastEvents(db: Db, agentId: string, last: number, before?: number, files?: Archives): Promise<EventView[]> {
   const rows = await db
     .select(columns)
     .from(agentEvents)
@@ -153,7 +179,10 @@ export async function lastEvents(db: Db, agentId: string, last: number, before?:
     .where(and(eq(agentEvents.agentId, agentId), before === undefined ? undefined : lt(agentEvents.seq, before), sql`${agentEvents.data}->>'operatorEvidenceId' is null`))
     .orderBy(desc(agentEvents.seq))
     .limit(last);
-  return rows.reverse().map(view);
+  if (!files) return rows.reverse().map(view);
+  const reach = rows.length === last ? rows.at(-1)!.seq : undefined;
+  const archived = await archivedRows({ db, files }, { agentId, after: reach, before, newest: true, limit: last });
+  return together(rows, archived, true, last).reverse().map(view);
 }
 
 /* A queued turn's sender snapshot, with trusted legacy ids for turns queued before message envelopes existed. */
@@ -178,7 +207,7 @@ export async function workingCount(db: Db, companyId: string, among?: string[], 
 }
 
 /* The last people's messages and his answers from turns that are over, oldest first, for a new session to catch up. */
-export async function earlierTalk(db: Db, agentId: string, limit = 20): Promise<EventView[]> {
+export async function earlierTalk(db: Db, agentId: string, limit = 20, files?: Archives): Promise<EventView[]> {
   /* Unsent task wakes stay in the log: a new session must not receive them as catch-up instructions. */
   const unspoken = db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agentId), or(inArray(jobs.status, ['queued', 'running']), inArray(jobs.error, ['stale', 'waiting']))));
   const rows = await db
@@ -188,7 +217,15 @@ export async function earlierTalk(db: Db, agentId: string, limit = 20): Promise<
     .where(and(eq(agentEvents.agentId, agentId), inArray(agentEvents.kind, ['message', 'text']), sql`coalesce(${agentEvents.data}->>'turnFact', 'false') <> 'true'`, or(isNull(agentEvents.jobId), notInArray(agentEvents.jobId, unspoken))))
     .orderBy(desc(agentEvents.seq))
     .limit(limit);
-  return rows.reverse().map(view);
+  if (!files) return rows.reverse().map(view);
+  /* An archive holds texts of ended jobs alone; of those, a wake that was never sent stays out as it does here. */
+  const reach = rows.length === limit ? rows.at(-1)!.seq : undefined;
+  const silent = new Set((await unspoken).map(job => job.id));
+  const archived = await archivedRows({ db, files }, {
+    agentId, after: reach, newest: true, limit,
+    keep: event => event.kind === 'text' && !silent.has(event.jobId) && String((event.data as { turnFact?: unknown } | null)?.turnFact ?? 'false') !== 'true',
+  });
+  return together(rows, archived, true, limit).reverse().map(view);
 }
 
 /* How many agents work right now, for the map's counter. */

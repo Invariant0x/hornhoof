@@ -8,6 +8,7 @@ import { ApiError } from '../../errors.js';
 import { backupState, MAX_KEEP_DAYS, setKeepDays } from './backup.js';
 import { copiesSet, copiesWanted, counted, countedTargets, MAX_COPIES, seats } from './place.js';
 import { plainOf } from './seal.js';
+import { historyDays, MAX_HISTORY_DAYS, setHistoryDays } from '../events/archive.js';
 
 /* The company's setting for how many machines keep each file, and how the store stands under it: the CEO's alone. */
 
@@ -94,10 +95,15 @@ export async function setCopies(db: Tx, copies: number, by: string): Promise<voi
     ON CONFLICT (one) DO UPDATE SET copies = excluded.copies, set_by = excluded.set_by, set_at = now()`);
 }
 
-/* The copies the CEO asks for, and the days the store's backup keeps a file no row names, either or both. */
+/* The copies the CEO asks for, the days the store's backup keeps a file no row names, and the days an ended job's
+   history stays in the database before it moves into the store, any of them. */
 const Settings = z
-  .strictObject({ copies: z.number().int().min(1).max(MAX_COPIES).optional(), backupKeepDays: z.number().int().min(1).max(MAX_KEEP_DAYS).optional() })
-  .refine(set => set.copies !== undefined || set.backupKeepDays !== undefined, 'Name the copies, the days the backup keeps a file, or both.');
+  .strictObject({
+    copies: z.number().int().min(1).max(MAX_COPIES).optional(),
+    backupKeepDays: z.number().int().min(1).max(MAX_KEEP_DAYS).optional(),
+    historyDays: z.number().int().min(1).max(MAX_HISTORY_DAYS).optional(),
+  })
+  .refine(set => set.copies !== undefined || set.backupKeepDays !== undefined || set.historyDays !== undefined, 'Name the copies, the days the backup keeps a file, or the days agents\' work stays in the database.');
 
 export function fileCopiesRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
@@ -106,17 +112,18 @@ export function fileCopiesRoutes(app: FastifyInstance, ctx: Ctx): void {
     return me;
   }
 
-  app.get('/api/company/file-store', async req => {
-    ceo(await requirePerson(req, db));
-    return fileStoreState(ctx);
-  });
+  /* The store as it stands, with the days the company's agents' history stays in the database. */
+  const view = async (me: Person) => ({ ...(await fileStoreState(ctx)), historyDays: await historyDays(db, me.companyId) });
+
+  app.get('/api/company/file-store', async req => view(ceo(await requirePerson(req, db))));
 
   app.patch('/api/company/file-store', async req => {
     const me = ceo(await requirePerson(req, db));
-    const { copies, backupKeepDays } = Settings.parse(req.body);
+    const { copies, backupKeepDays, historyDays: days } = Settings.parse(req.body);
     const by = me.via ? `orchestrator:${me.via}` : `person:${me.id}`;
     if (copies !== undefined) await setCopies(db, copies, by);
     if (backupKeepDays !== undefined) await setKeepDays(db, backupKeepDays, by);
-    return fileStoreState(ctx);
+    if (days !== undefined) await setHistoryDays(db, me.companyId, days);
+    return view(me);
   });
 }

@@ -80,6 +80,10 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ci_dispatches: { kind: 'add', topic: 'work', task: 'task_id' },
 
   agent_events: { kind: 'log', topic: 'work', match: 'id', sequence: 'seq' },
+  /* Each database moves its own agents' old history out of agent_events: an archive holds that database's seqs and the
+     file it names on that database's store, so it is never brought over; the events it holds that the source still has
+     as rows are not added again either (apply.ts). */
+  agent_event_archives: skip('work'),
   task_events: { kind: 'log', topic: 'work', match: 'uuid', sequence: 'id', task: 'task_id' },
   goal_events: { kind: 'log', topic: 'work', match: 'uuid', sequence: 'id' },
   agent_changes: { kind: 'log', topic: 'work', match: 'id' },

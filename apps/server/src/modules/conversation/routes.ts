@@ -133,7 +133,7 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { after, last, before } = EventsQuery.parse(req.query);
     const viewer = await viewerOf(db, me);
     const state = await agentState(ctx, agent.id);
-    const found = last === undefined ? await listEvents(db, agent.id, after) : await lastEvents(db, agent.id, last, before);
+    const found = last === undefined ? await listEvents(db, agent.id, after, undefined, ctx.files) : await lastEvents(db, agent.id, last, before, ctx.files);
     return { events: found.map(e => maskEvent(viewer, e)), state: { ...state, ...(await terminalRights(ctx, me, agent, state.terminal)) } };
   });
 

@@ -7,6 +7,7 @@ import { requirePerson, type Person } from '../../auth/session.js';
 import { agentEvents, companies, jobs } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
+import { archivedEvents } from '../events/archive.js';
 import { FIRST_CONTACT_ACTION, quote, turnPrompt } from './prompt.js';
 import { insertTurn, pump } from './queue.js';
 import { NoSubscription, orchestratorOf, turnGoingOn } from './turn-records.js';
@@ -75,8 +76,14 @@ async function answerOf(ctx: Ctx, me: Person, id: string) {
     chain.push(next.id);
     status = row.status;
   }
-  const replies = await ctx.db.select({ text: sql<string | null>`${agentEvents.data}->>'text'` }).from(agentEvents)
+  const here = await ctx.db.select({ id: agentEvents.id, seq: agentEvents.seq, text: sql<string | null>`${agentEvents.data}->>'text'` }).from(agentEvents)
     .where(and(inArray(agentEvents.jobId, chain), eq(agentEvents.kind, 'text'))).orderBy(asc(agentEvents.seq));
+  /* The answers of a contact that ended before the company's window are read from its archive (#2126). */
+  const seen = new Set(here.map(row => row.id));
+  const archived = (await archivedEvents(ctx, { jobs: chain, newest: false, limit: Number.MAX_SAFE_INTEGER, keep: event => event.kind === 'text' && !seen.has(event.id) }))
+    .map(event => ({ id: event.id, seq: event.seq, text: (event.data as { text?: unknown } | null)?.text }))
+    .map(row => ({ ...row, text: typeof row.text === 'string' ? row.text : null }));
+  const replies = [...here, ...archived].sort((a, b) => a.seq - b.seq);
   return { status, replies: replies.flatMap(row => row.text ? [row.text] : []) };
 }
 

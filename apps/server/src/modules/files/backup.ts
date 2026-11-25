@@ -52,13 +52,14 @@ export async function pickBackupMachine(db: FilesDb, mine: string | null, now: D
 }
 
 /* The store's backup round, as the leading app runs it with the store's round: it writes down which row names which
-   content since when, takes into the backup each content a row names, keeps it here while no other machine is picked
+   content since when, takes into the backup each content a row names, an archive of agents' old history too, keeps it here while no other machine is picked
    for it and lets go of what another keeps now, and lets go of the contents no row named for longer than the days kept. */
 export async function backupRound(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Promise<void> {
   await recordNames(ctx.db, now);
   await ctx.db.execute(sql`INSERT INTO net.file_backups (sha256, size, sealed_sha256, sealed_size, salt, at)
     SELECT f.sha256, f.size, f.sealed_sha256, f.sealed_size, f.salt, ${now.toISOString()}::timestamptz FROM net.files f
     WHERE EXISTS (SELECT 1 FROM net.file_backup_names n WHERE n.sha256 = f.sha256 AND n.until IS NULL)
+      OR EXISTS (SELECT 1 FROM public.agent_event_archives x WHERE x.sha256 = f.sha256)
     ON CONFLICT (sha256) DO UPDATE SET drop_at = NULL WHERE net.file_backups.drop_at IS NOT NULL`);
   const { keepDays, machineId } = await backupSettings(ctx.db);
   const mine = await ctx.files.machineId(ctx.db);
