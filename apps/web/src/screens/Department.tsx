@@ -238,7 +238,7 @@ type Drawer = 'about' | 'speed' | 'hire';
 /* Whether the department still waits for its company (Design on #1654): it then stands with what it knows without waiting,
    back, the plate of its name, its tools and the room of Hire, and only the schema's body waits. */
 const waitsFor = (load?: Load): load is Load => load !== undefined && load.phase !== 'done';
-const busyOf = (load?: Load) => (load?.phase === 'loading' || load?.phase === 'slow') || undefined;
+const busyOf = (load?: Load) => load?.phase === 'loading' || undefined;
 
 /* The schema's body while the company comes: the shared indicator, then why it did not come with Retry. */
 function DepartmentBodyWait({ load }: { load?: Load }) {

@@ -67,6 +67,27 @@ function watchShellBars(page: HTMLElement, changed: () => void): () => void {
   };
 }
 
+/* Where the strip of the service road stands: 8 px under the menu (Design #2100). The shell measures the bottom of its top bar
+   as it comes, as the window changes size and as the bar changes size, and says it as --svc-top on the page. With no shell on
+   the page, such as the sign-in, the strip keeps its place 8 px from the top. */
+export function useServiceTop(bar: RefObject<HTMLElement | null>): void {
+  useLayoutEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const place = () => root.style.setProperty('--svc-top', `${Math.round(el.getBoundingClientRect().bottom + 8)}px`);
+    place();
+    window.addEventListener('resize', place);
+    const sizes = sizesOf(place);
+    sizes.observe(el);
+    return () => {
+      window.removeEventListener('resize', place);
+      sizes.disconnect();
+      root.style.removeProperty('--svc-top');
+    };
+  }, [bar]);
+}
+
 /* The shell's own measure of it: again as a bar comes, goes or grows with its words, and as the window changes size. */
 export function useMeasuredShellTop(page: RefObject<HTMLElement | null>): number | null {
   const [top, setTop] = useState<number | null>(null);

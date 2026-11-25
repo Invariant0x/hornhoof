@@ -6,8 +6,10 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { serveApi } from './api';
 
-/* A server that cannot be reached or installs an update shows only the Hornhoof logo and one English line, centred on a plain
-   background over the page, and returns by itself with no reload once the server answers (#1938, #2049). */
+/* A server that cannot be reached or installs an update goes the one road of service messages (#2098, #2099, Design #2100):
+   the window first, once it is closed the thin strip under the menu, which never moves the page, and gone by itself once the
+   server answers, with no reload. Where a page area has nothing cached, the loader line stands in its place. The words are
+   English in every language. */
 const MODES = ['refused', 'relay', 'front', 'updating'] as const;
 type Mode = (typeof MODES)[number] | 'up';
 
@@ -24,12 +26,11 @@ async function shot(page: Page, name: string): Promise<void> {
 }
 
 async function serveServer(page: Page) {
-  const server = { mode: 'up' as Mode, org: 0, gate: null as Promise<void> | null };
+  const server = { mode: 'up' as Mode, org: 0 };
   await serveApi(page);
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/org') server.org++;
-    if (path === '/api/build' && server.gate && server.mode !== 'up') await server.gate;
     switch (server.mode) {
       case 'up': return route.fallback();
       case 'refused': return route.abort('connectionrefused');
@@ -47,7 +48,8 @@ function loads(page: Page) {
   return count;
 }
 
-const layer = (page: Page, title: string) => page.getByRole('alertdialog', { name: title, exact: true });
+const windowOf = (page: Page, title: string) => page.getByRole('dialog', { name: title, exact: true });
+const strip = (page: Page) => page.locator('.svc-strip');
 const tab = (page: Page, name: string) => page.getByRole('navigation').getByRole('button', { name, exact: true });
 
 async function until(page: Page, check: () => Promise<boolean>) {
@@ -59,43 +61,74 @@ async function until(page: Page, check: () => Promise<boolean>) {
 
 const NOTICE_MS = 6_000;
 
+/* What stands under the strip and the window: the menu, the app and the map or the page. */
+async function placeOf(page: Page) {
+  const box = async (selector: string) => (await page.locator(selector).first().boundingBox())!;
+  return { nav: await box('.topbar'), app: await box('.app-screen'), body: await box('.shell') };
+}
+
 for (const mode of MODES) {
   const title = mode === 'updating' ? LINE.updating : LINE.lost;
 
-  test(`${mode}: an open page shows only ${title} and comes back by itself`, async ({ page }) => {
+  test(`${mode}: an open page shows the window ${title}, then the strip once it is closed, and both go by themselves`, async ({ page }) => {
     await page.clock.install();
     const server = await serveServer(page);
     const loaded = loads(page);
     await page.goto('/tasks');
     await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
-    await expect(layer(page, title)).toHaveCount(0);
+    await expect(windowOf(page, title)).toHaveCount(0);
+    await expect(strip(page)).toHaveCount(0);
+    const still = await placeOf(page);
 
     server.mode = mode;
     await page.clock.runFor(NOTICE_MS);
-    await expect(layer(page, title)).toBeVisible();
+    await expect(windowOf(page, title)).toBeVisible();
+    /* The window and the strip never stand together; a missing page never shows. */
+    await expect(strip(page)).toHaveCount(0);
     await expect(page.getByRole('heading', { name: en.routes.accessDenied })).toHaveCount(0);
     await expect(page.getByText(en.routes.explanation)).toHaveCount(0);
+    await shot(page, `window-${mode}`);
+
+    await page.keyboard.press('Escape');
+    await expect(windowOf(page, title)).toHaveCount(0);
+    await expect(strip(page)).toBeVisible();
+    await expect(strip(page)).toHaveText(title);
+    await expect(strip(page).locator('button, a, input')).toHaveCount(0);
+    /* Out of the flow: not one pixel of the menu or the page moved or shrank. */
+    expect(await placeOf(page)).toEqual(still);
+    await shot(page, `strip-${mode}`);
 
     server.mode = 'up';
     const before = server.org;
-    await until(page, async () => (await layer(page, title).count()) === 0);
+    await until(page, async () => (await strip(page).count()) === 0);
     await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
     await expect.poll(() => server.org).toBeGreaterThan(before);
     expect(loaded.n).toBe(1);
   });
 
-  test(`${mode}: a page opened or reloaded while it lasts shows only ${title} and comes back by itself`, async ({ page }) => {
+  test(`${mode}: a page opened or reloaded while it lasts shows the window and the loader in its place, and comes back by itself`, async ({ page }) => {
     await page.clock.install();
     const server = await serveServer(page);
     server.mode = mode;
     const loaded = loads(page);
     await page.goto('/');
-    await expect(layer(page, title)).toBeVisible();
+    await expect(windowOf(page, title)).toBeVisible();
     await expect(page.getByRole('heading', { name: en.app.notResponding })).toHaveCount(0);
     await expect(page.getByText(en.errors.codes.internal)).toHaveCount(0);
 
+    /* Once the window is closed, the page area with nothing cached says the same line in its place, and the strip is not
+       drawn: one status on the screen. */
+    await page.keyboard.press('Escape');
+    await expect(windowOf(page, title)).toHaveCount(0);
+    const loader = page.locator('.svc-loader');
+    await expect(loader).toBeVisible();
+    await expect(loader).toHaveText(title);
+    await expect(loader).toHaveAttribute('aria-busy', 'true');
+    await expect(strip(page)).toHaveCount(0);
+    await expect(page.getByRole('status')).toHaveCount(1);
+
     server.mode = 'up';
-    await until(page, async () => (await layer(page, title).count()) === 0);
+    await until(page, async () => (await loader.count()) === 0);
     await expect(page.getByRole('navigation')).toBeVisible();
     expect(loaded.n).toBe(1);
   });
@@ -110,19 +143,20 @@ test('a hop that answers 404 for one screen reads as no connection there, never 
   await expect(tab(page, en.shell.tabs.machines)).toBeVisible();
   hop.on = true;
   await tab(page, en.shell.tabs.machines).click();
-  await expect(page.getByText(en.load.failed.offline).or(page.getByText(en.errors.codes.network)).first()).toBeVisible();
+  await expect(windowOf(page, LINE.lost).or(strip(page).filter({ hasText: LINE.lost }))).toBeVisible();
   await expect(page.getByRole('heading', { name: en.routes.accessDenied })).toHaveCount(0);
   await expect(page.getByText(en.routes.explanation)).toHaveCount(0);
 });
 
-test('a stream that breaks while the server answers draws no layer', async ({ page }) => {
+test('a stream that breaks while the server answers draws no window and no strip', async ({ page }) => {
   await page.clock.install();
   await serveApi(page);
   await page.route('**/api/stream', route => route.fulfill({ status: 404, contentType: 'text/html', body: RELAY_PAGE }));
   await page.goto('/tasks');
   await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
   await page.clock.runFor(NOTICE_MS * 3);
-  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(strip(page)).toHaveCount(0);
 });
 
 test('what the server itself says is missing still reads as missing', async ({ page }) => {
@@ -132,67 +166,67 @@ test('what the server itself says is missing still reads as missing', async ({ p
   await page.goto('/machines');
   await expect(page.getByRole('heading', { name: en.routes.accessDenied })).toBeVisible();
   await page.clock.runFor(NOTICE_MS * 2);
-  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(strip(page)).toHaveCount(0);
 });
 
-test('keeps the one English line even on a Russian page, hides the retry, holds focus, and keeps the page where it stands', async ({ page }) => {
+test('keeps the one English line and the English Close on a Russian page, takes the focus, holds it on Close, and keeps the page where it stands', async ({ page }) => {
   await page.clock.install();
   await page.addInitScript(() => localStorage.setItem('hh-lang', 'ru'));
   const server = await serveServer(page);
   await page.goto('/');
   const tasks = tab(page, ru.shell.tabs.tasks);
   await expect(tasks).toBeVisible();
-  const before = await page.getByRole('navigation').boundingBox();
+  const still = await placeOf(page);
   await tasks.focus();
   await expect(tasks).toBeFocused();
 
   server.mode = 'refused';
   await page.clock.runFor(NOTICE_MS);
-  const lost = layer(page, LINE.lost);
+  const lost = windowOf(page, LINE.lost);
   await expect(lost).toBeVisible();
-  await expect(lost).toBeFocused();
-  expect(await lost.textContent()).toBe(LINE.lost);
-  await expect(lost.locator('button, .spinner, h1, h2')).toHaveCount(0);
-  await page.keyboard.press('Escape');
-  await expect(lost).toBeVisible();
-
-  /* During a probe and after 6 minutes: still only the logo and one English line. */
-  let release!: () => void;
-  server.gate = new Promise<void>(r => (release = r));
-  await page.clock.runFor(10_000);
-  expect(await lost.textContent()).toBe(LINE.lost);
-  await expect(lost.locator('button, .spinner')).toHaveCount(0);
-  release();
-  server.gate = null;
-  await page.clock.runFor(360_000);
-  expect(await lost.textContent()).toBe(LINE.lost);
-
-  /* Plain --bg over the whole window, page underneath inert and unshifted. */
-  expect(await page.locator('.conn-layer').evaluate(el => {
-    const probe = document.createElement('div');
-    probe.style.background = 'var(--bg)';
-    document.body.append(probe);
-    const bg = getComputedStyle(probe).backgroundColor;
-    probe.remove();
-    return getComputedStyle(el).backgroundColor === bg;
-  })).toBe(true);
-  expect(await page.evaluate(() => document.elementFromPoint(window.innerWidth / 2, 20)?.closest('.conn-layer') !== null)).toBe(true);
-  expect(await page.evaluate(() => document.elementFromPoint(20, window.innerHeight - 10)?.closest('.conn-layer') !== null)).toBe(true);
+  const close = lost.getByRole('button', { name: 'Close', exact: true });
+  await expect(close).toBeFocused();
+  expect(await lost.locator('.svc-line').textContent()).toBe(LINE.lost);
+  await expect(lost.locator('button, .spinner, h1, h2, .svc-progress')).toHaveCount(1);
+  /* Tab stays on the one button; the page under the window is inert and has not moved. */
+  await page.keyboard.press('Tab');
+  await expect(close).toBeFocused();
   await expect(page.locator('.app-screen')).toHaveAttribute('inert', '');
-  expect(await page.getByRole('navigation').boundingBox()).toEqual(before);
+  expect(await placeOf(page)).toEqual(still);
+  /* Over the whole window, on the shared scrim. */
+  expect(await page.evaluate(() => document.elementFromPoint(window.innerWidth / 2, 20)?.closest('.dialog-back') !== null)).toBe(true);
 
-  server.mode = 'up';
-  await until(page, async () => (await layer(page, LINE.lost).count()) === 0);
+  await page.keyboard.press('Escape');
+  await expect(lost).toHaveCount(0);
   await expect(page.locator('.app-screen')).not.toHaveAttribute('inert', '');
   await expect(tasks).toBeFocused();
+  await expect(strip(page)).toHaveText(LINE.lost);
+
+  server.mode = 'up';
+  await until(page, async () => (await strip(page).count()) === 0);
+  await expect(tasks).toBeVisible();
 });
 
-test('centres the overlay logo and one line on a plain token background across schemes and widths', async ({ browser }) => {
-  const skins = [
-    ['light', 'light', 'rgb(230, 235, 240)'],
-    ['dark', 'cyberpunk', 'rgb(20, 26, 34)'],
-  ] as const;
-  for (const [scheme, skin, expectedBg] of skins) {
+test('a click outside the window closes it, and a click inside does not', async ({ page }) => {
+  await page.clock.install();
+  const server = await serveServer(page);
+  await page.goto('/');
+  await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
+  server.mode = 'refused';
+  await page.clock.runFor(NOTICE_MS);
+  const lost = windowOf(page, LINE.lost);
+  await expect(lost).toBeVisible();
+  await lost.locator('.svc-line').click();
+  await expect(lost).toBeVisible();
+  await page.mouse.click(4, 4);
+  await expect(lost).toHaveCount(0);
+  await expect(strip(page)).toBeVisible();
+});
+
+test('draws the window, the strip and the loader as Design drew them, across themes and widths, with the strip 8 px under the menu', async ({ browser }) => {
+  const skins = [['light', 'light'], ['dark', 'cyberpunk']] as const;
+  for (const [scheme, skin] of skins) {
     for (const [width, height] of [[1440, 900], [375, 700]] as const) {
       const context = await browser.newContext({ viewport: { width, height }, colorScheme: scheme });
       const page = await context.newPage();
@@ -202,52 +236,55 @@ test('centres the overlay logo and one line on a plain token background across s
         const server = await serveServer(page);
         await page.goto('/');
         await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
+        const still = await placeOf(page);
 
         for (const [state, mode] of [['lost', 'refused'], ['updating', 'updating']] as const) {
           server.mode = mode;
-          const dialog = layer(page, LINE[state]);
+          const dialog = windowOf(page, LINE[state]);
           await until(page, async () => (await dialog.count()) > 0);
           await expect(dialog).toBeVisible();
           const seen = await page.evaluate(() => {
-            const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect().toJSON() as { x: number; y: number; width: number; height: number; bottom: number };
-            const inner = getComputedStyle(document.querySelector('.conn')!);
-            const line = getComputedStyle(document.querySelector('#conn-title')!);
+            const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect().toJSON() as { x: number; y: number; width: number; height: number; bottom: number; right: number };
+            const line = getComputedStyle(document.querySelector('.svc-window .svc-line')!);
             return {
-              layerBox: box('.conn-layer'),
-              layerBg: getComputedStyle(document.querySelector('.conn-layer')!).backgroundColor,
-              innerBg: inner.backgroundColor,
-              innerBorder: inner.borderTopWidth,
-              mark: box('.conn-mark'),
-              logoParts: {
-                dome: document.querySelectorAll('.conn-mark .mk-dome').length,
-                base: document.querySelectorAll('.conn-mark .mk-base').length,
-                dot: document.querySelectorAll('.conn-mark .mk-dot').length,
-              },
-              lineBox: box('#conn-title'),
+              back: box('.dialog-back'),
+              window: box('.svc-window'),
+              mark: box('.svc-window .svc-mark'),
+              lineBox: box('.svc-window .svc-line'),
+              closeBox: box('.svc-window .window-close'),
               lineFont: { size: line.fontSize, weight: line.fontWeight },
-              text: document.querySelector('.conn-layer')!.textContent ?? '',
-              extras: document.querySelectorAll('.conn-layer :is(button, .spinner, h1, h2, h3)').length,
               fitsWidth: document.documentElement.scrollWidth <= window.innerWidth,
             };
           });
-          expect(seen.layerBox).toMatchObject({ x: 0, y: 0, width, height });
-          expect(seen.layerBg).toBe(expectedBg);
-          expect(seen.innerBg).toBe('rgba(0, 0, 0, 0)');
-          expect(seen.innerBorder).toBe('0px');
-          expect(seen.text).toBe(LINE[state]);
-          expect(seen.extras).toBe(0);
-          expect(seen.logoParts).toEqual({ dome: 1, base: 1, dot: 1 });
-          expect(seen.mark).toMatchObject({ width: 48, height: 48 });
-          expect(seen.lineFont).toEqual({ size: '14px', weight: '400' });
+          expect(seen.back).toMatchObject({ x: 0, y: 0, width, height });
+          expect(seen.window.width).toBeCloseTo(Math.min(360, width - 32), 0);
+          expect(seen.mark).toMatchObject({ width: 72, height: 72 });
+          expect(seen.lineFont).toEqual({ size: '18px', weight: '600' });
+          expect(seen.closeBox).toMatchObject({ width: 44, height: 44 });
+          expect(Math.abs(seen.window.x + seen.window.width / 2 - width / 2)).toBeLessThanOrEqual(1);
+          expect(Math.abs(seen.window.y + seen.window.height / 2 - height / 2)).toBeLessThanOrEqual(2);
           expect(seen.lineBox.y).toBeGreaterThanOrEqual(seen.mark.bottom);
-          expect(Math.abs(seen.mark.x + seen.mark.width / 2 - width / 2)).toBeLessThanOrEqual(1);
-          expect(Math.abs(seen.lineBox.x + seen.lineBox.width / 2 - width / 2)).toBeLessThanOrEqual(1);
-          expect(Math.abs((seen.mark.y + seen.lineBox.bottom) / 2 - height / 2)).toBeLessThanOrEqual(2);
           expect(seen.fitsWidth).toBe(true);
-          await shot(page, `overlay-${state}-${width}-${scheme}`);
+          await shot(page, `window-${state}-${width}-${scheme}`);
+
+          await page.keyboard.press('Escape');
+          await expect(strip(page)).toBeVisible();
+          const bar = await page.evaluate(() => {
+            const el = document.querySelector('.svc-strip')!;
+            const box = el.getBoundingClientRect();
+            const menu = document.querySelector('.topbar')!.getBoundingClientRect();
+            const style = getComputedStyle(el);
+            return { top: box.top, height: box.height, menuBottom: menu.bottom, position: style.position, mark: document.querySelector('.svc-strip .svc-mark')!.getBoundingClientRect().width };
+          });
+          expect(bar.position).toBe('fixed');
+          expect(Math.abs(bar.top - (bar.menuBottom + 8))).toBeLessThanOrEqual(1);
+          expect(bar.height).toBeGreaterThanOrEqual(36);
+          expect(bar.mark).toBe(24);
+          expect(await placeOf(page)).toEqual(still);
+          await shot(page, `strip-${state}-${width}-${scheme}`);
 
           server.mode = 'up';
-          await until(page, async () => (await layer(page, LINE[state]).count()) === 0);
+          await until(page, async () => (await strip(page).count()) === 0);
         }
       } finally {
         await context.close();

@@ -47,6 +47,10 @@
       "types": "./dist/pipeline-report.d.ts",
       "default": "./dist/pipeline-report.js"
     },
+    "./service-lines": {
+      "types": "./dist/service-lines.d.ts",
+      "default": "./dist/service-lines.js"
+    },
     "./signin": {
       "types": "./dist/signin.d.ts",
       "default": "./dist/signin.js"

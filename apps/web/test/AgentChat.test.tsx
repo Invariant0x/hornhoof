@@ -5,7 +5,7 @@ import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import type { EventView } from '../src/types';
 import { en } from '../src/i18n/en';
-import { FAIL_MS, SLOW_MS } from '../src/ui/Loading';
+import { STUCK_MS } from '../src/ui/Loading';
 import { CARD, DEV_ORG, ME, mockApi, ORG } from './api-mock';
 
 /* xterm needs a real canvas; the window only has to know the terminal is there. */
@@ -165,24 +165,21 @@ describe("an agent's window opens as a chat", () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('says the terminal takes longer than usual at 10 s and gives up at 30 s, each with Retry, which asks again', async () => {
+  it('says nothing of a terminal that takes long to open, and asks for its state again by itself at 30 s', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     localStorage.setItem('hh-agent-view', 'terminal');
     let asked = 0;
     const { container } = open({ [`GET ${EVENTS}?last=300`]: () => { asked++; return new Promise(() => {}); } });
-    await act(async () => { vi.advanceTimersByTime(SLOW_MS - 1); });
+    await act(async () => { vi.advanceTimersByTime(STUCK_MS - 1); });
     const term = container.querySelector<HTMLElement>('.t-term')!, place = within(term);
     expect(term.querySelector('.load-fail')).toBeNull();
-    await act(async () => { vi.advanceTimersByTime(1); });
-    expect(term.querySelector('.load-fail.slow')).toHaveTextContent('Taking longer than usual');
     expect(place.queryByRole('alert')).not.toBeInTheDocument();
-    await act(async () => { vi.advanceTimersByTime(FAIL_MS - SLOW_MS); });
-    expect(place.getByRole('alert').querySelector('.lf-t')?.textContent).toBe(en.load.failed.timeout);
+    expect(place.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(place.getByRole('status')).toHaveTextContent(/^Opening the \w+ terminal…$/);
     const before = asked;
-    fireEvent.click(place.getByRole('button', { name: 'Retry' }));
-    await act(async () => {});
-    expect(asked).toBe(before + 1);
-    expect(place.queryByRole('alert')).not.toBeInTheDocument();
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(asked).toBeGreaterThan(before);
+    expect(term.querySelector('.load-fail')).toBeNull();
     expect(place.getByRole('status')).toHaveTextContent(/^Opening the \w+ terminal…$/);
   });
 

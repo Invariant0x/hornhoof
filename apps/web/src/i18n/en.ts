@@ -104,18 +104,13 @@ export const en = {
     task: 'Loading the task…',
     limits: 'Loading limits…',
     failed: {
-      offline: 'Could not load: no connection to the server.',
-      timeout: 'Could not load: the server did not answer in 30\u00a0seconds.',
       server: 'Could not load: something went wrong on the server.',
       provider: 'Could not load the limits: the provider did not answer.',
     },
     hint: {
-      offline: 'Check the internet connection, then press "Retry".',
-      timeout: 'What is already on the screen stays. Press "Retry" to ask again.',
       server: 'What is already on the screen stays. If "Retry" does not help, try again in a few minutes.',
       provider: 'The rest of the card works. Press "Retry" to ask the provider again.',
     },
-    slowHint: 'You can wait or press "Retry".',
   },
   app: {
     notResponding: 'Hornhoof is not responding',
@@ -1519,7 +1514,7 @@ export const en = {
       by: (name: string) => `${name} typed in this terminal last.`,
       nobody: 'Hornhoof cannot tell who wrote them.',
     },
-    inputDropped: 'Too much text was typed while the terminal was disconnected. Wait for it to connect, then type again.',
+    inputDropped: 'Too much text was typed before the terminal was ready. Wait until it is ready, then type again.',
     turnRefused: {
       busy: 'What was just typed got no turn of its own: it went into the turn that was running. Check the answer there, and type it again if it is missing.',
       unknown_words: 'The agent is answering words, but Hornhoof could not tell who wrote them, so no turn opened and its tools are closed for this answer. Please type your message again.',

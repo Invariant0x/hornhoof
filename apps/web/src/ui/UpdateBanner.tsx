@@ -1,11 +1,10 @@
-import { useLayoutEffect, useState } from 'react';
+import { useState } from 'react';
 import { errorText, useLanguage, useT } from '../i18n';
 import type { UpdateCalledOff, UpdatesView, UpdateWaiting } from '../types';
 import type { Updates } from '../updates';
 import { useBarFold } from './shellBars';
-import { UpdateProgress } from './UpdateProgress';
 import { buildText, versionText } from './VersionMark';
-import { updateTargetText, versionedStatus } from './UpdateVersion';
+import { updateRunOf, versionedStatus } from './UpdateVersion';
 
 const LATER = 'hh-later';
 const SEEN = 'hh-update-seen';
@@ -57,28 +56,15 @@ function WaitNoteBody({ note, onCallOff, onSeen }: { note: WaitNote; onCallOff: 
   );
 }
 
-/* Whether the banner shows an update on its way: asked for, or running, with the server in maintenance or restarting
-   meanwhile. */
-function showsUpdate(updates: Updates): boolean {
-  return updates.view !== null && (updates.starting || updates.view.updater.status?.state === 'running');
-}
-
-/* Under the top bar: a newer build to take, an update waiting for the agents or running, or how the last one ended. */
-export function UpdateBanner({ updates, onDetails, onProgressShown }: {
-  updates: Updates; onDetails: () => void; onProgressShown?: (shown: boolean) => void;
-}) {
+/* Under the top bar: a newer build to take, an update waiting for the agents, or how the last one ended. An update on its way
+   is no bar of its own: the service road says it, with its progress. */
+export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetails: () => void }) {
   const t = useT();
   const [, rerender] = useState(0);
   const [failure, setFailure] = useState<unknown>(null);
   const fold = useBarFold();
-  const showingProgress = showsUpdate(updates);
-  useLayoutEffect(() => {
-    if (!showingProgress || !onProgressShown) return;
-    onProgressShown(true);
-    return () => onProgressShown(false);
-  }, [showingProgress, onProgressShown]);
   const { view } = updates;
-  if (!view) return null;
+  if (!view || updateRunOf(updates)) return null;
   const { status } = view.updater;
   const note = waitNoteOf(view.updater);
 
@@ -97,14 +83,7 @@ export function UpdateBanner({ updates, onDetails, onProgressShown }: {
   };
 
   let body: React.ReactNode = null;
-  if (showingProgress) {
-    body = (
-      <>
-        <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status!.step} starting={updates.starting} offline={updates.offline} maintenance={updates.maintenance} />
-        <button className="btn small ghost" type="button" onClick={onDetails}>{t.updates.details}</button>
-      </>
-    );
-  } else if (note) {
+  if (note) {
     body = <WaitNoteBody note={note} onCallOff={() => void act(updates.callOff)} onSeen={at => hide(CALLED_OFF, at)} />;
   } else if (status && stored(SEEN) !== status.id) {
     body = (

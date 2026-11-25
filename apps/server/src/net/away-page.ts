@@ -1,12 +1,11 @@
 /* The page a browser gets when the front or a keeper has no live server behind it (#1938, #2049): the server is away, or an
    update installs. It shows only the Hornhoof logo and one English line, centred on a plain background in light or dark by
    the browser's preference, refreshes itself so it becomes the app once the server answers, and makes no outside request. */
-export type Away = 'lost' | 'updating';
+import { SERVICE_LINES, type Away } from '@hornhoof/protocol/service-lines';
 
-const LINE: Record<Away, string> = {
-  lost: 'No connection',
-  updating: 'Updating',
-};
+export type { Away };
+
+const LINE: Record<Away, string> = { lost: SERVICE_LINES.lost, updating: SERVICE_LINES.updating };
 
 /* How often the page asks again, in seconds: the Retry-After the answer carries. */
 const EVERY_S: Record<Away, number> = { lost: 5, updating: 10 };

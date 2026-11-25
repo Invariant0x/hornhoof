@@ -10,6 +10,7 @@ import { isBracketedPaste, TerminalInput, type InputRefusal, type TerminalRights
 import { uploadTerminalPictures } from './terminal-pictures';
 import { attachTerminalScroll, readingHistoryLine, restoreHistoryLine, restoreLiveTerminal, writeTerminalData } from './terminal-scroll';
 import { isHidden } from './visibility';
+import { ServiceLoader, useServiceView } from './ServiceRoad';
 import { WindowFoot, type WindowNote } from './WindowNotes';
 import { disposeTerminal } from './xterm-release';
 
@@ -778,6 +779,8 @@ function useNotesFoot(label: string, notes: WindowNote[], onNotes?: (notes: Wind
 /* A live agent terminal or a proof-only standalone test view, both using the same renderer and local history. */
 export function AgentTerminal({ path, program, onGone, watching = false, testSession, onNotes }: Props) {
   const t = useT();
+  /* While a service state stands, the terminal that is not open yet says that in place, not words of its own. */
+  const serviceSays = useServiceView() !== null;
   const box = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const sendPicture = useRef<Send>(() => {});
@@ -863,12 +866,12 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
         <div className="t-xterm" ref={box} />
         <CopyMenu menu={menu} termRef={termRef} onClose={() => setMenu(null)} label={t.common.copy} pasteLabel={t.common.paste} />
         {dragging && <div className="t-drop" role="status">{t.window.dropPictures}</div>}
-        {!up && (
+        {!up && (serviceSays ? <div className="t-load"><ServiceLoader /></div> : (
           <div className="t-load" role="status">
             <span className="spinner" aria-hidden="true" />
             <span>{t.window.opening(program)}</span>
           </div>
-        )}
+        ))}
       </div>
       {foot}
     </>
