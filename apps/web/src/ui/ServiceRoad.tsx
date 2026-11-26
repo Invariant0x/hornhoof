@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useSyncExternalStore, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
 import { BOOT_STYLE, SERVICE_CLOSE } from '@hornhoof/protocol/service-lines';
 import { useT } from '../i18n';
 import { service, type ServiceMessage, type ServiceView } from '../service-state';
@@ -8,15 +8,34 @@ import { VersionMark } from './VersionMark';
 
 export const useServiceView = (): ServiceView => useSyncExternalStore(service.subscribe, service.snapshot);
 
+type DepartmentFooter = { dock: HTMLDivElement | null; empty: HTMLParagraphElement | null };
+const NO_FOOTER: DepartmentFooter = { dock: null, empty: null };
+const ServiceFooter = createContext<Dispatch<SetStateAction<DepartmentFooter>>>(() => {});
+
+export function useServiceStripFooter(ref: RefObject<HTMLDivElement | null>) {
+  const register = useContext(ServiceFooter);
+  const dock = useCallback((element: HTMLDivElement | null) => {
+    ref.current = element;
+    register(footer => ({ ...footer, dock: element }));
+  }, [ref, register]);
+  const empty = useCallback((element: HTMLParagraphElement | null) => {
+    register(footer => ({ ...footer, empty: element }));
+  }, [register]);
+  return { dock, empty };
+}
+
 /* Keep the loaded app mounted so it can reconnect, poll the updater, and resume with its
    cached data. The startup screen is the only visible content while the update lasts. */
 export function ServiceLayout({ starting = false, children }: { starting?: boolean; children: ReactNode }) {
   const view = useServiceView();
   const boot = starting || view?.place === 'boot';
+  const [footer, setFooter] = useState(NO_FOOTER);
   return (
     <div className="app-layout">
-      {!boot && <ServiceStrip />}
-      <div className="app-screen" hidden={boot} inert={boot || view?.place === 'window'}>{children}</div>
+      {!boot && <ServiceStrip footer={footer} />}
+      <div className="app-screen" hidden={boot} inert={boot || view?.place === 'window'}>
+        <ServiceFooter value={setFooter}>{children}</ServiceFooter>
+      </div>
       {boot && <BootScreen message={view?.message} />}
       <VersionMark />
       {!boot && <ServiceWindow />}
@@ -93,13 +112,38 @@ export function ServiceWindow() {
   );
 }
 
+/* Phones place the strip above the department's footer, whose controls and text can wrap. */
+function useDockRoom({ dock, empty }: DepartmentFooter, shown: boolean): number {
+  const [room, setRoom] = useState(0);
+  useLayoutEffect(() => {
+    if (!shown || !dock) return;
+    const update = () => {
+      const top = Math.min(dock.getBoundingClientRect().top, empty?.getBoundingClientRect().top ?? Infinity);
+      setRoom(Math.max(0, window.innerHeight - top));
+    };
+    update();
+    window.addEventListener('resize', update);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    observer?.observe(dock);
+    if (empty) observer?.observe(empty);
+    if (dock.parentElement) observer?.observe(dock.parentElement);
+    return () => {
+      window.removeEventListener('resize', update);
+      observer?.disconnect();
+    };
+  }, [dock, empty, shown]);
+  return room;
+}
+
 /* Once dismissed, the current message stays in a strip out of the page flow. An area
    showing the loader already has the line in place, so the strip is hidden. */
-export function ServiceStrip() {
+export function ServiceStrip({ footer = NO_FOOTER }: { footer?: DepartmentFooter }) {
   const view = useServiceView();
+  const room = useDockRoom(footer, view?.place === 'strip' && !view.loader);
   if (view?.place !== 'strip' || view.loader) return null;
+  const style = footer.dock ? { '--svc-department-dock-room': `${room}px` } as CSSProperties : undefined;
   return (
-    <div className="svc-strip glass" role="status" aria-live="polite">
+    <div className="svc-strip glass" role="status" aria-live="polite" style={style}>
       <LogoMark className="svc-mark" />
       <Line message={view.message} />
     </div>
@@ -118,9 +162,9 @@ export function useServiceNotice(id: string, on: boolean, line: string): void {
 /* A loaded page area with nothing cached uses the same loader inside its own room. */
 export function ServiceLoader({ live = true }: { live?: boolean }) {
   const view = useServiceView();
-  const message = view?.place === 'boot' ? undefined : view?.message;
+  const message = view?.place === 'strip' ? view.message : undefined;
   const shown = message !== undefined;
-  useEffect(() => (shown ? service.holdLoader() : undefined), [shown]);
+  useLayoutEffect(() => (shown ? service.holdLoader() : undefined), [shown]);
   return message ? <BootScreen message={message} live={live} inline /> : null;
 }
 
@@ -132,7 +176,7 @@ function BootScreen({ message, live = true, inline = false }: { message?: Servic
   return (
     <>
       <style>{BOOT_STYLE}</style>
-      <section className={inline ? 'boot-screen svc-loader' : 'boot-screen'} role={live ? 'status' : undefined} aria-live={live ? 'polite' : undefined} aria-busy="true">
+      <section className={inline ? 'boot-screen svc-loader' : 'boot-screen'} role={live ? 'status' : undefined} aria-live={live ? 'polite' : undefined}>
         <LogoMark className="boot-mark" />
         <p className="boot-line" lang={message && message.kind !== 'notice' ? 'en' : undefined}>
           <span className="boot-label">{label}</span>

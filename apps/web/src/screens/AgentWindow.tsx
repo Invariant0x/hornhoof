@@ -1,7 +1,7 @@
 import { nextLevelProgress, type WorldLiveAgent, type WorldLiveSnapshot } from '@hornhoof/protocol/world';
 import { commandBlockOpen } from '../ui/CommandBox';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { api, ApiFailure } from '../api';
+import { api, ApiFailure, isAway } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { liveOf } from '../org';
@@ -307,7 +307,8 @@ function chatParts(o: WindowLoadOf): LoadPart[] {
    after the window showed him; before that, the load says it where he will stand. */
 function useWindowLoad(o: WindowLoadOf) {
   const history: LoadPart = { data: o.terminal ? o.state : o.historyIn || null, failure: o.historyFailure, load: () => void o.catchUp() };
-  return { load: useLoad([history, ...(o.terminal ? [] : chatParts(o))]), said: o.failure ?? onTop(o.state, o.historyFailure ?? o.cardFailure) };
+  const refreshFailure = isAway(o.historyFailure) ? o.cardFailure : o.historyFailure ?? o.cardFailure;
+  return { load: useLoad([history, ...(o.terminal ? [] : chatParts(o))]), said: o.failure ?? onTop(o.state, refreshFailure) };
 }
 
 /* Where the conversation or the terminal will stand while the window's load comes: the terminal names the program it

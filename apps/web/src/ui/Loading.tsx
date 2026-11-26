@@ -229,12 +229,11 @@ type BusyProps = { ring: boolean; words?: ReactNode; form?: 'inline' | 'screen';
 
 export function Busy({ ring, words, form = 'inline', live = true }: BusyProps) {
   const t = useT();
-  const serviceSays = useServiceView() !== null;
+  const servicePlace = useServiceView()?.place;
   const said = words ?? t.common.loading;
   const role = live ? 'status' : undefined;
-  /* While a service state stands, a page area with nothing to show says it in place: the logo and the same line of the road.
-     A small part of a card keeps its ring and its own words. */
-  if (serviceSays && form === 'screen') return <ServiceLoader live={live} />;
+  /* After the service window closes, an uncached page can show the message in place of the strip. */
+  if (servicePlace === 'strip' && form === 'screen') return <ServiceLoader live={live} />;
   if (form === 'screen') {
     return (
       <div className={ring ? 'load-boot' : 'load-boot unseen'} role={role}>

@@ -1,6 +1,6 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { api, ApiFailure } from '../api';
+import { api, ApiFailure, isAway } from '../api';
 import { useStream } from '../live';
 import { doneOf, useHeldRows, useLoad } from '../ui/Loading';
 import { PlanConnection, ReadySaid } from '../ui/PlanConnection';
@@ -524,7 +524,7 @@ type PlanReads = ReturnType<typeof usePlanCommands>;
 type ConnectionParts = {
   setSubs: PlanReads['setSubs'];
   load: PlanReads['load'];
-  run: (action: () => Promise<void>) => Promise<void>;
+  run: (action: () => Promise<void>, options?: { serviceOutage?: boolean }) => Promise<void>;
   signIn: (sub: SubView, fresh: boolean) => unknown;
 };
 
@@ -544,12 +544,12 @@ function usePlanConnections({ setSubs, load, run, signIn }: ConnectionParts) {
       setConnection(sub.id, null);
       if (TERMINAL_SIGNIN.has(sub.provider)) await signIn(sub, false);
       else await api.post(`/api/subscriptions/${sub.id}/connecting/retry`);
-    });
+    }, { serviceOutage: true });
   const cancelConnection = (sub: SubView) =>
     run(async () => {
       setConnection(sub.id, null);
       await api.post(`/api/subscriptions/${sub.id}/connecting/cancel`);
-    });
+    }, { serviceOutage: true });
   return { retryConnection, cancelConnection };
 }
 
@@ -593,12 +593,12 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   const newCommand = (sub: SubView) => run(() => requestCommand(sub));
   const onConnected = (shown: ActiveCommand, added: SubView[]) => { setConnecting(false); connected(shown, added); };
 
-  async function run(action: () => Promise<void>) {
+  async function run(action: () => Promise<void>, { serviceOutage = false } = {}) {
     setFailure(null);
     try {
       await action();
     } catch (err) {
-      setFailure(err);
+      if (!serviceOutage || !isAway(err)) setFailure(err);
     }
   }
 
