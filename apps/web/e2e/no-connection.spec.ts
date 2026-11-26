@@ -320,7 +320,7 @@ test('places the connection strip under the desktop menu and clear of the phone 
   const skins = [['light', 'light'], ['dark', 'cyberpunk']] as const;
   for (const [scheme, skin] of skins) {
     for (const [width, height] of [[1440, 900], [375, 700]] as const) {
-      const context = await browser.newContext({ viewport: { width, height }, colorScheme: scheme });
+      const context = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, reducedMotion: 'reduce' });
       const page = await context.newPage();
       try {
         await page.clock.install();
@@ -389,4 +389,34 @@ test('places the connection strip under the desktop menu and clear of the phone 
       }
     }
   }
+});
+
+test('the phone strip leaves the loaded map the same size', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 700 });
+  await page.addInitScript(() => localStorage.setItem('hh-theme', 'light'));
+  await page.clock.install();
+  const server = await serveServer(page);
+  await page.goto('/');
+  await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
+  const map = page.locator('.map:not(.map-wait)');
+  await expect(map).toBeVisible();
+  const before = await map.boundingBox();
+  expect(before).not.toBeNull();
+
+  server.mode = 'refused';
+  await page.clock.runFor(NOTICE_MS);
+  await expect(windowOf(page, LINE.lost)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(strip(page)).toBeVisible();
+  expect(await map.boundingBox()).toEqual(before);
+  const blocked = await strip(page).evaluate(node => {
+    const stripBox = node.getBoundingClientRect();
+    return [...document.querySelectorAll('.map :is(.zoom, .ticker, .map-version)')].some(control => {
+      const box = control.getBoundingClientRect();
+      return box.width > 0 && box.height > 0 &&
+        stripBox.left < box.right && stripBox.right > box.left &&
+        stripBox.top < box.bottom && stripBox.bottom > box.top;
+    });
+  });
+  expect(blocked).toBe(false);
 });

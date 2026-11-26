@@ -134,6 +134,14 @@ describe('the window and the strip', () => {
     expect(screen.getByRole('button', { name: 'Page' })).toBeVisible();
   });
 
+  it('uses the English service line while the page language is Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    render(<LanguageProvider><ServiceLayout starting>{null}</ServiceLayout></LanguageProvider>);
+    expect(await screen.findByText('Загрузка…')).toBeInTheDocument();
+    act(() => service.setUpdate(true));
+    expect(screen.getByText('Updating…').closest('p')).toHaveAttribute('lang', 'en');
+  });
+
   it('shows only the same boot loader when the connection drops before the app loads', async () => {
     render(<LanguageProvider><ServiceLayout starting>{null}</ServiceLayout></LanguageProvider>);
     expect(screen.getByRole('status')).toHaveTextContent('Loading…');
@@ -151,6 +159,15 @@ describe('the window and the strip', () => {
     act(() => void window.dispatchEvent(new Event('offline')));
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
     expect(screen.getByRole('dialog')).toHaveTextContent(SERVICE_LINES.offline);
+  });
+
+  it('dismisses a notice without giving it the connection strip', () => {
+    road();
+    act(() => service.notify('page', 'A notice'));
+    expect(screen.getByRole('dialog')).toHaveTextContent('A notice');
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
   it('say a notice of the page in its own language, not marked as English', () => {

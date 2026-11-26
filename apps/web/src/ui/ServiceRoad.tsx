@@ -127,14 +127,14 @@ export function ServiceLoader({ live = true }: { live?: boolean }) {
 function BootScreen({ message, live = true, inline = false }: { message?: ServiceMessage; live?: boolean; inline?: boolean }) {
   const t = useT();
   const updating = message?.kind === 'updating';
-  const word = updating ? t.boot.updating : message?.line ?? t.boot.loading;
+  const word = message?.line ?? t.boot.loading;
   const label = updating || !message ? `${word}…` : word;
   return (
     <>
       <style>{BOOT_STYLE}</style>
       <section className={inline ? 'boot-screen svc-loader' : 'boot-screen'} role={live ? 'status' : undefined} aria-live={live ? 'polite' : undefined} aria-busy="true">
         <LogoMark className="boot-mark" />
-        <p className="boot-line" lang={message && !updating && message.kind !== 'notice' ? 'en' : undefined}>
+        <p className="boot-line" lang={message && message.kind !== 'notice' ? 'en' : undefined}>
           <span className="boot-label">{label}</span>
           <span className="boot-word" aria-hidden="true" data-word={word} />
           <span className="boot-dots" aria-hidden="true"><i /><i /><i /></span>

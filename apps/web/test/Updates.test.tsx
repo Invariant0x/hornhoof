@@ -189,7 +189,8 @@ describe('updates', () => {
     expect(screen.getByText('Updating…')).toBeInTheDocument();
   });
 
-  it('shows maintenance while the server answers with it', async () => {
+  it('shows maintenance while the server answers with it and returns to the loaded page afterward', async () => {
+    heldPolls();
     let view = updates({}, { status: { ...status('running', 'install'), id: 'u2' } });
     let maintenance = false;
     mockApi({
@@ -198,14 +199,15 @@ describe('updates', () => {
         maintenance ? [503, { error: { code: 'unavailable', message: '', reason: 'maintenance' } }] : [200, view],
     });
     render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
-    const loader = () => screen.getByText('Updating…');
-    await vi.waitFor(() => expect(loader()).toBeInTheDocument());
+    await screen.findByText('Updating…');
     maintenance = true;
-    /* A maintenance refusal keeps the loading screen up. */
-    await vi.waitFor(() => expect(loader()).toBeInTheDocument());
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    expect(screen.getByText('Updating…')).toBeVisible();
     maintenance = false;
-    view = updates({}, { status: { ...status('running', 'health'), id: 'u2' } });
-    await vi.waitFor(() => expect(loader()).toBeInTheDocument());
+    view = updates({}, { status: { ...status('rolled_back', 'finished'), id: 'u2' } });
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    expect(screen.queryByText('Updating…')).not.toBeInTheDocument();
+    expect(screen.getByRole('navigation')).toBeVisible();
   });
 
   it('lists versions and marks the running one', async () => {
