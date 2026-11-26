@@ -597,18 +597,8 @@ const turnPriority = sql<number>`case
   when ${tasks.priority} = 'low' then 3
   else 2 end`;
 
-const dispatchInProgress = new AsyncLocalStorage<{ ctx: Ctx; active: boolean }>();
-
-/* Dispatch can enqueue another wake while it holds an agent's line, for example a plan-limit notice. That wake has already
-   been stored. It can wait its turn without making the dispatch await the line it is holding. */
-function runPump(ctx: Ctx, dispatch: () => Promise<void>): Promise<void> {
-  const previous = dispatchInProgress.getStore();
-  if (previous?.ctx !== ctx || !previous.active) return dispatch();
-  void dispatch().catch((error: unknown) => ctx.log.error({ error: loggable(error) }, 'A queued turn could not be sent.'));
-  return Promise.resolve();
-}
-
-type PlanWake = { subscriptionId: string; agentId: string };
+type PlanWake = { subscriptionId: string; agentId?: string; deferred?: boolean };
+const dispatchInProgress = new AsyncLocalStorage<{ ctx: Ctx; active: boolean; after: PlanWake[] }>();
 
 /* After a move, the destination compares the agent's turn with the other turns it holds. */
 async function turnOnPlan(ctx: Ctx, agentId: string, subscriptionId: string, after: PlanWake[]) {
@@ -653,21 +643,29 @@ async function pumpRanked(ctx: Ctx, subscriptionId: string, requestedAgent: stri
   }
 }
 
-/* New arrivals and moves visit the shared queue before they can claim a place. */
-function pumpPlan(ctx: Ctx, subscriptionId: string, requestedAgent?: string): Promise<void> {
-  return runPump(ctx, async () => {
-    const after: PlanWake[] = [];
-    await onSubscription(ctx, subscriptionId, async () => {
-      const run = { ctx, active: true };
-      try {
-        await dispatchInProgress.run(run, () => pumpRanked(ctx, subscriptionId, requestedAgent, after));
-      } finally {
-        run.active = false;
-      }
-    });
-    /* Release the source lane before waiting on another plan, which may itself send work back here. */
-    for (const wake of after) await pumpPlan(ctx, wake.subscriptionId, wake.agentId);
+/* A wake stored during dispatch, such as a plan-limit notice, waits for the outer pass to release its lanes. */
+async function pumpPlan(ctx: Ctx, subscriptionId: string, requestedAgent?: string): Promise<void> {
+  const previous = dispatchInProgress.getStore();
+  if (previous?.ctx === ctx && previous.active) {
+    previous.after.push({ subscriptionId, agentId: requestedAgent, deferred: true });
+    return;
+  }
+
+  const after: PlanWake[] = [];
+  await onSubscription(ctx, subscriptionId, async () => {
+    const run = { ctx, active: true, after };
+    try {
+      await dispatchInProgress.run(run, () => pumpRanked(ctx, subscriptionId, requestedAgent, after));
+    } finally {
+      run.active = false;
+    }
   });
+
+  for (const wake of after) {
+    const dispatch = pumpPlan(ctx, wake.subscriptionId, wake.agentId);
+    if (wake.deferred) await dispatch.catch((error: unknown) => ctx.log.error({ error: loggable(error) }, 'A queued turn could not be sent.'));
+    else await dispatch;
+  }
 }
 
 /* The job that freed a place can belong to a plan the agent has since left. Both lines can have work to send. */
