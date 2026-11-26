@@ -159,7 +159,7 @@ describe('the way of a state: window, strip, gone', () => {
     expect(service.snapshot()).toMatchObject({ place: 'strip', message: { kind: 'lost' } });
   });
 
-  it('shows a less important state that comes while the window is closed, or is left once the more important one ends, as the strip only', async () => {
+  it('keeps the strip for connection loss when a lower-priority notice arrives', async () => {
     await lose();
     service.close();
     service.notify('relay', 'A notice');
@@ -186,7 +186,7 @@ describe('the way of a state: window, strip, gone', () => {
     service.signedOut(true);
     expect(service.snapshot()).toMatchObject({ place: 'window', message: { kind: 'signedOut', line: SERVICE_LINES.signedOut } });
     service.close();
-    expect(service.snapshot()?.place).toBe('strip');
+    expect(service.snapshot()).toBeNull();
     service.signedOut(false);
     expect(service.snapshot()).toMatchObject({ message: { kind: 'offline' } });
     browserOnline(true);

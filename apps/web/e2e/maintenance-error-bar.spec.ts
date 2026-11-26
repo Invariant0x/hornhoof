@@ -16,10 +16,11 @@ const TARGET = { version: '0.34.0', commit: '00e5ff3e' + 'f'.repeat(32) };
 /* How often the updates screen asks while an update runs; the page's clock moves only as the test moves it. */
 const BUSY_POLL_MS = 2_000;
 /* The one line of the update, English in every language, and where the road stands. */
+const UPDATING = 'Updating…';
 const loaderOf = (page: Page) => page.locator('.boot-screen');
 
 /* What this view says, the same way in every language: the tabs and the bars it may show. The road's own lines are English. */
-const viewWords = (t: Messages) => [...TABS.map(tab => t.shell.tabs[tab]), t.boot.updating, t.errors.maintenance, t.errors.codes.internal, t.people.heading, t.machines.heading, t.subs.heading];
+const viewWords = (t: Messages) => [...TABS.map(tab => t.shell.tabs[tab]), t.errors.maintenance, t.errors.codes.internal, t.people.heading, t.machines.heading, t.subs.heading];
 const ranked = LANGUAGES.map(l => ({ id: l.id, length: viewWords(DICTS[l.id]).join('').length })).sort((a, b) => a.length - b.length);
 const SHORTEST = ranked[0]!.id;
 const LONGEST = ranked.at(-1)!.id;
@@ -146,10 +147,10 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     const orgRefused = page.waitForResponse(response => new URL(response.url()).pathname === '/api/org' && response.status() === 503);
     await page.goto('/');
     const loader = loaderOf(page);
-    await expect(loader).toHaveText(`${t.boot.updating}…`);
+    await expect(loader).toHaveText(UPDATING);
     await orgRefused;
     await page.clock.runFor(BUSY_POLL_MS);
-    await expect(loader).toHaveText(`${t.boot.updating}…`);
+    await expect(loader).toHaveText(UPDATING);
     await turned(page, rtl);
     await expect(page.getByText(t.errors.maintenance)).toHaveCount(0);
     await expect(page.getByRole('alert')).toHaveCount(0);
@@ -187,7 +188,7 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
       running.on = true;
       await page.goto(path);
       const loader = loaderOf(page);
-      await expect(loader).toHaveText(`${t.boot.updating}…`);
+      await expect(loader).toHaveText(UPDATING);
       await expect(page.getByRole('alert')).toHaveCount(0);
       await turned(page, rtl);
 

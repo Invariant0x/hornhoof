@@ -1,5 +1,5 @@
-/* One current service message and its place. The update uses the startup screen; other
-   service messages go from the window to the strip when dismissed. */
+/* One current service message and its place. The update uses the startup screen.
+   Once dismissed, a connection loss keeps its place in the strip. */
 import { SERVICE_LINES, type Away } from '@hornhoof/protocol/service-lines';
 import { connection, joined } from './connection';
 
@@ -11,7 +11,8 @@ export type ServiceMessage = { id: string; kind: ServiceKind; line: string };
 
 /* What the page shows of the road: nothing, or the one current message in the one place it stands now. loader: a page area
    shows the loader line in its own place, so the strip is not drawn on this screen. */
-export type ServiceView = { place: 'boot' | 'window' | 'strip'; message: ServiceMessage; loader: boolean } | null;
+type ServicePlace = 'boot' | 'window' | 'strip';
+export type ServiceView = { place: ServicePlace; message: ServiceMessage; loader: boolean } | null;
 
 /* What the states are read from. */
 export type Inputs = { online: boolean; away: Away | null; updating: boolean; signedOut: boolean; notices: readonly Notice[] };
@@ -45,8 +46,7 @@ const sameView = (a: ServiceView, b: ServiceView): boolean =>
 let updating = false;
 let signedOut = false;
 let notices: Notice[] = [];
-/* How important the most important state is whose window the person closed, for as long as any state stands: that state and
-   every less important one go on as the strip, and a more important one opens the window again. */
+/* Remember the importance of the last dismissed window until all service states end. */
 let closedAt = 0;
 /* How many page areas show the loader line now. */
 let loaders = 0;
@@ -55,15 +55,18 @@ const watchers = new Set<() => void>();
 
 const online = (): boolean => typeof navigator === 'undefined' || navigator.onLine !== false;
 
+function placeOf(kind: ServiceKind): ServicePlace | null {
+  if (kind === 'updating') return 'boot';
+  if (IMPORTANCE[kind] > closedAt) return 'window';
+  return kind === 'lost' || kind === 'offline' ? 'strip' : null;
+}
+
 /* Reads every state again; the people watching hear of it only when what is drawn changed. */
 function refresh(): void {
   const current = messageOf({ online: online(), away: connection.snapshot().away, updating, signedOut, notices });
   if (!current) closedAt = 0;
-  let next: ServiceView = null;
-  if (current) {
-    const place = current.kind === 'updating' ? 'boot' : IMPORTANCE[current.kind] <= closedAt ? 'strip' : 'window';
-    next = { place, message: current, loader: loaders > 0 };
-  }
+  const place = current && placeOf(current.kind);
+  const next = current && place ? { place, message: current, loader: loaders > 0 } : null;
   if (sameView(view, next)) return;
   view = next;
   for (const watch of [...watchers]) watch();
@@ -100,7 +103,7 @@ export const service = {
     notices = notices.filter(n => n.id !== id);
     refresh();
   },
-  /* The person closed the window: the state goes on as the strip. */
+  /* The person dismissed the window. A connection loss stays in the strip. */
   close(): void {
     if (view?.place !== 'window') return;
     closedAt = Math.max(closedAt, IMPORTANCE[view.message.kind]);

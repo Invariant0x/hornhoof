@@ -1,7 +1,7 @@
 /* The page a browser gets when the front or a keeper has no live server behind it (#1938, #2049): the server is away, or an
    update installs. It shows only the Hornhoof logo and one English line, centred on a plain background in light or dark by
    the browser's preference, refreshes itself so it becomes the app once the server answers, and makes no outside request. */
-import { BOOT_STYLE, BOOT_WORDS, SERVICE_LINES, type Away } from '@hornhoof/protocol/service-lines';
+import { BOOT_STYLE, SERVICE_LINES, type Away } from '@hornhoof/protocol/service-lines';
 
 export type { Away };
 
@@ -25,7 +25,7 @@ body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding
 
 function loader(kind: Away): string {
   const word = LINE[kind];
-  const label = kind === 'updating' ? `${BOOT_WORDS.updating}…` : word;
+  const label = kind === 'updating' ? `${word}…` : word;
   return `<main class="boot-screen" role="status" aria-busy="true">
 ${SIGN}
 <p class="boot-line"><span class="boot-label">${label}</span><span class="boot-word" aria-hidden="true" data-word="${word}"></span><span class="boot-dots" aria-hidden="true"><i></i><i></i><i></i></span></p>

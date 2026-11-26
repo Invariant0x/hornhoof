@@ -74,7 +74,7 @@ export const en = {
       telegram: 'Set up Telegram so I can talk to you there', assistant: 'Set up my personal assistant',
     },
   },
-  boot: BOOT_WORDS,
+  boot: { loading: BOOT_WORDS.loading },
   common: {
     loading: 'Loading…',
     /* Something under way that took longer than its one limit: it may still finish. */
