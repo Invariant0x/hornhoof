@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [0.44.5] - 2026-11-26
+
+### Fixed
+
+- Connect windows ask for your Hornhoof password while the command is locked. After you enter it, the command takes the place of the password field and the window tells you how to copy it.
+
 ## [0.44.3] - 2026-11-25
 
 ### Fixed
