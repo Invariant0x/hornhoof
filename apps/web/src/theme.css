@@ -1148,6 +1148,11 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .disk-parts .bar { grid-column: 1 / -1; }
 /* Docker's own disk is another disk than the parts above, so its line stands apart from them. */
 .dp-docker { margin-block-start: 12px; }
+.dp-copies-head { margin-block: 12px 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.disk-copies { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.disk-copies li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 4px 12px; min-inline-size: 0; }
+.disk-copies .dc-n { min-inline-size: 0; overflow-wrap: anywhere; }
+.disk-copies .dc-v { font-weight: 500; font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; color: var(--muted); }
 .machine-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 /* Subscriptions & API: every button, field and list is a target of 44px, and a card's actions end at its end edge. */
 .subs .btn { min-height: 44px; }

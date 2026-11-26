@@ -30,7 +30,7 @@ import { FileHolder } from './file-holder.js';
 import { switchAnswer, switchWord, type SwitchWord } from './switch-word.js';
 import { WIPE_FILE, WIPED_FILE } from './uploads.js';
 import { Hourly, jsonOf, machineKey, readJson, reasonOf, writePrivately, type MachineKey } from './machine-keys.js';
-import { Measures, type Internet } from './measures.js';
+import { Measures, type Internet, type Probe } from './measures.js';
 import { pinKey, readPin } from './owner-pin.js';
 import { updaterBusy } from './updater-status.js';
 import type { WorkerConfig } from './worker-config.js';
@@ -104,10 +104,13 @@ export type WorkerKeeperOptions = {
   extraReport?: () => object | Promise<object>;
   /* What measures this machine's connection to the internet; none where a test gives none. */
   internet?: Internet;
-  /* How often the keeper times a synced write to its disk; a test's keeper takes its own. copying: whether the
-     machine makes its copy of the company's data now, when it times none. */
+  /* How often the keeper times a synced write to its disk; a test's keeper takes its own. copying: whether the machine
+     keeps its disk busy with its copy of the company's data now, making it or saving what a database that led held,
+     when what it times is left out of its report. probe: what it times, a commit of the machine's own database where
+     it keeps one, a write to its folder unless given. */
   sampleMs?: number;
   copying?: () => boolean;
+  probe?: Probe;
   onView?: (view: KeeperView) => void;
 };
 
@@ -260,7 +263,7 @@ export class WorkerKeeper {
   private readonly stopping = new AbortController();
 
   constructor(private readonly opts: WorkerKeeperOptions) {
-    this.measures = new Measures({ dir: opts.config.dir, sampleMs: opts.sampleMs, internet: opts.internet, copying: opts.copying, filesDir: opts.config.filesDir });
+    this.measures = new Measures({ dir: opts.config.dir, sampleMs: opts.sampleMs, internet: opts.internet, busy: opts.copying, probe: opts.probe, filesDir: opts.config.filesDir });
     this.following = new Following({ dir: opts.config.dir, controlDir: opts.config.controlDir, commit: opts.config.commit, now: opts.now, log: opts.log });
     this.carrier = new ComputerCarrier({
       dir: opts.config.dir,

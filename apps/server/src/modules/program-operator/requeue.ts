@@ -64,7 +64,7 @@ async function fallbackMessage(ctx: Ctx, delivery: StoredDelivery): Promise<Unhe
 }
 
 async function recordFallback(tx: Tx, inside: Ctx, nodeId: string, message: Unheard, metadata: Delivery, now: Date) {
-  const [agent] = await tx.select().from(agents).where(and(eq(agents.id, message.agentKey), isNull(agents.removedAt))).for('update');
+  const [agent] = await tx.select().from(agents).where(and(eq(agents.id, message.agentKey), isNull(agents.removedAt))).for('no key update');
   const [delivery] = await tx.select().from(programDeliveries).where(eq(programDeliveries.id, metadata.id));
   if (!agent || !delivery || !validFallbackDelivery(delivery, agent, nodeId, message, metadata)) return;
   const [previous] = await tx.select(only(agentEvents, 'jobId')).from(agentEvents).where(and(eq(agentEvents.agentId, agent.id), eq(agentEvents.kind, 'typed'), sql`${agentEvents.data}->>'operatorFallback' = ${metadata.id}`)).limit(1);

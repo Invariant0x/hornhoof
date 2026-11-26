@@ -100,9 +100,9 @@ export type FollowKeeperOptions = {
   peerClientFor?: (services: PeerServices, clientId: string, local: { data: number; app: number }) => Client;
 };
 
-/* Whether the copy is being poured in: made or made again, or not begun yet, as the leader says of a copy that said
-   nothing. */
-const pouring = (copy: CopyReport | null): boolean => copy === null || copy.state === 'making' || copy.state === 'remaking';
+/* Whether the copy keeps the machine's disk busy by itself: it is poured in, made or made again, or not begun yet, as
+   the leader says of a copy that said nothing; or what a database of this machine that led held is saved. */
+export const copyBusy = (copy: CopyReport | null): boolean => copy === null || copy.state === 'making' || copy.state === 'remaking' || copy.state === 'saving';
 
 /* The keeper of a machine that keeps a copy of the company's data and does not lead. It is a worker's keeper with a
    database: it reaches the leader as a worker does and serves the company on its own address, and besides that it
@@ -208,7 +208,7 @@ export class FollowKeeper {
       updating: () => this.updating.holds(),
       switchMore: () => ({ cut: this.watcher.cut(), question: this.asking !== null }),
       extraReport: () => this.replicaReport(),
-      copying: () => pouring(this.maker.report()),
+      copying: () => copyBusy(this.maker.report()),
       onView: view => this.heard(view),
       ...opts.worker,
     });

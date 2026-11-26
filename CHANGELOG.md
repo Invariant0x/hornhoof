@@ -9,9 +9,13 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 ### Fixed
 
+- A machine's disk is no longer called slow for a day because of the company's own writes: the speed it reports leaves out what it timed while it made or saved a copy of the data, or while a backup of the database was dumped or sealed, and a machine that keeps the data times its disk by a commit of its own database, which reaches no table and no other machine, so the disk measured is the one Postgres writes to. The lease and the keeper's statements still go by every sample, so a disk slow under a dump is slow for them too.
+- A prepared harness a machine takes from Hornhoof or hands to it, as a machine behind the relay does, no longer stands silent until its part runs out: the part's log says how much has gone and of how much at least once a minute, a transfer that has not finished in 5 minutes stops with how far it got, the machine then builds what it lacks itself, and an upload that stops keeps the build on that machine. A range that drops goes on from the bytes that came instead of from the start, and Hornhoof answers 404 for a bundle whose file is gone before it starts to send it.
+- The keeper renews its ten-second lease on a dedicated database connection isolated from journal pruning and fence checks, runs pruning without blocking lease ticks, caps concurrent minute-round sweeps, and indexes the remaining hot lookups on `jobs` and `agent_events` behind org loads, silent-turn checks and program-operator evidence (migration `hot_query_indexes`) so heavy database load no longer drops leases or hits the five-second transaction limit.
 - A checking stage follows its owner when the owner's plan or model changes, by hand, through a fallback plan and back, or because a plan leaves the company: the owner keeps the stage when every rule that chose it still holds, and otherwise the stage waits with its reason and the department head is told, instead of every later result being refused with "The checking assignment changed".
 - A short one-shot Antigravity call no longer hangs on a long prompt: agy reads its prompt on stdin, and a one-shot call ends at its time limit.
 - A check started from inside a check that already holds the machine's check slot runs in that slot instead of waiting behind its own parent in the queue.
+- A merge refuses a database that holds more than the one company it merges, or any row of another company, before it writes anything, and a city that PUT /api/world/layout would refuse is never written by a merge or a pick: the leader keeps its own and the orchestrator sees why.
 
 ### Added
 
@@ -39,6 +43,18 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A restore of a database backup also keeps the copies the CEO set, from the database it replaces, and the area each machine gives the company's files, none included, so a restore neither fills a machine whose owner set less nor drops a limit.
 - A company with one machine keeps one copy of each file. An upload is answered after at most 10 seconds even when the machines picked for the file do not keep it yet, and at once when they are away.
 - Files on a task of no turn go 30 days after the task closed, and a test or work run's logs and files 30 days after the run ended, also on a task still open; a file an agent or a person put on a task under a name like a run's, such as `test-3-plan.md`, is no run's and stays. Migration `run_files` names its run on each run's file, and finds the files of earlier runs by their task, name, the turn that started the run and their time. On a server updated from 0.43 these two rules wait for the CEO's yes to the move, as the old column is still there until then.
+
+## [0.44.3] - 2026-11-25
+
+### Fixed
+
+- A leader whose database server gives every session a commit setting other than on, as a `postgresql.auto.conf` with `synchronous_commit = 'local'` in it does, no longer refuses every write of the app while it says it leads: the app asks for `on` itself in each session it opens, and the keeper looks at what a session that asks for nothing gets, sets it on in the server's file and reloads, says what it found, and does not report a lead while a setting it cannot change, as one the server was started with, is left as it was.
+
+## [0.44.2] - 2026-11-25
+
+### Fixed
+
+- A machine that led the company before and follows another now asks its updater again for the dump of what it did while it led, ten minutes after a request that left no dump and no line, or after a dump the updater cleared before it was sealed, so its copy no longer stays in "Saving" for ever after such a request was lost.
 
 ## [0.44.1] - 2026-11-25
 

@@ -1191,6 +1191,13 @@
       "when": 1795565848081,
       "tag": "0171_file_store_backup",
       "breakpoints": true
+    },
+    {
+      "idx": 171,
+      "version": "7",
+      "when": 1795631214986,
+      "tag": "0172_hot_query_indexes",
+      "breakpoints": true
     }
   ]
 }

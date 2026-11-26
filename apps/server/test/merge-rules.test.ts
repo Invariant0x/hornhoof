@@ -3,6 +3,7 @@ import { HIDDEN } from '../src/db/agent-sql.js';
 import { factsOf, sameShape, type Facts, type Query } from '../src/modules/merge/facts.js';
 import { BOOKKEEPING, CLOSING, SOFT_REFS, TABLE_RULES, ceosConflict, isSecret, protectedSummary, ruleOf } from '../src/modules/merge/rules.js';
 import { nameOf, rangeWords, timeWords, valueWords } from '../src/modules/merge/words.js';
+import { storedLayoutProblem } from '../src/modules/world/stored-layout.js';
 import { openTestDb } from './helpers-db.js';
 
 /* What the catalog says of a database as the migrations leave it. */
@@ -51,7 +52,8 @@ describe('the rule of each table in a merge', () => {
     /* A bot's token is the company's way out to a person: two that differ are the CEO's to settle. Two cities that differ
        are the company's world, never its people or access: the orchestrator's, like a person's map. */
     expect([ceosConflict('telegram_bots'), ceosConflict('map_layouts'), ceosConflict('world_layouts')]).toEqual([true, false, false]);
-    expect(ruleOf('world_layouts')).toEqual({ kind: 'rows', topic: 'work' });
+    /* A city a merge writes passes the check the app saves one with (#1967). */
+    expect(ruleOf('world_layouts')).toEqual({ kind: 'rows', topic: 'work', check: storedLayoutProblem });
     /* A place the CEO pinned is his word, so two that differ are his to settle. */
     expect(BOOKKEEPING.machines).not.toContain('server_pin');
     for (const [table, columns] of Object.entries(BOOKKEEPING)) {
