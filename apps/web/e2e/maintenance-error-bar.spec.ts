@@ -1,16 +1,13 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { LANGUAGES, type ShippedLanguage } from '../src/i18n/index';
 import { ru } from '../src/i18n/ru';
 import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
 import type { UpdatesView } from '../src/types';
-import { serveApi } from './api';
+import { ME, serveApi } from './api';
 
-/* The bars of the shell during an update, as Ivan saw them on 0.34.0: the map's bar of a refused load ran under the logo
-   and the tabs and said again what the update panel says. While the panel shows the update, a maintenance refusal draws no
-   bar, and the map comes back by itself when the update ends; any bar that does show stands in its own row under the
-   header, and what the page shows moves down. Each look is a width, a skin, and the shipped language with the longest or
-   the shortest words of this view, or the longest turned right to left: no shipped language is written that way yet. */
+/* A maintenance refusal uses the full loading screen. Genuine errors still have
+   a row of their own once the app is usable. Cover the shipped languages and skins. */
 test.describe.configure({ timeout: 0 });
 
 const DICTS: Record<ShippedLanguage, Messages> = { en, ru };
@@ -18,10 +15,12 @@ const TABS = ['map', 'tasks', 'people', 'subscriptions', 'machines'] as const;
 const TARGET = { version: '0.34.0', commit: '00e5ff3e' + 'f'.repeat(32) };
 /* How often the updates screen asks while an update runs; the page's clock moves only as the test moves it. */
 const BUSY_POLL_MS = 2_000;
+/* The one line of the update, English in every language, and where the road stands. */
+const UPDATING = 'Updating…';
+const loaderOf = (page: Page) => page.locator('.boot-screen');
 
-/* What this view says, the same way in every language: the tabs, the update panel and the bars it may show. */
-const viewWords = (t: Messages) => [...TABS.map(tab => t.shell.tabs[tab]), t.updates.label, t.updates.running('0.34.0 (00e5ff3)'),
-  t.updates.maintenance, t.updates.details, t.errors.maintenance, t.errors.codes.internal, t.people.heading, t.machines.heading, t.subs.heading];
+/* What this view says, the same way in every language: the tabs and the bars it may show. The road's own lines are English. */
+const viewWords = (t: Messages) => [...TABS.map(tab => t.shell.tabs[tab]), t.errors.maintenance, t.errors.codes.internal, t.people.heading, t.machines.heading, t.subs.heading];
 const ranked = LANGUAGES.map(l => ({ id: l.id, length: viewWords(DICTS[l.id]).join('').length })).sort((a, b) => a.length - b.length);
 const SHORTEST = ranked[0]!.id;
 const LONGEST = ranked.at(-1)!.id;
@@ -40,15 +39,16 @@ function updates(step: 'install' | 'health'): UpdatesView {
   return {
     current: { version: '0.33.2', commit: 'c'.repeat(40), migrations: 60 }, available: false, checkedAt: '2026-11-18T13:00:00.000Z',
     latest: null, versions: [], error: null,
-    updater: { present: true, status: { id: 'u1', ...TARGET, state: 'running', step, log: '', at: '2026-11-18T13:30:00.000Z' }, waiting: null, calledOff: null },
+    updater: { present: true, status: { id: 'u1', ...TARGET, state: step === 'health' ? 'rolled_back' : 'running', step, log: '', at: '2026-11-18T13:30:00.000Z' }, waiting: null, calledOff: null },
   };
 }
 
 /* The server an update holds: the updates poll answers first with the update running, then with the maintenance refusal,
    as does every load of the company, until the update ends. */
-async function heldServer(page: Page) {
+async function heldServer(page: Page, theme: string) {
   const held = { on: true, polls: 0 };
   await serveApi(page);
+  await page.route('**/api/me', route => route.fulfill({ json: { ...ME, company: { ...ME.company, theme } } }));
   await page.route('**/api/updates', route => {
     held.polls++;
     if (held.on && held.polls > 1) return route.fulfill(REFUSED);
@@ -76,15 +76,6 @@ async function turned(page: Page, rtl: boolean) {
 type Box = { x: number; y: number; width: number; height: number };
 type Bar = Box & { what: string; onTop: boolean };
 
-/* Where one part of the page stands, read once the state it belongs to has come: a part that is not on the page then, or
-   is on it more than once, fails the test at once and names itself. A wait for it would wait as long as the run lets it,
-   as a box of the map did once the map's workspace was gone. */
-async function boxOf(locator: Locator, what: string): Promise<Box> {
-  expect(await locator.count(), `${what} is on the page once`).toBe(1);
-  const box = await locator.boundingBox();
-  expect(box, `${what} takes room on the page`).not.toBeNull();
-  return box!;
-}
 const meet = (a: Box, b: Box) => a.x < b.x + b.width - 0.5 && b.x < a.x + a.width - 0.5 && a.y < b.y + b.height - 0.5 && b.y < a.y + a.height - 0.5;
 
 /* What stands where: the parts of the header on screen (the mark gives its place to the tabs on a phone), every bar of
@@ -147,137 +138,71 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
   const pictured = skin === 'cyberpunk';
   const world = builtinSkin(skin)?.world;
 
-  test(`during an update the map draws no bar of a maintenance refusal and comes back after it, ${name}`, async ({ page }, info) => {
+  test(`during an update the map draws no bar of a maintenance refusal, the road says it, and the map comes back after it, ${name}`, async ({ page }, info) => {
     const t = DICTS[lang];
     const problems = watchProblems(page);
     await page.clock.install({ time: new Date('2026-11-18T13:00:00.000Z') });
     await page.clock.pauseAt(new Date('2026-11-18T13:35:00.000Z'));
     await look(page, lang, skin, width);
-    const server = await heldServer(page);
+    const server = await heldServer(page, skin);
     const orgRefused = page.waitForResponse(response => new URL(response.url()).pathname === '/api/org' && response.status() === 503);
     await page.goto('/');
-    const panel = page.getByRole('status', { name: t.updates.label, exact: true });
-    await expect(panel).toContainText(t.updates.running('0.34.0 (00e5ff3)'));
+    const loader = loaderOf(page);
+    await expect(loader).toHaveText(UPDATING);
     await orgRefused;
-    /* The next poll gets the refusal too: the panel says maintenance. */
     await page.clock.runFor(BUSY_POLL_MS);
-    await expect(panel).toContainText(t.updates.maintenance);
+    await expect(loader).toHaveText(UPDATING);
     await turned(page, rtl);
-    expect(await page.getByText(t.errors.maintenance).count(), 'no bar says maintenance again').toBe(0);
-    expect(await page.getByRole('alert').count(), 'no bar of a refused load').toBe(0);
-    expect(await page.getByText(t.updates.maintenance, { exact: true }).count(), 'the panel says it once').toBe(1);
-    expect(rowsHold(await places(page, t), width)).toEqual([]);
+    await expect(page.getByText(t.errors.maintenance)).toHaveCount(0);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('progressbar')).toHaveCount(0);
+    await expect(page.locator('.svc-strip')).toHaveCount(0);
+    await expect(page.getByRole('navigation')).toBeHidden();
     if (pictured) await shot(page, info.outputPath(`maintenance-map-${name.replaceAll(' ', '-')}.png`));
 
-    /* The update ends: the next poll answers, and the map loads the company again with no reload of the page. */
     const loaded = page.waitForResponse(response => new URL(response.url()).pathname === '/api/org' && response.status() === 200);
     server.end();
     await page.clock.runFor(BUSY_POLL_MS);
     await loaded;
-    /* The map is back with the company: the plain map shows the department's card, a world map draws its city on a canvas
-       and shows the company's ticker over it. */
+    // The maintenance poll is complete. Let the lazy world render on the page clock.
+    await page.clock.resume();
     await expect(world ? page.locator(`.map[data-world-canvas="${world}"] > .ticker[role="button"]`) : page.getByRole('button', { name: /^Development/ })).toBeVisible();
-    await expect(panel).toContainText(t.updates.steps.health);
-    expect(await page.getByRole('alert').count()).toBe(0);
-    /* The open map runs under the header and the panel to the top of the window, and the panel floats over it (#1639): it
-       covers no card, chip, hub or control of the map. */
-    expect(rowsHold(await places(page, t), width)).toEqual([]);
-    const mapBox = await boxOf(page.locator('.map'), 'the map');
-    const panelBox = await boxOf(panel, 'the update panel');
-    expect(mapBox.y, 'the map starts at the top of the window').toBeLessThanOrEqual(0.5);
-    const covered: string[] = [];
-    for (const part of await page.locator('.map .world :is(.dept, .hub, .chip), .map > :is(.zoom, .ticker, .map-arrange)').all()) {
-      const b = await part.boundingBox();
-      if (b && b.width > 0 && b.height > 0 && meet(b, panelBox)) covered.push((await part.textContent())?.slice(0, 40) ?? '');
-    }
-    expect(covered, 'the panel covers nothing the map shows').toEqual([]);
+    await expect(loader).toHaveCount(0);
+    await expect(page.getByRole('alert')).toHaveCount(0);
     expect(problems).toEqual([]);
   });
 
-  test(`a bar of any other failure stands in its own row under the header, and the page moves down, ${name}`, async ({ page }, info) => {
+  test(`a genuine failure keeps its row after the update ends, ${name}`, async ({ page }, info) => {
     const t = DICTS[lang];
     const problems = watchProblems(page);
     await look(page, lang, skin, width);
     await serveApi(page);
+    await page.clock.install();
     const running = { on: true };
-    await page.route('**/api/updates', route => route.fulfill({ json: running.on ? updates('install') : { ...updates('install'), updater: { present: true, status: null, waiting: null, calledOff: null } } }));
+    await page.route('**/api/updates', route => route.fulfill({ json: updates(running.on ? 'install' : 'health') }));
     await page.route('**/api/org', route => route.fulfill(BROKEN));
     await page.route('**/api/people', route => route.fulfill(BROKEN));
     await page.route('**/api/machines', route => route.fulfill(BROKEN));
     await page.route('**/api/subscriptions', route => route.fulfill(BROKEN));
-    const panel = page.getByRole('status', { name: t.updates.label, exact: true });
 
-    /* The map: the panel, then the bar of the company's failed load under it. */
-    await page.goto('/');
-    await expect(panel).toBeVisible();
-    await expect(page.getByRole('alert')).toHaveCount(1);
-    await turned(page, rtl);
-    const map = await places(page, t);
-    expect(map.bars).toHaveLength(2);
-    expect(rowsHold(map, width)).toEqual([]);
-    expect(map.bars[1]!.y, 'the bar stands under the panel').toBeGreaterThanOrEqual(map.bars[0]!.y + map.bars[0]!.height - 0.5);
-    if (pictured) await shot(page, info.outputPath(`failure-map-${name.replaceAll(' ', '-')}.png`));
-
-    /* A department, with no update: its bar right under the header. */
-    running.on = false;
-    await page.goto('/departments/d2');
-    await expect(page.getByRole('alert')).toHaveCount(1);
-    await expect(panel).toHaveCount(0);
-    await turned(page, rtl);
-    const department = await places(page, t);
-    expect(department.bars).toHaveLength(1);
-    expect(rowsHold(department, width)).toEqual([]);
-    if (pictured) await shot(page, info.outputPath(`failure-department-${name.replaceAll(' ', '-')}.png`));
-
-    /* A page: the panel in its own row, the page's heading and its own bar after it. */
-    running.on = true;
-    await page.goto('/people');
-    const heading = page.getByRole('heading', { name: t.people.heading, exact: true });
-    await expect(heading).toBeVisible();
-    await expect(panel).toBeVisible();
-    await expect(page.getByRole('alert')).toHaveCount(1);
-    await turned(page, rtl);
-    const people = await places(page, t);
-    expect(rowsHold(people, width)).toEqual([]);
-    const top = await boxOf(heading, 'the heading of People');
-    expect(top.y, 'the heading stands under the panel').toBeGreaterThanOrEqual(people.bars[0]!.y + people.bars[0]!.height - 0.5);
-    if (pictured) await shot(page, info.outputPath(`failure-people-${name.replaceAll(' ', '-')}.png`));
-    /* Scrolled, the page and its bars pass under the band at the top, never over it: nothing shows around the glass
-       blocks of the header. */
-    await page.setViewportSize({ width, height: 300 });
-    const main = page.getByRole('main');
-    await main.evaluate(element => { element.scrollTop = 30; });
-    expect(await main.evaluate(element => element.scrollTop)).toBe(30);
-    const below = Math.max(...people.header.map(h => h.y + h.height)) + 2;
-    const covered = await panel.evaluate((element, y) => {
-      const r = element.getBoundingClientRect();
-      const hit = document.elementFromPoint(r.left + r.width / 2, y);
-      return { reaches: r.top < y && r.bottom > y, over: hit !== null && element.contains(hit) };
-    }, below);
-    expect(covered).toEqual({ reaches: true, over: false });
-    await page.setViewportSize({ width, height: 900 });
-
-    /* The tracker, which stands right under the header: the panel in its own row, the tracker after it. */
-    const sections = page.getByRole('navigation', { name: t.shell.sections });
-    await sections.getByRole('button', { name: t.shell.tabs.tasks, exact: true }).click();
-    const tracker = page.locator('.tracker');
-    await expect(tracker).toBeVisible();
-    await expect(panel).toBeVisible();
-    await turned(page, rtl);
-    const tasks = await places(page, t);
-    expect(rowsHold(tasks, width)).toEqual([]);
-    expect((await boxOf(tracker, 'the tracker')).y, 'the tracker stands under the panel').toBeGreaterThanOrEqual(tasks.bars[0]!.y + tasks.bars[0]!.height - 0.5);
-
-    for (const [tab, title] of [['machines', t.machines.heading], ['subscriptions', t.subs.heading]] as const) {
-      await sections.getByRole('button', { name: t.shell.tabs[tab], exact: true }).click();
-      const heading = page.getByRole('heading', { name: title, exact: true });
-      await expect(heading).toBeVisible();
-      await expect(panel).toBeVisible();
-      await expect(page.getByRole('alert')).toHaveCount(1);
+    const screens = [['/', null], ['/departments/d2', null], ['/people', t.people.heading], ['/machines', t.machines.heading], ['/subscriptions', t.subs.heading]] as const;
+    for (const [path, title] of screens) {
+      running.on = true;
+      await page.goto(path);
+      const loader = loaderOf(page);
+      await expect(loader).toHaveText(UPDATING);
+      await expect(page.getByRole('alert')).toHaveCount(0);
       await turned(page, rtl);
-      const screen = await places(page, t);
-      expect(rowsHold(screen, width)).toEqual([]);
-      expect((await boxOf(heading, `the heading of ${tab}`)).y).toBeGreaterThanOrEqual(screen.bars[0]!.y + screen.bars[0]!.height - 0.5);
+
+      running.on = false;
+      await page.clock.runFor(BUSY_POLL_MS * 2);
+      await expect(loader).toHaveCount(0);
+      await expect(page.getByRole('alert')).toHaveCount(1);
+      if (title) await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
+      expect(rowsHold(await places(page, t), width)).toEqual([]);
+      if (pictured && path === '/') await shot(page, info.outputPath(`failure-map-${name.replaceAll(' ', '-')}.png`));
+      if (pictured && path === '/people') await shot(page, info.outputPath(`failure-people-${name.replaceAll(' ', '-')}.png`));
     }
     expect(problems).toEqual([]);
   });

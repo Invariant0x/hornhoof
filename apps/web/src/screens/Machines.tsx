@@ -388,8 +388,7 @@ function PlanPicker({ machine, addable, shown, picking, controls }: { machine: M
   const t = useT();
   if (shown) return (
     <div className="add-plan">
-      <p className="muted">{t.machines.runOn(machine.hostname)}</p>
-      <CommandBox command={shown.command} />
+      <CommandBox command={shown.command} run={t.machines.runOn(machine.hostname)} />
       <CommandLifetime expiresAt={shown.expiresAt} />
       <div className="entry-actions"><button className="btn ghost" type="button" onClick={() => controls.cancelAdd(machine.id, shown.id)}>{t.subs.cancelCommand}</button></div>
     </div>
@@ -409,8 +408,7 @@ function CoreCommand({ machine, shown, controls }: { machine: MachineView; shown
   const t = useT();
   return (
     <div className="add-plan">
-      <p className="muted">{t.machines.coreRun(machine.hostname)}</p>
-      <CommandBox command={shown.command} trust={t.machines.trust} />
+      <CommandBox command={shown.command} trust={t.machines.trust} run={t.machines.coreRun(machine.hostname)} />
       <CommandLifetime expiresAt={shown.expiresAt} />
       <div className="entry-actions"><button className="btn ghost" type="button" onClick={() => controls.cancelCore(machine.id, shown.id)}>{t.subs.cancelCommand}</button></div>
     </div>

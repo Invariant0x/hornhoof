@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
+import { heardAgain } from '../src/live';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import type { EventView, Me, Org, ShownCommand } from '../src/types';
 import { accessView, CARD, DEV_ORG, ME, mockApi, ORG, ROSTER, SUBS, withKey } from './api-mock';
@@ -321,9 +322,35 @@ describe('AgentWindow', () => {
     expect(within(card).queryByText(en.machines.computerConsent)).not.toBeInTheDocument();
     expect(within(card).getByText(/^Run this in a terminal on work-laptop\./)).toBeInTheDocument();
     expect(within(card).getByText('The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.')).toBeInTheDocument();
-    await user.click(within(card).getByRole('button', { name: 'Done' }));
-    expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${shown.id}/hide`, body: undefined });
-    await vi.waitFor(() => expect(screen.queryByText(commandCode(command))).not.toBeInTheDocument());
+    await user.click(within(card).getByRole('button', { name: /^Close$/ }));
+    expect(card).not.toBeInTheDocument();
+    expect(calls).not.toContainEqual({ method: 'POST', path: `/api/nodes/commands/${shown.id}/hide`, body: undefined });
+  });
+
+  it.each(['pending', 'failed'] as const)('dismisses the agent plan command while saving the dismissal is %s and keeps it closed on refresh', async state => {
+    const user = userEvent.setup();
+    fakeStream();
+    const command: ShownCommand = {
+      id: 'd'.repeat(64), kind: 'plans', plans: ['Codex'], subscriptionIds: ['codex-plan'], machine: null,
+      command: 'fixture command', expiresAt: '2099-01-01T00:00:00Z',
+    };
+    const other: ShownCommand = { ...command, id: 'e'.repeat(64), plans: ['Claude'], subscriptionIds: ['claude-plan'] };
+    let commands = [command];
+    const { calls } = open({
+      'GET /api/nodes/commands': () => [200, { commands }],
+      [`POST /api/nodes/commands/${command.id}/hide`]: state === 'pending'
+        ? () => new Promise(() => {})
+        : [500, { error: { code: 'internal', message: 'Could not save the dismissal.' } }],
+    });
+    const title = en.window.commandPlans('Codex');
+    await user.click(within(await screen.findByRole('region', { name: title })).getByRole('button', { name: /^Done$/ }));
+    expect(screen.queryByRole('region', { name: title })).not.toBeInTheDocument();
+    expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${command.id}/hide`, body: undefined });
+
+    commands = [command, other];
+    act(heardAgain);
+    expect(await screen.findByRole('region', { name: en.window.commandPlans('Claude') })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: title })).not.toBeInTheDocument();
   });
 
   it('names each kind of machine command in Russian', async () => {

@@ -1,6 +1,7 @@
 import { useT, type Messages } from '../i18n';
 import { PROGRAM_NAMES } from '../providers';
 import type { ShownCommand, SubView } from '../types';
+import { commandStepText, type CommandStepContent } from './CommandBox';
 import { isKeyPlan } from './KeyForm';
 import { subName, TERMINAL_SIGNIN } from './subscription';
 
@@ -26,27 +27,32 @@ function signInNow(t: Messages, s: SubView, signing: boolean): string {
 }
 
 /* command: null when the plan has none that still works, so its owner makes a new one; signing: its terminal is open. */
-type Props = { sub: SubView; command?: ShownCommand | null; signing?: boolean };
+type Props = { sub: SubView; command?: ShownCommand | null; signing?: boolean; install?: CommandStepContent };
 
 /* The steps from adding a personal plan to agents working on it, for its owner: the passed ones ticked, the current one with
    what to do now, the later ones dimmed. */
-export function PlanSteps({ sub: s, command, signing = false }: Props) {
+export function PlanSteps({ sub: s, command, signing = false, install }: Props) {
   const t = useT();
   const at = planStep(s);
-  if (at === null) return null;
+  if (at === null) return install?.body ?? null;
   const words = t.subs.steps;
   const program = PROGRAM_NAMES[s.provider];
   const titles = [words.run, words.connect, isKeyPlan(s.provider) ? words.key(program) : words.signIn(program), words.ready];
-  const now = [command === null ? words.now.newCommand : words.now.run, words.now.connect, signInNow(t, s, signing)][at];
+  const first = command === null ? words.now.newCommand : commandStepText(t, install?.state, words.now.run);
+  const now = [first, words.now.connect, signInNow(t, s, signing)][at];
   return (
-    <ol className="plan-steps" aria-label={words.label(subName(t, s))}>
-      {titles.map((title, i) => (
-        <li key={i} className={i < at ? 'done' : i === at ? 'now' : 'next'} aria-current={i === at ? 'step' : undefined}>
-          <span>{title}</span>
-          {i < at && <span className="sr"> {words.done}</span>}
-          {i === at && <p>{now}</p>}
-        </li>
-      ))}
-    </ol>
+    <>
+      <ol className="plan-steps" role="list" aria-label={words.label(subName(t, s))}>
+        {titles.map((title, i) => (
+          <li key={i} className={i < at ? 'done' : i === at ? 'now' : 'next'} aria-current={i === at ? 'step' : undefined}>
+            <span>{title}</span>
+            {i < at && <span className="sr"> {words.done}</span>}
+            {i === at && now && <p>{now}</p>}
+            {i === 0 && at === 0 && install?.body}
+          </li>
+        ))}
+      </ol>
+      {at !== 0 && install?.body}
+    </>
   );
 }
