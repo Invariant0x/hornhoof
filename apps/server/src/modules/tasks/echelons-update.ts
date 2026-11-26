@@ -1,7 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, tasks } from '../../db/schema.js';
-import { checkerFor, checkingIdentity, heldCheckingIdentity, keptFromReview, populateSecurityOwner, PRODUCER_REVIEW } from './echelons-assign.js';
+import { checkerFor, checkingIdentity, heldCheckingIdentity, keptFromReview, populateSecurityOwner, PRODUCER_REVIEW, requireIndependentChecker } from './echelons-assign.js';
 import { checkedProducer, currentHanded } from './echelons-candidates.js';
 import { isStaged, type EchelonStage, type HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { CheckerIdentity } from './echelons-policy.js';
@@ -90,6 +90,7 @@ async function changedFutureOwner(ctx: Ctx, task: Task, route: Route, stage: Ech
   await requireAvailableOwner(ctx, task, ownerId);
   const ownerAgentId = await futureOwner(ctx, task, route, stage, ownerId);
   if (!ownerAgentId) throw refuse(409, 'task_invalid', 'The proposed future owner must be outside teams and have the required ability and known model capability.');
+  requireIndependentChecker(task, route.state, stage, ownerAgentId);
   const { state } = route;
   return { state: { ...state, stages: state.stages.map(item => item.stage === stage ? { ...item, ownerAgentId, reason: null } : item) },
     set: stage === 'development' && !state.candidateId ? { executorAgentId: ownerAgentId } : {} };
@@ -116,6 +117,7 @@ async function requireAvailableOwner(ctx: Ctx, task: Task, ownerId: string): Pro
 async function assignedChecker(ctx: Ctx, task: Task, route: Route, stage: Route['state']['stage'], ability: string, ownerId: string) {
   const handed = await currentHanded(ctx.db, task, route);
   if ((await keptFromReview(ctx.db, task, stage, handed)).has(ownerId)) throw refuse(409, 'task_invalid', PRODUCER_REVIEW);
+  requireIndependentChecker(task, route.state, stage, ownerId);
   return checkerFor(ctx, task, await checkedProducer(ctx.db, task, route, handed), ability, ownerId);
 }
 

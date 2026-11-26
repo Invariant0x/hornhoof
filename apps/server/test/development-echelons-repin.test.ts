@@ -109,11 +109,52 @@ describe('a checking stage whose automatic fallback left the old plan pinned', (
     });
   });
 
+  it('refuses to assign Tests to a reviewer who already completed Review', async () => {
+    const f = await atReview();
+    await verdict(f.ctx, f.reviewer.id, f.task.id, pass);
+    await f.db.update(agents).set({ skills: f.tester.skills }).where(eq(agents.id, f.reviewer.id));
+    const before = await f.route();
+    await expect(updateTask(f.ctx, f.head.id, f.task.id, { ownerAgentId: f.reviewer.id })).rejects.toMatchObject({
+      status: 409, message: expect.stringContaining('already checked'),
+    });
+    expect(await f.route()).toEqual(before);
+  });
+
+  it.each([true, false])('hands off past the completing reviewer with another eligible tester available: %s', async hasTester => {
+    const f = await atReview();
+    await f.db.update(agents).set({ skills: [...f.reviewer.skills, ...f.tester.skills] }).where(eq(agents.id, f.reviewer.id));
+    await updateTask(f.ctx, f.head.id, f.task.id, { echelonStage: 'tests', ownerAgentId: f.reviewer.id });
+    if (!hasTester) await f.db.update(agents).set({ skills: [] }).where(eq(agents.id, f.tester.id));
+
+    await verdict(f.ctx, f.reviewer.id, f.task.id, pass);
+    const route = (await f.detail()).echelons;
+    if (!hasTester) {
+      expect(route).toMatchObject({ stage: 'tests', phase: 'waiting', ownerAgentId: null });
+      expect(route.stages.find(step => step.stage === 'tests')).toMatchObject({ status: 'pending', reason: 'eligible_owner_required' });
+      return;
+    }
+
+    expect(route).toMatchObject({ stage: 'tests', phase: 'active', ownerAgentId: f.tester.id });
+    await report(f.ctx, f.tester.id, f.task.id, {
+      done: true, summary: 'Tested.', verification: { candidateId: route.candidateId!, revision: route.revision },
+    });
+    expect(await f.route()).toMatchObject({ stage: 'tests', phase: 'ready' });
+  });
+
   it('does not use a fallback to let a completed checker verify a later stage', async () => {
     const f = await atReview();
     await verdict(f.ctx, f.reviewer.id, f.task.id, pass);
     await f.db.update(agents).set({ skills: f.tester.skills }).where(eq(agents.id, f.reviewer.id));
-    await updateTask(f.ctx, f.head.id, f.task.id, { ownerAgentId: f.reviewer.id });
+    const state = await f.route();
+    /* A route persisted before owner selection rejected earlier checkers. */
+    await f.db.transaction(async tx => {
+      await tx.update(tasks).set({ assigneeAgentId: f.reviewer.id }).where(eq(tasks.id, f.task.id));
+      await tx.update(taskRoutes).set({ state: {
+        ...state,
+        assignment: { ...state.assignment!, agentId: f.reviewer.id },
+        stages: state.stages.map(step => step.stage === 'tests' ? { ...step, ownerAgentId: f.reviewer.id } : step),
+      } }).where(eq(taskRoutes.taskId, f.task.id));
+    });
     const detail = (await f.detail()).echelons;
     await savedFallback(f, FALLBACK_MODEL);
     await expect(report(f.ctx, f.reviewer.id, f.task.id, {

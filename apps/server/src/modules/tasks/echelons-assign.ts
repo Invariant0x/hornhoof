@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, isNotNull, isNull, notLike } from 'drizzle-orm';
-import type { HandedCandidate } from '@hornhoof/protocol/echelons';
+import type { EchelonStage, HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import { agentFallbacks, agents, departments, subscriptions, turnTokens } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
@@ -151,12 +151,24 @@ async function fellBack(db: Reader['db'], task: Task, pinned: CheckerIdentity, l
   return fallback !== undefined && (fallback.homeModel === '' || fallback.homeModel === pinned.model);
 }
 
-function requireIndependentChecker(task: Task, route: Route, agentId: string): void {
+const CHECKING_STAGES: ReadonlySet<EchelonStage> = new Set(['review', 'cleanup', 'security', 'tests']);
+
+export function excludedCheckingOwners(task: Task, state: Route['state'], stage: EchelonStage | null, completing: EchelonStage | null = null): Set<string> {
+  const excluded = new Set<string>();
+  if (!stage || !CHECKING_STAGES.has(stage)) return excluded;
+  if (task.executorAgentId) excluded.add(task.executorAgentId);
+  const at = state.stages.findIndex(step => step.stage === stage);
+  for (const step of state.stages.slice(0, Math.max(0, at))) {
+    const checked = step.status === 'complete' || (step.stage === completing && step.status === 'active');
+    if (checked && step.ownerAgentId && CHECKING_STAGES.has(step.stage)) excluded.add(step.ownerAgentId);
+  }
+  return excluded;
+}
+
+export function requireIndependentChecker(task: Task, state: Route['state'], stage: EchelonStage | null, agentId: string): void {
+  if (!excludedCheckingOwners(task, state, stage).has(agentId)) return;
   if (agentId === task.executorAgentId) throw new ApiError(409, 'conflict', 'The original producer cannot check this task.', 'task_invalid');
-  const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
-  const earlier = route.state.stages.slice(0, at).some(step => step.status === 'complete' && step.ownerAgentId === agentId
-    && ['review', 'cleanup', 'security', 'tests'].includes(step.stage));
-  if (earlier) throw new ApiError(409, 'conflict', 'This employee already checked an earlier stage of the task. The head must assign another checker.', 'task_invalid');
+  throw new ApiError(409, 'conflict', 'This employee already checked an earlier stage of the task. The head must assign another checker.', 'task_invalid');
 }
 
 async function requireEligiblePlan(db: Reader['db'], task: Task, pinned: CheckerIdentity, live: CheckerIdentity, producer: CheckerIdentity): Promise<void> {
@@ -172,7 +184,7 @@ export async function checkingIdentity(ctx: Reader, task: Task, route: Route, ca
   const { identity: assignment, ability } = pinnedChecker(task, route);
   const owner = assignment.agentId;
   if ((await keptFromReview(ctx.db, task, route.state.stage, candidate)).has(owner)) throw new ApiError(409, 'conflict', PRODUCER_REVIEW, 'task_invalid');
-  requireIndependentChecker(task, route, owner);
+  requireIndependentChecker(task, route.state, route.state.stage, owner);
   const [member] = await stageStaff(ctx.db, task, owner);
   const identity = member && canCheckTask(member, task, ability, owner) ? await agentIdentity(ctx.db, task.companyId, owner) : null;
   if (!identity) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
