@@ -12,9 +12,9 @@ type Reader = Pick<Db, 'select'>;
    session go on there; else the one of the machine this server runs on; else the ready one whose machine stands first
    in the server order. A machine that installs its build now, or is next to, takes nothing new. The machine's network
    id, or null when no built-in node is ready. */
-export async function pickBuiltin(ctx: Ctx, db: Reader, current: string | null): Promise<string | null> {
+export async function pickBuiltin(ctx: Ctx, db: Reader, current: string | null, accepts?: (machine: string) => boolean): Promise<string | null> {
   const own = ownMachine(ctx.config);
-  const there = (machine: string): boolean => ctx.hub.isReady(builtinOf(machine));
+  const there = (machine: string): boolean => (accepts?.(machine) ?? true) && ctx.hub.isReady(builtinOf(machine));
   /* The machine this server runs on follows nobody's build, so its node is never held for an install. */
   if (current === own || current === null) {
     if (there(own)) return own;
@@ -22,7 +22,7 @@ export async function pickBuiltin(ctx: Ctx, db: Reader, current: string | null):
   const installing = await heldBuiltins(ctx, db);
   if (current && current !== own && there(current) && !installing.has(current)) return current;
   if (there(own)) return own;
-  const ready = ctx.hub.builtins().filter(machine => machine !== own && !installing.has(machine));
+  const ready = ctx.hub.builtins().filter(machine => machine !== own && (accepts?.(machine) ?? true) && !installing.has(machine));
   if (ready.length === 0) return null;
   const rows = await db.select({ networkId: machines.networkId, order: machines.serverOrder }).from(machines).where(and(inArray(machines.networkId, ready), isNull(machines.revokedAt)));
   const orderOf = (machine: string): number => rows.find(row => row.networkId === machine)?.order ?? Infinity;

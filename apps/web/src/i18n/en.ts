@@ -868,6 +868,8 @@ export const en = {
     offlineLimit: (at: string | null) => at ? `Machine offline, last data from ${at}` : 'Machine offline, no limit data yet',
     noPlanLimits: 'Pay as you go, no plan limits',
     share: 'Tasks may use',
+    turnLimit: 'Concurrent turns per machine',
+    turnLimitProblem: 'Enter a whole number from 1 to 5.',
     shareLabel: (name: string) => `Share of ${name} for tasks`,
     shareAll: 'the whole limit',
     fallbacks: 'Fallback plans',
@@ -1504,6 +1506,7 @@ export const en = {
     limitUntil: (at: string) => `The plan is at its limit. Turns wait until ${at} and go on by themselves then.`,
     budgetUntil: (at: string) => `The plan used the share set for tasks. Task turns wait until ${at}; messages from people still go.`,
     machineDrain: 'The machine is finishing its work before an update. New turns wait and go on by themselves after it.',
+    subscriptionWait: (label: string, running: string, limit: string) => `Waiting for room on ${label} (${running} of ${limit})`,
     memoryWait: 'The machine reported a shortage of memory. Turns wait and go on by themselves once it reports none, and what already runs there goes on.',
     /* The notes at the foot of an agent's window, each led by a word in a frame that says what kind of note it is. */
     notes: {

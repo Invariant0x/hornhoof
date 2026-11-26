@@ -8,7 +8,7 @@ import { runsDepartment } from '../../auth/departments.js';
 import { requireCompanyScope, requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
-import { agentFallbacks, agents, attachments, departments, jobs, machines, nodes, people, planCredentials, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
+import { agentFallbacks, agents, attachments, departments, jobs, machines, nodes, people, planCredentials, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions, teams, testParts, MAX_SUBSCRIPTION_TURNS, MIN_SUBSCRIPTION_TURNS, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
@@ -80,7 +80,7 @@ const Fallbacks = z
 /* What a subscription's owner or company scope changes: the share of its limits and its fallbacks, and of an API connection
    its name, models and the place it serves. */
 const SubscriptionPatch = z
-  .object({ budget: Budget.optional(), fallbacks: Fallbacks.optional(), label: label.optional(), models: ConnectionModels.optional(), target: Target.optional() })
+  .object({ budget: Budget.optional(), turnLimit: z.number().int().min(MIN_SUBSCRIPTION_TURNS).max(MAX_SUBSCRIPTION_TURNS).optional(), fallbacks: Fallbacks.optional(), label: label.optional(), models: ConnectionModels.optional(), target: Target.optional() })
   .refine(patch => Object.values(patch).some(value => value !== undefined), 'Say what to change.');
 
 const badFallback = (message: string) => new ApiError(400, 'validation', `fallbacks: ${message}`, 'fallback_invalid');
@@ -99,8 +99,8 @@ async function checkFallbacks(db: Db, sub: { id: string; companyId: string }, fa
 }
 
 /* The columns a change of a subscription sets: only those it names. */
-function patchColumns({ budget, fallbacks, label, models }: Pick<z.infer<typeof SubscriptionPatch>, 'budget' | 'fallbacks' | 'label' | 'models'>) {
-  return { ...(budget !== undefined ? { budget } : {}), ...(fallbacks !== undefined ? { fallbacks } : {}), ...(label !== undefined ? { label } : {}), ...(models !== undefined ? { models } : {}) };
+function patchColumns({ budget, turnLimit, fallbacks, label, models }: Omit<z.infer<typeof SubscriptionPatch>, 'target'>) {
+  return { ...(budget !== undefined ? { budget } : {}), ...(turnLimit !== undefined ? { turnLimit } : {}), ...(fallbacks !== undefined ? { fallbacks } : {}), ...(label !== undefined ? { label } : {}), ...(models !== undefined ? { models } : {}) };
 }
 
 /* A plan removed: those on it for a while, as a fallback, go back to their own plan; those it was a home to stay where
@@ -459,7 +459,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const sub = await liveSubscription(IdParams.parse(req.params).id);
     const keeps = await mayKeep(me, sub);
     if (!ownsOrCompany(me, sub.ownerPersonId) && !keeps) throw notOwner();
-    const { budget, fallbacks, label, models, target } = SubscriptionPatch.parse(req.body);
+    const { budget, turnLimit, fallbacks, label, models, target } = SubscriptionPatch.parse(req.body);
     if (label !== undefined || models !== undefined || target !== undefined) {
       if (!keeps) throw notTheirPlace();
       if (sub.kind !== 'api_key') throw notApiKey();
@@ -468,7 +468,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (target) await placeExists(target);
     await checkFallbacks(db, sub, fallbacks);
     const place = target ? { targetKind: target.kind, targetId: 'id' in target ? target.id : null } : {};
-    await db.update(subscriptions).set({ ...patchColumns({ budget, fallbacks, label, models }), ...place }).where(eq(subscriptions.id, sub.id));
+    await db.update(subscriptions).set({ ...patchColumns({ budget, turnLimit, fallbacks, label, models }), ...place }).where(eq(subscriptions.id, sub.id));
     await pumpWaiting(ctx);
     /* A share set below what the plan used sends its workers on to a fallback at once. */
     if (budget !== undefined) await fallBackFrom(ctx, sub.id);

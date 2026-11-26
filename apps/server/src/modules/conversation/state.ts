@@ -13,6 +13,7 @@ import { nodeIdentity, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
 import { planNodes, type NodeRow } from '../nodes/nodes.js';
 import { agentProgramState } from '../tasks/program-state.js';
 import { type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
+import { subscriptionWait, type SubscriptionWait } from './subscription-room.js';
 import { agentFailureState, type FailureState } from '../tasks/failure-records.js';
 export type PlanHold = { reason: 'limit' | 'budget'; since: string; until: string };
 
@@ -22,6 +23,7 @@ export type AgentState = FailureState & {
   /* Its turns would start its program on a machine whose kernel killed a process for want of memory since its node's
      report before, so they wait and go on by themselves with a report that finds no new kill. */
   memoryWait: boolean;
+  subscriptionWait: SubscriptionWait | null;
   /* Its plan is at its limit until then: its turns wait in line, and people may still write to it. */
   limitUntil: string | null;
   /* Its plan used the share set for tasks until then: workers' task turns wait, people's own messages still go. */
@@ -64,7 +66,7 @@ export const planHoldView = (held: HeldPlanTurn | null): PlanHold | null => held
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, machineDrain: null, memoryWait: false, limitUntil: null, budgetUntil: null, held: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, turnRefused: null, program: null, alarm: null, retry: null, failure: null, obsolete: null };
+  if (!agent) return { ready: false, machineDrain: null, memoryWait: false, subscriptionWait: null, limitUntil: null, budgetUntil: null, held: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, turnRefused: null, program: null, alarm: null, retry: null, failure: null, obsolete: null };
   return agentState(ctx, agent.id);
 }
 
@@ -129,6 +131,7 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
     ready: reason === null,
     machineDrain: place || reason !== null ? null : await drainInTheWay(ctx, agent, sub, shown),
     memoryWait: !running && !place && reason === null && Boolean(sub && agent && (await placement(ctx, agent, sub, () => true))),
+    subscriptionWait: !running && Number(waiting?.n ?? 0) > 0 && sub && agent && place ? await subscriptionWait(ctx, agent, sub, place) : null,
     ...await planState(ctx, agent, sub),
     reason,
     browserError,

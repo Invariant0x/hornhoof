@@ -2,6 +2,8 @@ import { eq } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { agents, jobs, machines, nodes, subscriptions, tasks } from '../src/db/schema.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
+import { routeOf } from '../src/modules/tasks/route-records.js';
+import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { BUILTIN } from './builtin.js';
 import { failureCompany } from './failure-company.js';
@@ -9,8 +11,8 @@ import { failureCompany } from './failure-company.js';
 async function plan() {
   const c = await failureCompany();
   const hire = (name: string) => c.hire(name, 'worker', 'DEV-BE', c.dev.id);
-  const turn = (agentId: string, taskId?: string) =>
-    enqueueTurn(c.ctx, { companyId: c.companyId, agentId, prompt: 'Start work.', createdBy: null, taskId });
+  const turn = (agentId: string) =>
+    enqueueTurn(c.ctx, { companyId: c.companyId, agentId, prompt: 'Start work.', createdBy: null });
   const patch = (turnLimit: number) => c.app.inject({
     method: 'PATCH', url: `/api/subscriptions/${c.sub.id}`, payload: { turnLimit }, ...c.as(c.ceo),
   });
@@ -51,7 +53,11 @@ it('gives a freed place to urgent work first and then to the earliest normal tur
     companyId: c.companyId, departmentId: c.dev.id, assigneeAgentId: team[5]!.id, executorAgentId: team[5]!.id,
     number: 1, title: 'Urgent work', urgent: true,
   }).returning();
-  const urgent = await c.turn(team[5]!.id, task!.id);
+  const route = await routeOf(c.db, task!);
+  const urgent = await enqueueTurn(c.ctx, {
+    companyId: c.companyId, agentId: team[5]!.id, taskId: task!.id, prompt: 'Urgent work.', createdBy: null,
+    message: { personId: null, text: 'Urgent work.', taskWake: taskWakeOf(task!, { why: 'assigned', version: task!.version }, route.state) },
+  });
   const later = await c.turn(team[6]!.id);
   expect(await Promise.all([normal, urgent, later].map(c.status))).toEqual(['queued', 'queued', 'queued']);
   await c.finish(active[0]!);

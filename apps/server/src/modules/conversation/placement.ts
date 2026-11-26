@@ -118,7 +118,7 @@ export const takesTurns = (ctx: Ctx, n: NodeRow): boolean => n.status === 'ready
 
 /* moves: the agent has not been on this node until now, or leaves the machine it was on for the built-in node. */
 /* builtinMachine: the machine of the built-in node, for an API key's turn. moves: the agent's program is not there yet. */
-export type Placement = { node: NodeIdentity; nodeId: string | null; builtinMachine: string | null; moves: boolean };
+export type Placement = { node: NodeIdentity; machineId: string; nodeId: string | null; builtinMachine: string | null; moves: boolean };
 
 export type PlacedAgent = { id: string; kind: AgentKind; nodeId: string | null; builtinMachine: string | null; roleKey: string | null };
 
@@ -137,20 +137,20 @@ export const lookRoom = (ctx: Ctx, agent: PlacedAgent) => (node: NodeIdentity) =
    node can take it. A turn that would start a new program goes to no machine whose kernel killed a process for want of
    memory since its node's report before; roomy: whether a node has room, which the agent's state also asks as if every
    node had. */
-export async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, roomy = (node: NodeIdentity) => roomFor(ctx, node, agent.id)): Promise<Placement | null> {
+export async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, roomy = (node: NodeIdentity) => roomFor(ctx, node, agent.id), accepts?: (node: NodeIdentity, machineId: string) => boolean): Promise<Placement | null> {
   if (sub.kind === 'api_key') {
-    const machine = await pickBuiltin(ctx, ctx.db, agent.builtinMachine);
+    const machine = await pickBuiltin(ctx, ctx.db, agent.builtinMachine, accepts ? id => accepts(builtinOf(id), id) : undefined);
     if (!machine) return null;
     const node = builtinOf(machine);
-    return !nodeHeldFrom(ctx, node, agent.roleKey, isLeader(agent)) && roomy(node) ? { node, nodeId: null, builtinMachine: machine, moves: agent.nodeId !== null || agent.builtinMachine !== machine } : null;
+    return !nodeHeldFrom(ctx, node, agent.roleKey, isLeader(agent)) && roomy(node) ? { node, machineId: machine, nodeId: null, builtinMachine: machine, moves: agent.nodeId !== null || agent.builtinMachine !== machine } : null;
   }
   const all = await planNodes(ctx.db, [sub.id]);
   /* A node that cannot write its work folder takes no turn until Operations or the node itself lifts its hold. */
   const onHold = await nodesOnHold(ctx, all.map(n => n.id));
-  const open = all.filter(n => !onHold.has(n.id));
+  const open = all.filter(n => !onHold.has(n.id) && (!accepts || accepts(nodeIdentity(n.id), n.machineId)));
   const able = open.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n) && roomy(nodeIdentity(n.id)));
   const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, open, roomy)));
-  return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, builtinMachine: null, moves: pick.id !== agent.nodeId } : null;
+  return pick ? { node: nodeIdentity(pick.id), machineId: pick.machineId, nodeId: pick.id, builtinMachine: null, moves: pick.id !== agent.nodeId } : null;
 }
 
 /* Whether the agent has work in progress on a node of its plan and waits for that one: not the orchestrator or a head whom

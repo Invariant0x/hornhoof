@@ -2,6 +2,7 @@ import type { DispatchQueue } from './queue.js';
 import { turnOperatorDeliveries, failedTurnDelivery, heldByOperator } from './deliveries.js';
 import { queuedSession, withOriginal, freshConversation, forgetFresh } from './sessions.js';
 import { type Along } from './turn-types.js';
+import { turnPlacement } from './subscription-room.js';
 import { placement, isLeader, liveSubscription, conversationOf } from './placement.js';
 import { WORKER_COMPACT_WINDOW, FULL_COMPACT_WINDOW, NOTHING_UNREAD } from './constants.js';
 import { idOnly } from '../../db/selections.js';
@@ -54,7 +55,7 @@ export async function sendNext(ctx: Ctx, agentId: string, queue: DispatchQueue):
   const job = due.inboxWake ? { ...due, prompt: mailSummary(mail) } : due;
   const at = await repoAt(ctx, await turnPlaces(db, agent, job.taskId));
   const repo = at?.repo ?? null;
-  const place = await placement(ctx, agent, sub);
+  const place = await turnPlacement(ctx, agent, sub);
   if (!place) return;
   /* A machine that installs its build takes no turn now; the turn waits and goes out by itself when the machine is done.
      Asked here, before the turn's words are put together, and once more when the turn is taken. Nor does the machine

@@ -26,6 +26,7 @@ export type SubView = {
   limits: Limits | null;
   limitsUpdatedAt: string | null;
   budget: number | null;
+  turnLimit: number;
   /* The plans its employees go on to at its limit, in order; empty for any plan of the company that may serve them. */
   fallbacks: PlanFallback[];
   isOrchestrator: boolean;
@@ -77,6 +78,7 @@ const columns = {
   limits: subscriptions.limits,
   limitsUpdatedAt: subscriptions.limitsUpdatedAt,
   budget: subscriptions.budget,
+  turnLimit: subscriptions.turnLimit,
   fallbacks: subscriptions.fallbacks,
   credVersion: subscriptions.credVersion,
   leaseNodeId: subscriptions.leaseNodeId,
@@ -180,6 +182,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
       limits: currentLimits(r.limits ?? null, r.limitsUpdatedAt),
       limitsUpdatedAt: r.limitsUpdatedAt?.toISOString() ?? null,
       budget: r.budget,
+      turnLimit: r.turnLimit,
       fallbacks: r.fallbacks,
       isOrchestrator: orchestrator?.subscriptionId === r.id,
       ...accountViews(mine, accountOf, viewer, r.ownerId),
