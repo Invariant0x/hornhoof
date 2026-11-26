@@ -112,6 +112,17 @@ async function screenshot(scope: Locator, info: TestInfo, name: string) {
   await scope.screenshot({ path, animations: 'disabled' });
 }
 
+async function screenshotPair(page: Page, second: Locator, info: TestInfo, name: string) {
+  if (!process.env.HH_CONNECT_SHOTS) return;
+  await page.evaluate(() => document.fonts.ready);
+  const box = (await second.boundingBox())!;
+  const viewport = page.viewportSize()!;
+  const height = Math.ceil(box.y + box.height);
+  expect(height).toBeLessThanOrEqual(viewport.height);
+  const path = process.env.HH_OUT ? join(process.env.HH_OUT, name) : info.outputPath(name);
+  await page.screenshot({ path, clip: { x: 0, y: 0, width: viewport.width, height }, animations: 'disabled' });
+}
+
 function length(t: Messages): number {
   const steps = t.subs.steps;
   return [steps.run, steps.connect, steps.ready, steps.now.run, steps.now.password, steps.now.copy,
@@ -178,34 +189,37 @@ for (const flow of FLOWS) for (const language of looks) {
   }
 }
 
-test('one install command asks for the password in every selected plan at 375, en, dark', async ({ page }, info) => {
-  await page.setViewportSize({ width: 375, height: 1000 });
-  await serve(page, { id: 'claude', plan: PLANS[0] }, 'en', 'dark', PLANS);
-  await page.goto('/');
-  await page.getByRole('navigation').getByRole('button', { name: en.shell.tabs.subscriptions, exact: true }).click();
-  await page.getByRole('button', { name: en.subs.connect, exact: true }).click();
-  for (const [, name] of PLANS) await page.getByRole('checkbox', { name, exact: true }).check();
-  await page.getByRole('button', { name: en.subs.getCommand, exact: true }).click();
+for (const [width, theme] of [[375, 'dark'], [1440, 'light']] as const) {
+  test(`one install command asks for the password in every selected plan at ${width}, en, ${theme}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 3000 });
+    await serve(page, { id: 'claude', plan: PLANS[0] }, 'en', theme, PLANS);
+    await page.goto('/');
+    await page.getByRole('navigation').getByRole('button', { name: en.shell.tabs.subscriptions, exact: true }).click();
+    await page.getByRole('button', { name: en.subs.connect, exact: true }).click();
+    for (const [, name] of PLANS) await page.getByRole('checkbox', { name, exact: true }).check();
+    await page.getByRole('button', { name: en.subs.getCommand, exact: true }).click();
 
-  const cards = PLANS.map(([, name]) => page.getByRole('region', { name: en.subs.commandHeading(name), exact: true }));
-  for (const card of cards) {
-    const step = card.getByRole('listitem').first();
-    await expect(step.getByLabel(en.common.password, { exact: true })).toBeVisible();
-    await expect(step.getByText(en.subs.steps.now.password, { exact: true })).toBeVisible();
-    await expect(step.locator('code')).toHaveCount(0);
-  }
-  const codex = cards[1]!;
-  await screenshot(codex, info, 'shared-command-codex-dark-375-locked.png');
-  await codex.getByLabel(en.common.password, { exact: true }).fill(PASSWORD);
-  await codex.getByRole('button', { name: en.common.next, exact: true }).click();
-  for (const card of cards) {
-    const step = card.getByRole('listitem').first();
-    await expect(step.locator('code').first()).toBeVisible();
-    await expect(step.getByText(en.subs.steps.now.run, { exact: true })).toBeVisible();
-    await expect(step.getByLabel(en.common.password, { exact: true })).toHaveCount(0);
-  }
-  await screenshot(codex, info, 'shared-command-codex-dark-375-unlocked.png');
-});
+    const cards = PLANS.map(([, name]) => page.getByRole('region', { name: en.subs.commandHeading(name), exact: true }));
+    for (const card of cards) {
+      const step = card.getByRole('listitem').first();
+      await expect(step.getByLabel(en.common.password, { exact: true })).toBeVisible();
+      await expect(step.getByText(en.subs.steps.now.password, { exact: true })).toBeVisible();
+      await expect(step.locator('code')).toHaveCount(0);
+    }
+    const codex = cards[1]!;
+    const frame = `shared-command-two-cards-${theme}-${width}`;
+    await screenshotPair(page, codex, info, `${frame}-locked.png`);
+    await codex.getByLabel(en.common.password, { exact: true }).fill(PASSWORD);
+    await codex.getByRole('button', { name: en.common.next, exact: true }).click();
+    for (const card of cards) {
+      const step = card.getByRole('listitem').first();
+      await expect(step.locator('code').first()).toBeVisible();
+      await expect(step.getByText(en.subs.steps.now.run, { exact: true })).toBeVisible();
+      await expect(step.getByLabel(en.common.password, { exact: true })).toHaveCount(0);
+    }
+    await screenshotPair(page, codex, info, `${frame}-unlocked.png`);
+  });
+}
 
 for (const theme of ['light', 'dark']) for (const width of [1440, 375]) {
   test(`setup reuses the account password at ${width}, en, ${theme}`, async ({ page }, info) => {
