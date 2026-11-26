@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useSyncExternalStore } from 'react';
-import { SERVICE_CLOSE } from '@hornhoof/protocol/service-lines';
+import { BOOT_STYLE, SERVICE_CLOSE } from '@hornhoof/protocol/service-lines';
+import { useT } from '../i18n';
 import { service, type ServiceMessage, type ServiceView } from '../service-state';
 import { takeEscape } from './escape';
 import { LogoMark } from './icons';
@@ -123,11 +124,12 @@ export function useServiceNotice(id: string, on: boolean, line: string): void {
 /* In the place of a page area that has nothing cached to show while a state stands: the logo, the ring and the same line, in
    place. No window of its own and nothing to press. live: false where a second area of the screen shows it too, so the
    screen has one status. */
-export function ServiceLoader({ live = true }: { live?: boolean }) {
+export function ServiceLoader({ live = true, boot = false }: { live?: boolean; boot?: boolean }) {
   const view = useServiceView();
   const shown = view !== null;
   useEffect(() => (shown ? service.holdLoader() : undefined), [shown]);
   if (!view) return null;
+  if (boot && view.message.kind === 'updating') return <BootScreen updating />;
   return (
     <section className="svc-loader" role={live ? 'status' : undefined} aria-live={live ? 'polite' : undefined} aria-busy="true">
       <LogoMark className="svc-mark" />
@@ -135,5 +137,23 @@ export function ServiceLoader({ live = true }: { live?: boolean }) {
       <Line message={view.message} />
       <Progress message={view.message} />
     </section>
+  );
+}
+
+export function BootScreen({ updating = false }: { updating?: boolean }) {
+  const t = useT();
+  const word = updating ? t.boot.updating : t.boot.loading;
+  return (
+    <>
+      <style>{BOOT_STYLE}</style>
+      <section className="boot-screen" role="status" aria-busy="true">
+        <LogoMark className="boot-mark" />
+        <p className="boot-line">
+          <span className="boot-label">{word}…</span>
+          <span className="boot-word" aria-hidden="true" data-word={word} />
+          <span className="boot-dots" aria-hidden="true"><i /><i /><i /></span>
+        </p>
+      </section>
+    </>
   );
 }

@@ -14,3 +14,23 @@ export const SERVICE_LINES = {
 
 /* What the window's one button and the update's progress bar are called to a screen reader, in English like the lines. */
 export const SERVICE_CLOSE = 'Close';
+
+/* The front has no app bundle while the server updates. Both entry points use these words and the same loader CSS. */
+export const BOOT_WORDS = { loading: 'Loading', updating: 'Updating' } as const;
+
+export const BOOT_STYLE = `
+.boot-screen { position: absolute; inset: 0; max-inline-size: none; display: grid; justify-items: center; align-content: center; gap: 16px; padding: 16px; text-align: center; }
+.boot-mark { display: block; inline-size: 48px; block-size: 48px; }
+.boot-mark .mk-dome { fill: none; stroke: var(--cyan); stroke-width: 2.4; }
+.boot-mark .mk-base { fill: none; stroke: var(--ink); stroke-width: 2.4; }
+.boot-mark .mk-dot { fill: var(--ink); }
+.boot-line { position: relative; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.boot-label { position: absolute; clip-path: inset(50%); inline-size: 1px; block-size: 1px; overflow: hidden; white-space: nowrap; }
+.boot-word::before { content: attr(data-word); }
+.boot-dots { display: inline-flex; gap: .12em; margin-inline-start: .12em; }
+.boot-dots > i { inline-size: .12em; block-size: .12em; border-radius: 50%; background: currentColor; animation: boot-dot 1.2s ease-in-out infinite; }
+.boot-dots > i:nth-child(2) { animation-delay: .2s; }
+.boot-dots > i:nth-child(3) { animation-delay: .4s; }
+@keyframes boot-dot { 0%, 60%, 100% { opacity: .35; } 30% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .boot-dots > i { animation: none; } }
+`;
