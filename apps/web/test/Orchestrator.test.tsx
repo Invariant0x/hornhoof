@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
+import { heardAgain } from '../src/live';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import type { EventView, Me, Org, ShownCommand } from '../src/types';
 import { accessView, CARD, DEV_ORG, ME, mockApi, ORG, ROSTER, SUBS, withKey } from './api-mock';
@@ -324,6 +325,32 @@ describe('AgentWindow', () => {
     await user.click(within(card).getByRole('button', { name: 'Done' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${shown.id}/hide`, body: undefined });
     await vi.waitFor(() => expect(screen.queryByText(commandCode(command))).not.toBeInTheDocument());
+  });
+
+  it.each(['pending', 'refused'] as const)('dismisses the agent command while the hide request is %s and keeps it closed on refresh', async state => {
+    const user = userEvent.setup();
+    fakeStream();
+    const command: ShownCommand = {
+      id: 'd'.repeat(64), kind: 'add', plans: ['Codex'], machine: 'work-laptop',
+      command: 'fixture command', expiresAt: '2099-01-01T00:00:00Z',
+    };
+    const other: ShownCommand = { ...command, id: 'e'.repeat(64), plans: ['Claude'] };
+    let commands = [command];
+    const { calls } = open({
+      'GET /api/nodes/commands': () => [200, { commands }],
+      [`POST /api/nodes/commands/${command.id}/hide`]: state === 'pending'
+        ? () => new Promise(() => {})
+        : [409, { error: { code: 'conflict', reason: 'other_machine', message: 'Command for another machine.' } }],
+    });
+    const title = 'Command to add Codex to work-laptop';
+    await user.click(within(await screen.findByRole('region', { name: title })).getByRole('button', { name: 'Done', exact: true }));
+    expect(screen.queryByRole('region', { name: title })).not.toBeInTheDocument();
+    expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${command.id}/hide`, body: undefined });
+
+    commands = [command, other];
+    act(heardAgain);
+    expect(await screen.findByRole('region', { name: 'Command to add Claude to work-laptop' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: title })).not.toBeInTheDocument();
   });
 
   it('names each kind of machine command in Russian', async () => {

@@ -10,6 +10,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Fixed
 
 - Connect windows ask for your Hornhoof password while the command is locked. After you enter it, the command takes the place of the password field and the window tells you how to copy it.
+- Done and Close dismiss a connect command from the orchestrator immediately, even if the connection is still pending or failed. Refreshing the window keeps the command dismissed.
 
 ## [0.44.3] - 2026-11-25
 

@@ -48,6 +48,16 @@ const CARD_ICON = 'M4 7h10M18 7h2M4 17h4M12 17h8M14 4v6M8 14v6';
 const INBOX_ICON = 'M4 13l3-8h10l3 8v6H4zM4 13h5l1 2h4l1-2h5';
 const STOP_ICON = 'M7 7h10v10H7z';
 
+const dismissedCommandKey = (personId: string, id: string): string => `hh-command-dismissed:${personId}:${id}`;
+
+function wasDismissed(personId: string, id: string): boolean {
+  try {
+    return sessionStorage.getItem(dismissedCommandKey(personId, id)) === '1';
+  } catch {
+    return false;
+  }
+}
+
 type Applied = {
   proposalId: string | null;
   created?: { template: TemplateKey | null; name: string | null; products: string[] }[];
@@ -404,6 +414,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
      here, apart from his conversation. */
   const [commands, setCommands] = useState<ShownCommand[]>([]);
   const [commandsIn, setCommandsIn] = useState(false);
+  const dismissed = useRef(new Set<string>());
+  const personId = me.person.id;
   const ownsCommands = orchestrator && me.person.isOwner;
   /* What the terminal has to say, at the foot of the window with the other notes. */
   const [termNotes, setTermNotes] = useState<WindowNote[]>([]);
@@ -453,15 +465,23 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     if (!ownsCommands) return;
     const res = await api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null);
     if (!mounted.current) return;
-    if (res) setCommands(res.commands.filter(commandBlockOpen));
+    if (res) setCommands(res.commands.filter(c => commandBlockOpen(c) && !dismissed.current.has(c.id) && !wasDismissed(personId, c.id)));
     setCommandsIn(true);
-  }, [ownsCommands]);
+  }, [ownsCommands, personId]);
 
-  const hideCommand = (id: string) =>
-    api.post(`/api/nodes/commands/${id}/hide`).then(
-      () => mounted.current && setCommands(list => list.filter(c => c.id !== id)),
-      err => mounted.current && setFailure(err),
-    );
+  const hideCommand = (id: string) => {
+    /* Close immediately. A pending or failed request and a stale refresh must not bring the command back. */
+    dismissed.current.add(id);
+    try {
+      sessionStorage.setItem(dismissedCommandKey(personId, id), '1');
+    } catch {
+      /* The dismissal still holds for the window when session storage is unavailable. */
+    }
+    setCommands(list => list.filter(c => c.id !== id));
+    void api.post(`/api/nodes/commands/${id}/hide`).catch(err => {
+      if (mounted.current) setFailure(err);
+    });
+  };
 
   /* History comes in order, a page at a time, and only it moves the cursor: a live line never skips what came before it. A
      window with no line yet takes the newest ones only. */
@@ -691,7 +711,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       {!open && staffByHand && <StaffCard key={`hand-${staffByHand.id}`} department={staffByHand} onDone={() => setStaffByHand(null)} onHide={() => setStaffByHand(null)} locked={handLock} />}
       {byHand && <StructureCard manual={{ existing }} departments={org.departments} onCorrect={focusLine} onDone={() => setManual(false)} onHide={() => setManual(false)} locked={handLock} />}
       {commands.map(c => (
-        <CommandCard key={c.id} shown={c} onDone={() => void hideCommand(c.id)} />
+        <CommandCard key={c.id} shown={c} onDone={() => hideCommand(c.id)} />
       ))}
     </>
   );

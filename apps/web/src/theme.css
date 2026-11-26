@@ -1170,9 +1170,11 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 /* The structure card in the orchestrator's window. */
 .t-card { margin-inline-start: 18px; padding: 14px 16px 16px; display: grid; gap: 4px; background: var(--surface2); border: 1px solid var(--line2); border-inline-start: 2px solid var(--cyan); font-family: var(--f-body); font-size: 14px; line-height: 1.4; }
 .t-card h4 { margin: 0 0 6px; font-family: var(--f-display); font-size: 15px; font-weight: 600; }
+.command-card-head { display: flex; align-items: flex-start; justify-content: space-between; }
+.command-card-head h4 { overflow-wrap: anywhere; }
 .t-card label { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start; padding: 6px 0; cursor: pointer; }
 .t-card label.lock { cursor: default; }
-.t-card input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan); }
+.t-card input[type="checkbox"] { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan); }
 .t-card small { display: block; color: var(--muted); font-size: 12.5px; }
 .t-card .f { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; }
 .t-card .alert { margin: 6px 0 0; }

@@ -1,12 +1,13 @@
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
-import { LOCALES, SOURCE_LOCALE } from '@hornhoof/protocol';
+import { isPseudoLocaleId, LOCALES, SOURCE_LOCALE, type Direction } from '@hornhoof/protocol';
 import { en, type Messages } from '../src/i18n/en';
 import type { Language, ShippedLanguage } from '../src/i18n/plural';
 import { pseudoMessages } from '../src/i18n/pseudo';
 import { ru } from '../src/i18n/ru';
 import type { MachineView, ShownCommand, SubView } from '../src/types';
-import { ME, serveApi } from './api';
+import { ME, serveApi, serveOwnerKey } from './api';
+import { open as openAgentWindow } from './agent-window-steps';
 
 const HOST = 'test-laptop';
 const PASSWORD = 'fixture password';
@@ -120,14 +121,14 @@ function length(t: Messages): number {
 }
 
 const dictionaries: Record<ShippedLanguage, Messages> = { en, ru };
-const shipped = LOCALES.map(({ id, dir }) => ({ id, dir, t: dictionaries[id] }));
+const shipped: { id: ShippedLanguage; dir: Direction; t: Messages }[] = LOCALES.map(({ id, dir }) => ({ id, dir, t: dictionaries[id] }));
 shipped.sort((a, b) => length(a.t) - length(b.t));
 const looks = new Set<Language>([SOURCE_LOCALE, shipped[0]!.id, shipped.at(-1)!.id, 'en-XL']);
 const rtl = shipped.find(({ dir }) => dir === 'rtl');
 if (rtl) looks.add(rtl.id);
 
 for (const flow of FLOWS) for (const language of looks) {
-  const t = language === 'en-XL' ? pseudoMessages(language, en) : dictionaries[language];
+  const t = isPseudoLocaleId(language) ? pseudoMessages(language, en) : dictionaries[language];
   for (const theme of ['light', 'dark']) for (const width of [1440, 375]) {
     test(`${flow.id}: password then command at ${width}, ${language}, ${theme}`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: 1000 });
@@ -209,5 +210,50 @@ for (const theme of ['light', 'dark']) for (const width of [1440, 375]) {
     await page.evaluate(() => document.fonts.ready);
     await fits(scope);
     await screenshot(scope, info, `setup-${theme}-${width}-unlocked.png`);
+  });
+}
+
+const DISMISSALS = [
+  ['pending', 'done', null],
+  ['refused', 'done', 409],
+  ['failed', 'close', 500],
+  ['finished', 'close', 204],
+] as const;
+
+for (const [state, control, status] of DISMISSALS) {
+  test(`${control} dismisses a ${state} agent connect command through the next refresh`, async ({ page }) => {
+    await page.clock.install();
+    await page.addInitScript(() => localStorage.setItem('hh-lang', 'en'));
+    await serveApi(page);
+    await serveOwnerKey(page);
+    const command: ShownCommand = {
+      id: 'b'.repeat(64), kind: 'add', plans: ['Codex'], machine: HOST, machineId: MACHINE.id,
+      command: JOIN, expiresAt: new Date(Date.now() + 45 * 60_000).toISOString(),
+    };
+    const other: ShownCommand = { ...command, id: 'c'.repeat(64), plans: ['Claude'] };
+    let commands = [command];
+    await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands } }));
+    await page.route(`**/api/nodes/commands/${command.id}/hide`, route => {
+      if (status === null) return;
+      if (status === 204) return route.fulfill({ status });
+      return route.fulfill({ status, json: { error: {
+        code: status === 409 ? 'conflict' : 'internal',
+        reason: status === 409 ? 'other_machine' : 'unknown',
+        message: status === 409 ? 'Command for another machine.' : 'Could not save the dismissal.',
+      } } });
+    });
+
+    const agent = await openAgentWindow(page, 'orchestrator', 'en');
+    const card = agent.getByRole('region', { name: en.window.commandAdd('Codex', HOST), exact: true });
+    await expect(card.locator('code').first()).toContainText('--owner-key');
+    await card.getByRole('button', { name: control === 'done' ? en.common.done : en.window.close, exact: true }).click();
+    expect(await card.count()).toBe(0);
+    commands = [command, other];
+    await page.clock.fastForward(15_000);
+    await expect(agent.getByRole('region', { name: en.window.commandAdd('Claude', HOST), exact: true })).toBeVisible();
+    await expect(card).toHaveCount(0);
+    const reopened = await openAgentWindow(page, 'orchestrator', 'en');
+    await expect(reopened.getByRole('region', { name: en.window.commandAdd('Claude', HOST), exact: true })).toBeVisible();
+    await expect(reopened.getByRole('region', { name: en.window.commandAdd('Codex', HOST), exact: true })).toHaveCount(0);
   });
 }
