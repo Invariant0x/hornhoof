@@ -469,7 +469,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     setCommandsIn(true);
   }, [ownsCommands, personId]);
 
-  const hideCommand = (id: string) => {
+  const dismissCommand = ({ id, kind, subscriptionIds }: ShownCommand) => {
     /* Close immediately. A pending or failed request and a stale refresh must not bring the command back. */
     dismissed.current.add(id);
     try {
@@ -478,6 +478,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       /* The dismissal still holds for the window when session storage is unavailable. */
     }
     setCommands(list => list.filter(c => c.id !== id));
+    /* The hide route consumes machine commands. Keep a copied command usable until it is run, cancelled or expires. */
+    if (kind !== 'plans' || !subscriptionIds?.length) return;
     void api.post(`/api/nodes/commands/${id}/hide`).catch(err => {
       if (mounted.current) setFailure(err);
     });
@@ -711,7 +713,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       {!open && staffByHand && <StaffCard key={`hand-${staffByHand.id}`} department={staffByHand} onDone={() => setStaffByHand(null)} onHide={() => setStaffByHand(null)} locked={handLock} />}
       {byHand && <StructureCard manual={{ existing }} departments={org.departments} onCorrect={focusLine} onDone={() => setManual(false)} onHide={() => setManual(false)} locked={handLock} />}
       {commands.map(c => (
-        <CommandCard key={c.id} shown={c} onDone={() => hideCommand(c.id)} />
+        <CommandCard key={c.id} shown={c} onDone={() => dismissCommand(c)} />
       ))}
     </>
   );

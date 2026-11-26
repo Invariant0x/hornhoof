@@ -29,11 +29,11 @@ const sub = ([provider, label]: Plan): SubView => ({
   isOrchestrator: false, accounts: [], tier: null, accountsDiffer: false, signedInOnce: false, leaseMachine: null,
 });
 
-async function serve(page: Page, flow: Flow, language: Language, theme: string) {
+async function serve(page: Page, flow: Flow, language: Language, theme: string, plans: readonly Plan[] = 'plan' in flow ? [flow.plan] : []) {
   let subscriptions = flow.id === 'add-my-plan' ? [sub(PLANS[0])] : [];
   let commands: ShownCommand[] = [];
-  const make = (kind: ShownCommand['kind'], target?: SubView): ShownCommand => ({
-    id: 'a'.repeat(64), kind, plans: target ? [target.label] : [], subscriptionIds: target ? [target.id] : [],
+  const make = (kind: ShownCommand['kind'], targets: SubView[] = []): ShownCommand => ({
+    id: 'a'.repeat(64), kind, plans: targets.map(target => target.label), subscriptionIds: targets.map(target => target.id),
     dismissedSubscriptionIds: [], machine: kind === 'add' ? HOST : null, ...(kind === 'add' ? { machineId: MACHINE.id } : {}),
     command: JOIN,
     expiresAt: new Date(Date.now() + 45 * 60_000).toISOString(),
@@ -54,9 +54,8 @@ async function serve(page: Page, flow: Flow, language: Language, theme: string) 
   await page.route('**/api/machines', route => route.fulfill({ json: { machines: [MACHINE], builtin: null } }));
   await page.route('**/api/subscriptions/connect', route => {
     if (!('plan' in flow)) return route.fallback();
-    const target = sub(flow.plan);
-    subscriptions = [target];
-    commands = [make('plans', target)];
+    subscriptions = plans.map(sub);
+    commands = [make('plans', subscriptions)];
     return route.fulfill({ status: 201, json: { ...commands[0], subscriptions } });
   });
   await page.route('**/api/machines/command', route => {
@@ -64,7 +63,7 @@ async function serve(page: Page, flow: Flow, language: Language, theme: string) 
     return route.fulfill({ status: 201, json: commands[0] });
   });
   await page.route(`**/api/machines/${MACHINE.id}/plans`, route => {
-    commands = [make('add', subscriptions[0])];
+    commands = [make('add', subscriptions)];
     return route.fulfill({ status: 201, json: commands[0] });
   });
   await page.addInitScript(({ language, theme }) => {
@@ -166,7 +165,9 @@ for (const flow of FLOWS) for (const language of looks) {
 
       await password.fill(PASSWORD);
       await scope.getByRole('button', { name: t.common.next, exact: true }).click();
-      await expect(replacement.locator('code').first()).toContainText('--join TEST_ONLY --owner-key');
+      const code = replacement.locator('code').first();
+      await expect(code).toBeVisible();
+      await expect(code).toContainText('--join TEST_ONLY --owner-key');
       await expect(copyLine).toBeVisible();
       await expect(password).toHaveCount(0);
       await expect(step.getByText(t.subs.steps.now.password, { exact: true })).toHaveCount(0);
@@ -176,6 +177,35 @@ for (const flow of FLOWS) for (const language of looks) {
     });
   }
 }
+
+test('one install command asks for the password in every selected plan at 375, en, dark', async ({ page }, info) => {
+  await page.setViewportSize({ width: 375, height: 1000 });
+  await serve(page, { id: 'claude', plan: PLANS[0] }, 'en', 'dark', PLANS);
+  await page.goto('/');
+  await page.getByRole('navigation').getByRole('button', { name: en.shell.tabs.subscriptions, exact: true }).click();
+  await page.getByRole('button', { name: en.subs.connect, exact: true }).click();
+  for (const [, name] of PLANS) await page.getByRole('checkbox', { name, exact: true }).check();
+  await page.getByRole('button', { name: en.subs.getCommand, exact: true }).click();
+
+  const cards = PLANS.map(([, name]) => page.getByRole('region', { name: en.subs.commandHeading(name), exact: true }));
+  for (const card of cards) {
+    const step = card.getByRole('listitem').first();
+    await expect(step.getByLabel(en.common.password, { exact: true })).toBeVisible();
+    await expect(step.getByText(en.subs.steps.now.password, { exact: true })).toBeVisible();
+    await expect(step.locator('code')).toHaveCount(0);
+  }
+  const codex = cards[1]!;
+  await screenshot(codex, info, 'shared-command-codex-dark-375-locked.png');
+  await codex.getByLabel(en.common.password, { exact: true }).fill(PASSWORD);
+  await codex.getByRole('button', { name: en.common.next, exact: true }).click();
+  for (const card of cards) {
+    const step = card.getByRole('listitem').first();
+    await expect(step.locator('code').first()).toBeVisible();
+    await expect(step.getByText(en.subs.steps.now.run, { exact: true })).toBeVisible();
+    await expect(step.getByLabel(en.common.password, { exact: true })).toHaveCount(0);
+  }
+  await screenshot(codex, info, 'shared-command-codex-dark-375-unlocked.png');
+});
 
 for (const theme of ['light', 'dark']) for (const width of [1440, 375]) {
   test(`setup reuses the account password at ${width}, en, ${theme}`, async ({ page }, info) => {
@@ -213,14 +243,7 @@ for (const theme of ['light', 'dark']) for (const width of [1440, 375]) {
   });
 }
 
-const DISMISSALS = [
-  ['pending', 'done', null],
-  ['refused', 'done', 409],
-  ['failed', 'close', 500],
-  ['finished', 'close', 204],
-] as const;
-
-for (const [state, control, status] of DISMISSALS) {
+for (const state of ['pending', 'refused', 'failed', 'finished']) for (const control of ['done', 'close']) {
   test(`${control} dismisses a ${state} agent connect command through the next refresh`, async ({ page }) => {
     await page.clock.install();
     await page.addInitScript(() => localStorage.setItem('hh-lang', 'en'));
@@ -232,28 +255,27 @@ for (const [state, control, status] of DISMISSALS) {
     };
     const other: ShownCommand = { ...command, id: 'c'.repeat(64), plans: ['Claude'] };
     let commands = [command];
+    let cancelled = false;
     await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands } }));
     await page.route(`**/api/nodes/commands/${command.id}/hide`, route => {
-      if (status === null) return;
-      if (status === 204) return route.fulfill({ status });
-      return route.fulfill({ status, json: { error: {
-        code: status === 409 ? 'conflict' : 'internal',
-        reason: status === 409 ? 'other_machine' : 'unknown',
-        message: status === 409 ? 'Command for another machine.' : 'Could not save the dismissal.',
-      } } });
+      cancelled = true;
+      return route.fulfill({ status: 204 });
     });
 
     const agent = await openAgentWindow(page, 'orchestrator', 'en');
     const card = agent.getByRole('region', { name: en.window.commandAdd('Codex', HOST), exact: true });
     await expect(card.locator('code').first()).toContainText('--owner-key');
+    /* The installer runs outside the web app. Its pending, refused and failed attempts leave the command active.
+       A successful join consumes it, so the next command list leaves it out. */
+    commands = state === 'finished' ? [other] : [command, other];
     await card.getByRole('button', { name: control === 'done' ? en.common.done : en.window.close, exact: true }).click();
     expect(await card.count()).toBe(0);
-    commands = [command, other];
     await page.clock.fastForward(15_000);
     await expect(agent.getByRole('region', { name: en.window.commandAdd('Claude', HOST), exact: true })).toBeVisible();
     await expect(card).toHaveCount(0);
     const reopened = await openAgentWindow(page, 'orchestrator', 'en');
     await expect(reopened.getByRole('region', { name: en.window.commandAdd('Claude', HOST), exact: true })).toBeVisible();
     await expect(reopened.getByRole('region', { name: en.window.commandAdd('Codex', HOST), exact: true })).toHaveCount(0);
+    expect(cancelled).toBe(false);
   });
 }

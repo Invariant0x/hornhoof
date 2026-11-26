@@ -125,20 +125,19 @@ export function CommandBox({ command, trust, password, showComputerConsent = tru
 
   useEffect(() => {
     if (!joins) return;
-    let live = true;
+    const controller = new AbortController();
+    const { signal } = controller;
     setLeft(false);
     /* The screen's own password is for the first try: one that did not work is asked for after it. */
-    publicKey(tries === 0 ? password : undefined).then(
+    publicKey(signal, tries === 0 ? password : undefined).then(
       found => {
-        if (!live) return;
+        if (signal.aborted) return;
         setKey(found);
         setLeft(found === null);
       },
-      () => live && setLeft(true),
+      () => { if (!signal.aborted) setLeft(true); },
     );
-    return () => {
-      live = false;
-    };
+    return () => controller.abort();
   }, [joins, tries, password, publicKey]);
 
   const keyless = joins && key === NO_KEY_HERE;

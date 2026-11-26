@@ -83,6 +83,34 @@ describe('the steps to connect a personal plan', () => {
     expect(step.querySelector('code')).toHaveTextContent('--owner-key');
   });
 
+  it('offers a password in each card sharing a command and unlocks every card from either prompt', async () => {
+    const claude = plan('claude', 'waiting_machine');
+    const codex = plan('codex', 'waiting_machine');
+    const command = { ...shown(claude), subscriptionIds: [claude.id, codex.id], plans: [claude.label, codex.label] };
+    view([claude, codex], { commands: [command], extra: { 'GET /api/me/key': [200, { key: null }] } });
+    const first = within(await screen.findByRole('region', { name: 'Install Claude' }));
+    const second = within(await screen.findByRole('region', { name: 'Install Codex' }));
+    await screen.findAllByLabelText('Password');
+    for (const block of [first, second]) {
+      const step = within(block.getAllByRole('listitem')[0]!);
+      expect(step.getByLabelText('Password')).toBeVisible();
+      expect(step.getByText('Enter your Hornhoof password to get the command.')).toBeVisible();
+    }
+
+    const user = userEvent.setup();
+    await user.click(first.getByRole('button', { name: 'Cancel' }));
+    expect(first.queryByLabelText('Password')).not.toBeInTheDocument();
+    expect(second.getByLabelText('Password')).toBeVisible();
+    await user.click(first.getByRole('button', { name: 'Enter password' }));
+    await first.findByLabelText('Password');
+    await user.type(second.getByLabelText('Password'), 'test password');
+    await user.click(second.getByRole('button', { name: 'Next' }));
+    for (const block of [first, second]) {
+      expect(await block.findByText(commandCode(withKey(COMMAND)))).toBeVisible();
+      expect(block.queryByLabelText('Password')).not.toBeInTheDocument();
+    }
+  });
+
   it('shows the same steps in the install block shown right after a plan is added', async () => {
     const waiting = plan('claude', 'waiting_machine');
     view([waiting], { commands: [shown(waiting)] });

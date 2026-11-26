@@ -322,34 +322,34 @@ describe('AgentWindow', () => {
     expect(within(card).queryByText(en.machines.computerConsent)).not.toBeInTheDocument();
     expect(within(card).getByText(/^Run this in a terminal on work-laptop\./)).toBeInTheDocument();
     expect(within(card).getByText('The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.')).toBeInTheDocument();
-    await user.click(within(card).getByRole('button', { name: 'Done' }));
-    expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${shown.id}/hide`, body: undefined });
-    await vi.waitFor(() => expect(screen.queryByText(commandCode(command))).not.toBeInTheDocument());
+    await user.click(within(card).getByRole('button', { name: en.window.close, exact: true }));
+    expect(card).not.toBeInTheDocument();
+    expect(calls).not.toContainEqual({ method: 'POST', path: `/api/nodes/commands/${shown.id}/hide`, body: undefined });
   });
 
-  it.each(['pending', 'refused'] as const)('dismisses the agent command while the hide request is %s and keeps it closed on refresh', async state => {
+  it.each(['pending', 'failed'] as const)('dismisses the agent plan command while saving the dismissal is %s and keeps it closed on refresh', async state => {
     const user = userEvent.setup();
     fakeStream();
     const command: ShownCommand = {
-      id: 'd'.repeat(64), kind: 'add', plans: ['Codex'], machine: 'work-laptop',
+      id: 'd'.repeat(64), kind: 'plans', plans: ['Codex'], subscriptionIds: ['codex-plan'], machine: null,
       command: 'fixture command', expiresAt: '2099-01-01T00:00:00Z',
     };
-    const other: ShownCommand = { ...command, id: 'e'.repeat(64), plans: ['Claude'] };
+    const other: ShownCommand = { ...command, id: 'e'.repeat(64), plans: ['Claude'], subscriptionIds: ['claude-plan'] };
     let commands = [command];
     const { calls } = open({
       'GET /api/nodes/commands': () => [200, { commands }],
       [`POST /api/nodes/commands/${command.id}/hide`]: state === 'pending'
         ? () => new Promise(() => {})
-        : [409, { error: { code: 'conflict', reason: 'other_machine', message: 'Command for another machine.' } }],
+        : [500, { error: { code: 'internal', message: 'Could not save the dismissal.' } }],
     });
-    const title = 'Command to add Codex to work-laptop';
+    const title = en.window.commandPlans('Codex');
     await user.click(within(await screen.findByRole('region', { name: title })).getByRole('button', { name: /^Done$/ }));
     expect(screen.queryByRole('region', { name: title })).not.toBeInTheDocument();
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${command.id}/hide`, body: undefined });
 
     commands = [command, other];
     act(heardAgain);
-    expect(await screen.findByRole('region', { name: 'Command to add Claude to work-laptop' })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: en.window.commandPlans('Claude') })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: title })).not.toBeInTheDocument();
   });
 

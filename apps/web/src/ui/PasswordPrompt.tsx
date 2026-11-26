@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ApiFailure } from '../api';
 import { useT } from '../i18n';
 import { canMakeKey, deviceKey, makeKey, serverKey } from '../owner-key';
@@ -47,64 +47,59 @@ export function PasswordPrompt({ purpose, onPassword, onCancel }: { purpose: 'ma
   );
 }
 
-/* One question on a page at a time: a second command that needs the key waits for the answer to the first. */
-type Asked = { answer: Promise<string | null>; settle(key: string | null): void };
-let open: Asked | null = null;
-
-function ask(): Asked {
-  let resolve!: (key: string | null) => void;
-  const answer = new Promise<string | null>(done => { resolve = done; });
-  const asked: Asked = {
-    answer,
-    settle: key => {
-      if (open === asked) open = null;
-      resolve(key);
-    },
-  };
-  open = asked;
-  return asked;
-}
+/* Each card shows its own field. A successful answer supplies the same public key to all waiting cards. */
+type KeyWaiters = Set<(key: string | null) => void>;
+type Question = { cancel(): void; answer(key: string): void };
+let open: KeyWaiters | null = null;
 
 /* What publicKey answers where the person has no key and this page can make none. */
 export const NO_KEY_HERE = '';
 
 /* The public half of the viewer's key, for commands that carry it. A viewer without a key makes one with their password. */
-export function useOwnerKey(): { publicKey(password?: string): Promise<string | null>; prompt: ReactNode } {
-  const [mine, setMine] = useState<Asked | null>(null);
+export function useOwnerKey(): { publicKey(signal: AbortSignal, password?: string): Promise<string | null>; prompt: ReactNode } {
+  const [mine, setMine] = useState<Question | null>(null);
 
-  const publicKey = useCallback(async (password?: string): Promise<string | null> => {
+  const publicKey = useCallback(async (signal: AbortSignal, password?: string): Promise<string | null> => {
+    setMine(null);
     const server = await serverKey();
     /* A key this device keeps for another one is dropped here. */
     await deviceKey(server);
+    if (signal.aborted) return null;
     if (server) return server.publicKey;
     if (!canMakeKey()) return NO_KEY_HERE;
     if (password !== undefined) return (await makeKey(password)).publicKey;
-    if (open) return open.answer;
-    const asked = ask();
-    setMine(asked);
-    return asked.answer;
+    const waiters = open ??= new Set();
+    return new Promise(resolve => {
+      const cancel = () => finish(null);
+      const question: Question = { cancel, answer: key => { for (const waiter of waiters) waiter(key); } };
+      function finish(key: string | null) {
+        waiters.delete(finish);
+        if (waiters.size === 0 && open === waiters) open = null;
+        signal.removeEventListener('abort', cancel);
+        if (!signal.aborted) setMine(current => current === question ? null : current);
+        resolve(key);
+      }
+      waiters.add(finish);
+      signal.addEventListener('abort', cancel, { once: true });
+      setMine(question);
+    });
   }, []);
 
-  /* A box that goes away takes its question with it, so nothing waits for an answer nobody can give. */
-  useEffect(() => () => mine?.settle(null), [mine]);
-
   if (!mine) return { publicKey, prompt: null };
-  const answered = (key: string | null) => {
-    setMine(null);
-    mine.settle(key);
-  };
   const onPassword = async (password: string): Promise<boolean> => {
     try {
-      answered((await makeKey(password)).publicKey);
+      mine.answer((await makeKey(password)).publicKey);
       return true;
     } catch (err) {
       if (!(err instanceof ApiFailure)) throw err;
       if (err.reason === 'wrong_password') return false;
       /* Another window of theirs made the key meanwhile: that one is the person's key. */
       if (err.reason !== 'key_exists') throw err;
-      answered((await serverKey())?.publicKey ?? null);
+      const key = await serverKey();
+      if (key) mine.answer(key.publicKey);
+      else mine.cancel();
       return true;
     }
   };
-  return { publicKey, prompt: <PasswordPrompt purpose="make" onPassword={onPassword} onCancel={() => answered(null)} /> };
+  return { publicKey, prompt: <PasswordPrompt purpose="make" onPassword={onPassword} onCancel={mine.cancel} /> };
 }
