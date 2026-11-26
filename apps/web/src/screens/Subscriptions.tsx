@@ -1,6 +1,6 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { api, ApiFailure } from '../api';
+import { api, ApiFailure, isAway } from '../api';
 import { useStream } from '../live';
 import { doneOf, useHeldRows, useLoad } from '../ui/Loading';
 import { PlanConnection, ReadySaid } from '../ui/PlanConnection';
@@ -28,7 +28,6 @@ import { TokenCount, TokenGauges } from '../ui/Tokens';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
 import { clock, limitState, planStateOnMachine, shortName, stateOf, subName, TERMINAL_SIGNIN, waitsThere, windowName, windowUsage } from '../ui/subscription';
-import { PlanSteps } from '../ui/PlanSteps';
 import { keepUnits } from '../ui/units';
 import { replaceSubscription } from './subscription-list';
 import { sayIf } from '@hornhoof/protocol';
@@ -478,8 +477,8 @@ function PlanFix(props: PlanProps) {
   return (
     <section className="blk blk-fix">
       {!c.note?.command && <p>{fixWords(t, s)}</p>}
-      {!c.note?.command && !s.connecting && s.owner.id === me.person.id && <PlanSteps sub={s} command={c.command} signing={Boolean(c.signing)} />}
-      <SubscriptionInstall sub={s} ownerId={me.person.id} command={c.command} onNew={() => c.newCommand(s)} />
+      <SubscriptionInstall sub={s} ownerId={me.person.id} command={c.command}
+        showSteps={!c.note?.command && !s.connecting && s.owner.id === me.person.id} signing={Boolean(c.signing)} onNew={() => c.newCommand(s)} />
       <SignInNote note={c.note} />
       <div className="machine-actions">{[signInAction(t, props), keyAction(t, props)].map(a => a && <ActionButton key={a.key} action={a} className="act" />)}<RemoveButtons {...props} /></div>
       <RemoveAsk sub={s} controls={c} />
@@ -524,7 +523,7 @@ type PlanReads = ReturnType<typeof usePlanCommands>;
 type ConnectionParts = {
   setSubs: PlanReads['setSubs'];
   load: PlanReads['load'];
-  run: (action: () => Promise<void>) => Promise<void>;
+  run: (action: () => Promise<void>, options?: { serviceOutage?: boolean }) => Promise<void>;
   signIn: (sub: SubView, fresh: boolean) => unknown;
 };
 
@@ -544,12 +543,12 @@ function usePlanConnections({ setSubs, load, run, signIn }: ConnectionParts) {
       setConnection(sub.id, null);
       if (TERMINAL_SIGNIN.has(sub.provider)) await signIn(sub, false);
       else await api.post(`/api/subscriptions/${sub.id}/connecting/retry`);
-    });
+    }, { serviceOutage: true });
   const cancelConnection = (sub: SubView) =>
     run(async () => {
       setConnection(sub.id, null);
       await api.post(`/api/subscriptions/${sub.id}/connecting/cancel`);
-    });
+    }, { serviceOutage: true });
   return { retryConnection, cancelConnection };
 }
 
@@ -593,12 +592,12 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   const newCommand = (sub: SubView) => run(() => requestCommand(sub));
   const onConnected = (shown: ActiveCommand, added: SubView[]) => { setConnecting(false); connected(shown, added); };
 
-  async function run(action: () => Promise<void>) {
+  async function run(action: () => Promise<void>, { serviceOutage = false } = {}) {
     setFailure(null);
     try {
       await action();
     } catch (err) {
-      setFailure(err);
+      if (!serviceOutage || !isAway(err)) setFailure(err);
     }
   }
 

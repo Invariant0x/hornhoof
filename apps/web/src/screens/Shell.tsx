@@ -12,10 +12,11 @@ import { Idents } from '../ui/Idents';
 import { FirstContact } from '../ui/FirstContact';
 import { RecoveryBanner } from '../ui/RecoveryBanner';
 import { SwitchBanner } from '../ui/SwitchBanner';
-import { ShellTop, useMeasuredShellTop } from '../ui/shellBars';
-import { LoadFailure, UpdateSaysIt, useLoadFailure } from '../ui/LoadFailure';
+import { ShellTop, useMeasuredShellTop, useServiceTop } from '../ui/shellBars';
+import { LoadFailure, useLoadFailure } from '../ui/LoadFailure';
 import { onTop, useLoad } from '../ui/Loading';
 import { UpdateBanner } from '../ui/UpdateBanner';
+import { useUpdateRoad } from '../ui/UpdateVersion';
 import { UpdateCut } from '../ui/UpdateCut';
 import { useVersion, versionText } from '../ui/VersionMark';
 import { useDecisions, useImprovements } from '../tasks';
@@ -456,7 +457,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
   const missingDepartment = departmentIsMissing({ deptId, org, orgFailure });
   const updates = useUpdates(company);
-  const [updateSaysIt, setUpdateSaysIt] = useState(false);
+  useUpdateRoad(updates);
   const decisions = useDecisionsView();
   /* A person's card, on the map or in a department, opens the decisions screen showing theirs. */
   const openDecisions = (personId: string) => {
@@ -468,6 +469,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const accountButton = useRef<HTMLButtonElement>(null);
   const closeContact = useCallback(() => { setContact(false); accountButton.current?.focus(); }, []);
   const fit = useTabsFit(`${TABS.map(id => t.shell.tabs[id]).join('|')}|${decisions.waiting}`);
+  useServiceTop(fit.bar);
   /* Where the room under the bars of the shell starts, which the map and an open department start what they show at. */
   const page = useRef<HTMLElement>(null);
   const shellTop = useMeasuredShellTop(page);
@@ -504,7 +506,6 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
 
   return (
     <AgentWindowContext value={openAgent}>
-    <UpdateSaysIt value={updateSaysIt}>
     <ShellTop value={shellTop}>
     <div className="shell" style={shellVars(tab === 'map', shellTop, plateRoom)}>
       <header className="topbar" ref={fit.bar}>
@@ -521,7 +522,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           name takes under them with --plate-room. */}
       <main ref={page} className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}${tab === 'tasks' ? ' tracker-page' : ''}`}>
         <SwitchBanner>
-          {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} onProgressShown={setUpdateSaysIt} />}
+          {company && <UpdateBanner updates={updates} onDetails={() => openAccount({ kind: 'versions' })} />}
           <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount({ kind: 'settings', group: 'company' })} />
         </SwitchBanner>
         <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />
@@ -618,7 +619,6 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
       {company && updates.cut && <UpdateCut cut={updates.cut} updates={updates} />}
     </div>
     </ShellTop>
-    </UpdateSaysIt>
     </AgentWindowContext>
   );
 }

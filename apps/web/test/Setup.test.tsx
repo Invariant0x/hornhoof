@@ -363,6 +363,8 @@ describe("the setup's command and its owner's key", () => {
     const sent = calls.find(call => call.method === 'PUT' && call.path === '/api/me/key')!.body as { password: string; publicKey: string };
     expect(sent.password).toBe('a password typed here');
     expect(await screen.findByText(commandCode(`${command} --owner-key ${sent.publicKey}`))).toBeInTheDocument();
+    expect(screen.getByText(/^Copy the command below,/)).toBeInTheDocument();
+    expect(screen.queryByText('Enter your Hornhoof password to get the command.')).not.toBeInTheDocument();
     /* The only password field is long gone: nothing was asked a second time. */
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
   });

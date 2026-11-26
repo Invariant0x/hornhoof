@@ -3,7 +3,7 @@ import type { Messages } from '../i18n/en';
 import type { UpdateStep } from '../types';
 
 /* The five steps of an update, in the order the updater takes them. */
-const STEPS: UpdateStep[] = ['pull', 'promise', 'backup', 'install', 'health'];
+export const STEPS: UpdateStep[] = ['pull', 'promise', 'backup', 'install', 'health'];
 
 type Props = { version: string; step: UpdateStep | null; starting?: boolean; offline?: boolean; maintenance?: boolean };
 

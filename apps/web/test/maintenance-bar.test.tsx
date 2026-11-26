@@ -4,13 +4,14 @@ import { deferred } from '../../../test-support/deferred.mjs';
 import { heardAgain } from '../src/live';
 import { Settings } from '../src/screens/Settings';
 import { Shell } from '../src/screens/Shell';
+import { Subscriptions } from '../src/screens/Subscriptions';
 import type { GoalView, UpdatesView } from '../src/types';
 import { DeptBranches } from '../src/ui/DeptBranches';
-import { UpdateSaysIt } from '../src/ui/LoadFailure';
+import { service } from '../src/service-state';
 import { page } from '../src/updates';
 import { en } from '../src/i18n/en';
 import { MACHINES, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS, TASK_DETAIL, TASKS } from './api-mock';
-import { userEvent, waitFor } from './subscriptions-helpers';
+import { lists, openAll, userEvent, waitFor } from './subscriptions-helpers';
 
 /* While the update panel shows an update in progress, a load the server refused for maintenance draws no bar of its own:
    the panel already says Hornhoof takes no changes. Once the updates poll gets an answer again, every such load asks
@@ -40,6 +41,8 @@ type Answer = readonly [number, unknown?];
 function server(routes: Record<string, Answer>, updates: 'running' | 'none' = 'running', available: Record<string, Answer> = {}) {
   const state = { held: true, polls: 0 };
   const calls = mockApi({
+    /* The page looks at the server before it says anything of it: an update that holds the server refuses the look too. */
+    'GET /api/build': () => (state.held ? [...REFUSED] : [200, { build: 'test' }]),
     'GET /api/updates': () => {
       state.polls++;
       if (updates === 'none' || (state.held && state.polls > 1)) return [...REFUSED];
@@ -55,15 +58,35 @@ const bars = () => screen.queryAllByRole('alert').map(alert => alert.textContent
 /* Answers already given are taken in: a number of turns of the event loop, with no timer. */
 const takenIn = () => act(async () => { for (let i = 0; i < 20; i++) await new Promise<void>(resolve => setImmediate(resolve)); });
 const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name });
-const progress = () => screen.getByRole('progressbar', { name: 'Update progress' });
+/* These tests exercise the shell under the loading screen. App-level visibility is checked separately. */
+const updateScreen = () => expect(service.snapshot()).toMatchObject({ place: 'boot', message: { kind: 'updating' } });
+
+it.each(['retry', 'cancel'] as const)('leaves a plan %s refused during an outage to the service road', async action => {
+  const plan = { ...SUBS[1]!, id: 's-antigravity', provider: 'antigravity' as const, label: 'Antigravity',
+    connecting: { nodeId: 'm1', hostname: 'dev-laptop', state: 'too_long', step: 'models',
+      since: '2026-10-30T02:00:00Z', until: '2099-10-30T02:05:00Z', error: null, code: null, line: null } };
+  const path = `/api/subscriptions/${plan.id}/connecting/${action}`;
+  const calls = lists({
+    'GET /api/subscriptions': [200, { subscriptions: [plan] }],
+    'GET /api/build': [...REFUSED],
+    [`POST ${path}`]: [...REFUSED],
+  });
+  render(<Subscriptions me={ME} onHome={() => {}} />);
+  await openAll();
+  const label = action === 'retry' ? en.subs.connection.retryLabel : en.subs.connection.cancelLabel;
+  await userEvent.click(await waitFor(() => screen.getByRole('button', { name: label('Antigravity') })));
+  await takenIn();
+  expect(calls.some(c => c.method === 'POST' && c.path === path)).toBe(true);
+  expect(bars()).toEqual([]);
+});
 
 /* The Shell under a held server, with the panel saying maintenance after the next poll on the test's clock. */
 async function held(routes: Record<string, Answer>, available?: Record<string, Answer>) {
   const s = server(routes, 'running', available);
   render(<Shell me={ME} onSignOut={() => {}} />);
-  await waitFor(progress);
+  await waitFor(updateScreen);
   await act(() => vi.advanceTimersByTimeAsync(BUSY_POLL_MS));
-  await waitFor(() => expect(progress()).toHaveAttribute('aria-valuetext', 'Maintenance: Hornhoof is installing the update and takes no changes until it ends.'));
+  await waitFor(updateScreen);
   return s;
 }
 
@@ -151,7 +174,7 @@ describe('a maintenance refusal while the update panel shows', () => {
       'GET /api/org': () => updating ? [...REFUSED] : [200, ORG],
     });
     render(<Shell me={ME} onSignOut={() => {}} />);
-    await waitFor(progress);
+    await waitFor(updateScreen);
     await takenIn();
     expect(bars()).toEqual([]);
     const before = calls.filter(call => call.path === '/api/org').length;
@@ -174,7 +197,7 @@ describe('a maintenance refusal while the update panel shows', () => {
       'GET /api/org': () => updating ? [...REFUSED] : [200, ORG],
     });
     render(<Shell me={ME} onSignOut={() => {}} />);
-    await waitFor(progress);
+    await waitFor(updateScreen);
     await act(() => vi.advanceTimersByTimeAsync(BUSY_POLL_MS));
     await takenIn();
     const before = calls.filter(call => call.path === '/api/org').length;
@@ -226,7 +249,7 @@ describe('a maintenance refusal while the update panel shows', () => {
       },
     });
     render(<Shell me={ME} onSignOut={() => {}} />);
-    await waitFor(progress);
+    await waitFor(updateScreen);
     await act(() => vi.advanceTimersByTimeAsync(BUSY_POLL_MS));
     await userEvent.click(tab('People'));
     await waitFor(() => expect(calls.some(call => call.path === '/api/people')).toBe(true));
@@ -261,11 +284,13 @@ describe('a maintenance refusal while the update panel shows', () => {
   ] as const)('clears the maintenance refusal and loads %s without reopening it', async (_name, path, answer, content, found) => {
     let held = true;
     const calls = mockApi({ [`GET ${path}`]: () => held ? [...REFUSED] : [200, answer] });
-    const { rerender } = render(<UpdateSaysIt value={true}>{content}</UpdateSaysIt>);
+    /* The service road says the update while it runs, so a load it refuses has nothing to add. */
+    act(() => service.setUpdate(true));
+    render(content);
     await takenIn();
     const whileHeld = bars();
     held = false;
-    rerender(<UpdateSaysIt value={false}>{content}</UpdateSaysIt>);
+    act(() => service.setUpdate(false));
     await act(async () => { heardAgain(); });
     expect({ whileHeld, reads: calls.filter(call => call.path === path).length, loaded: found() !== null }).toEqual({
       whileHeld: [], reads: 2, loaded: true,
@@ -273,39 +298,44 @@ describe('a maintenance refusal while the update panel shows', () => {
   });
 });
 
-describe('what still draws its bar', () => {
-  it('a maintenance refusal while no update panel shows, as for a person who does not see the whole company', async () => {
+describe('what the service road says, and what still draws its bar', () => {
+  it('a maintenance refusal with no update panel, as for a person who does not see the whole company: the road says it, the map adds no bar', async () => {
     server({ 'GET /api/org': [200, ORG] });
     render(<Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} onSignOut={() => {}} />);
-    await waitFor(() => screen.getByText(MAINTENANCE));
-    /* The map says it where it will stand, in the block of a failed load (#1620). */
-    expect(screen.getByText(MAINTENANCE).closest('[role="alert"]')).not.toBeNull();
+    await waitFor(updateScreen);
+    await takenIn();
+    expect(screen.queryByText(MAINTENANCE)).not.toBeInTheDocument();
+    expect(bars()).toEqual([]);
   });
 
-  it('a maintenance refusal while the updates screen has nothing to show yet', async () => {
+  it('a maintenance refusal while the updates screen has nothing to show yet: the road says it with no bar', async () => {
     server({ 'GET /api/org': [200, ORG] }, 'none');
     render(<Shell me={ME} onSignOut={() => {}} />);
-    await waitFor(() => screen.getByText(MAINTENANCE));
-    expect(screen.queryByRole('progressbar', { name: 'Update progress' })).not.toBeInTheDocument();
+    await waitFor(updateScreen);
+    await takenIn();
+    expect(screen.queryByText(MAINTENANCE)).not.toBeInTheDocument();
+    expect(bars()).toEqual([]);
   });
 
-  it('a maintenance refusal when a server move replaces the update panel', async () => {
+  it('a maintenance refusal when a server move shows: the road says the update once, and the move says itself', async () => {
     mockApi({
+      'GET /api/build': [...REFUSED],
       'GET /api/updates': [200, view('install')],
       'GET /api/org': [...REFUSED],
       'GET /api/network/switch': [200, { self: null, moving: true, from: null, to: 'm1', since: null, cut: false, question: false }],
     });
     render(<Shell me={ME} onSignOut={() => {}} />);
     await waitFor(() => screen.getByText(/Moving the company to another machine/));
+    await waitFor(updateScreen);
     await takenIn();
-    expect(bars()).toContainEqual(expect.stringContaining(MAINTENANCE));
-    expect(screen.queryByRole('progressbar', { name: 'Update progress' })).not.toBeInTheDocument();
+    expect(screen.queryByText(MAINTENANCE)).not.toBeInTheDocument();
+    expect(bars()).toEqual([]);
   });
 
   it('a failure other than maintenance while the update runs', async () => {
     mockApi({ 'GET /api/updates': [200, view('install')], 'GET /api/org': [...BROKEN] });
     render(<Shell me={ME} onSignOut={() => {}} />);
-    await waitFor(() => screen.getByRole('progressbar', { name: 'Update progress' }));
+    await waitFor(updateScreen);
     await waitFor(() => expect(bars()).toEqual([expect.stringContaining(en.load.failed.server)]));
   });
 });

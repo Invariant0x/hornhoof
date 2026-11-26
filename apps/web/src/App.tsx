@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiFailure, isAway, onSignedOut } from './api';
+import { askAgainAfter } from './backoff';
 import { useReloadToNewBuild } from './build';
-import { errorText, useT } from './i18n';
+import { useT } from './i18n';
 import { forgetOrg } from './org';
+import { service } from './service-state';
 import { forgetRequestDrafts } from './ui/Requests';
 import { AcceptInvite } from './screens/AcceptInvite';
 import { Login } from './screens/Login';
 import { Setup } from './screens/Setup';
 import { Shell } from './screens/Shell';
 import type { Me } from './types';
-import { Card } from './ui/Card';
-import { ConnectionLayer, useLink } from './ui/ConnectionLayer';
-import { VersionMark } from './ui/VersionMark';
+import { ServiceLayout, useServiceNotice } from './ui/ServiceRoad';
 import { parseRoute } from './routes';
 
 type Screen =
@@ -20,38 +20,34 @@ type Screen =
   | { kind: 'setup'; linkDomain?: string; recovering?: boolean }
   | { kind: 'login' }
   | { kind: 'shell'; me: Me; welcome?: boolean }
-  /* The server cannot be reached: the layer over the page says so, and the page asks again after a growing wait, tries times so far. */
-  | { kind: 'away'; tries: number; welcome: boolean }
-  | { kind: 'error'; failure: unknown };
+  /* The server cannot be reached, or answered with an error: the service road says so, in the page's own place the loader, and
+     the page asks again after a growing wait, tries times so far. No page of its own and nothing to press. */
+  | { kind: 'away' | 'error'; tries: number; welcome: boolean };
 
-/* How long the page waits before it asks again, after so many tries: the layer's own look is quicker, and this is the page's. */
-const ASK_AGAIN_MS = [1_000, 2_000, 4_000, 8_000, 10_000];
-
-/* What the page shows when its first asks fail: the log in for a session that is not there, the wait for a server that is
-   away, which the layer over the page says and the page asks again from, or the error. */
+/* What the page shows when its first asks fail: the log in for a session that is not there, or the wait for a server that is
+   away or in error, which the service road says and the page asks again from. */
 function screenFor(failure: unknown, welcome: boolean, tries: number): Screen {
   if (failure instanceof ApiFailure && failure.status === 401) return { kind: 'login' };
-  return isAway(failure) ? { kind: 'away', tries: tries + 1, welcome } : { kind: 'error', failure };
+  return { kind: isAway(failure) ? 'away' : 'error', tries: tries + 1, welcome };
 }
 
-/* While the page waits for a server that is away, it asks again after a growing wait. */
+/* While the page waits for a server that is away or in error, it asks again after a growing wait. */
 function useAskAgain(screen: Screen, ask: (welcome: boolean, tries: number) => unknown): void {
   useEffect(() => {
-    if (screen.kind !== 'away') return;
-    const timer = setTimeout(() => void ask(screen.welcome, screen.tries), ASK_AGAIN_MS[Math.min(screen.tries - 1, ASK_AGAIN_MS.length - 1)]);
+    if (screen.kind !== 'away' && screen.kind !== 'error') return;
+    const timer = setTimeout(() => void ask(screen.welcome, screen.tries), askAgainAfter(screen.tries - 1));
     return () => clearTimeout(timer);
   }, [screen, ask]);
 }
 
 export function App() {
-  const { away } = useLink();
+  const session = useScreen();
+  const [screen] = session;
+  const starting = screen.kind === 'loading' || screen.kind === 'away' || screen.kind === 'error';
   return (
-    <div className="app-layout">
-      {/* Under the layer that says the server is away, nothing takes a key or a click. */}
-      <div className="app-screen" inert={away !== null}><Screens /></div>
-      <VersionMark />
-      <ConnectionLayer />
-    </div>
+    <ServiceLayout starting={starting}>
+      <Screens session={session} />
+    </ServiceLayout>
   );
 }
 
@@ -62,6 +58,8 @@ export function App() {
 function useScreen() {
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
   const person = useRef<string | null>(null);
+  /* The person chose to sign out: the session that ends then is no service state. */
+  const chose = useRef(false);
   const show = useCallback((next: Screen) => {
     const id = next.kind === 'shell' ? next.me.person.id : null;
     if (id !== person.current) {
@@ -69,10 +67,17 @@ function useScreen() {
       forgetRequestDrafts();
     }
     person.current = id;
+    if (next.kind === 'shell') service.signedOut(false);
     setScreen(next);
   }, []);
-  useEffect(() => onSignedOut(() => person.current !== null && show({ kind: 'login' })), [show]);
-  return [screen, show] as const;
+  useEffect(() => onSignedOut(() => {
+    if (person.current === null) return;
+    service.signedOut(!chose.current);
+    chose.current = false;
+    show({ kind: 'login' });
+  }), [show]);
+  const signOut = useCallback(() => void (chose.current = true), []);
+  return [screen, show, signOut] as const;
 }
 
 function validSetup(setup: { needed: boolean; linkDomain?: string; recovering?: boolean } | null) {
@@ -85,9 +90,9 @@ function validMe(me: Me | null): Me {
   return me;
 }
 
-function Screens() {
+function Screens({ session }: { session: ReturnType<typeof useScreen> }) {
   const t = useT();
-  const [screen, show] = useScreen();
+  const [screen, show, signOut] = session;
   useReloadToNewBuild(screen.kind === 'shell');
 
   const decide = useCallback(async (welcome = false, tries = 0) => {
@@ -109,6 +114,9 @@ function Screens() {
 
   useAskAgain(screen, decide);
 
+  /* A load that failed with an answer of the server's own is a notice of the road, until the page asks again and it works. */
+  useServiceNotice('app', screen.kind === 'error', t.app.notResponding);
+
   const home = useCallback(
     (welcome = false) => {
       window.history.replaceState(null, '', '/');
@@ -120,6 +128,7 @@ function Screens() {
   switch (screen.kind) {
     case 'loading':
     case 'away':
+    case 'error':
       return null;
     case 'invite':
       return <AcceptInvite token={screen.token} onDone={home} />;
@@ -129,16 +138,6 @@ function Screens() {
       return <Login onDone={() => void decide()} />;
     case 'shell':
       /* Each person gets screens of their own: nothing the one before drew stays on them. */
-      return <Shell key={screen.me.person.id} me={screen.me} welcome={screen.welcome} onSignOut={() => void decide()} />;
-    case 'error':
-      return (
-        <Card>
-          <h1>{t.app.notResponding}</h1>
-          <p className="muted">{errorText(t, screen.failure)}</p>
-          <div className="actions">
-            <button className="btn" type="button" onClick={() => home()}>{t.app.tryAgain}</button>
-          </div>
-        </Card>
-      );
+      return <Shell key={screen.me.person.id} me={screen.me} welcome={screen.welcome} onSignOut={() => { signOut(); void decide(); }} />;
   }
 }
