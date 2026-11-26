@@ -12,7 +12,7 @@ export const SERVICE_LINES = {
   signedOut: 'Signed out',
 } as const;
 
-/* What the window's one button and the update's progress bar are called to a screen reader, in English like the lines. */
+/* What the window's one button is called to a screen reader. */
 export const SERVICE_CLOSE = 'Close';
 
 /* The front has no app bundle while the server updates. Both entry points use these words and the same loader CSS. */
@@ -28,9 +28,9 @@ export const BOOT_STYLE = `
 .boot-label { position: absolute; clip-path: inset(50%); inline-size: 1px; block-size: 1px; overflow: hidden; white-space: nowrap; }
 .boot-word::before { content: attr(data-word); }
 .boot-dots { display: inline-flex; gap: .12em; margin-inline-start: .12em; }
-.boot-dots > i { inline-size: .12em; block-size: .12em; border-radius: 50%; background: currentColor; animation: boot-dot 1.2s ease-in-out infinite; }
-.boot-dots > i:nth-child(2) { animation-delay: .2s; }
-.boot-dots > i:nth-child(3) { animation-delay: .4s; }
+.boot-dots > i { inline-size: .12em; block-size: .12em; border-radius: 50%; background: currentColor; animation: boot-dot 1.2s ease-in-out var(--boot-dot-delay, 0s) infinite; }
+.boot-dots > i:nth-child(2) { --boot-dot-delay: .2s; }
+.boot-dots > i:nth-child(3) { --boot-dot-delay: .4s; }
 @keyframes boot-dot { 0%, 60%, 100% { opacity: .35; } 30% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .boot-dots > i { animation: none; } }
 `;

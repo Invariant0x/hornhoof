@@ -4,10 +4,9 @@ import { deferred } from '../../../test-support/deferred.mjs';
 import { heardAgain } from '../src/live';
 import { Settings } from '../src/screens/Settings';
 import { Shell } from '../src/screens/Shell';
-import { ServiceStrip, ServiceWindow } from '../src/ui/ServiceRoad';
 import type { GoalView, UpdatesView } from '../src/types';
 import { DeptBranches } from '../src/ui/DeptBranches';
-import { service, type UpdateRun } from '../src/service-state';
+import { service } from '../src/service-state';
 import { page } from '../src/updates';
 import { en } from '../src/i18n/en';
 import { MACHINES, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS, TASK_DETAIL, TASKS } from './api-mock';
@@ -19,7 +18,6 @@ import { userEvent, waitFor } from './subscriptions-helpers';
 
 const MAINTENANCE = 'Hornhoof is installing an update and takes no changes until it ends. Try again in a few minutes.';
 const REFUSED = [503, { error: { code: 'unavailable', message: 'Hornhoof is installing an update and takes no changes until it ends.', reason: 'maintenance' } }] as const;
-const RUN: UpdateRun = { progress: 0.4 };
 const BROKEN = [500, { error: { code: 'internal', message: 'Something went wrong.' } }] as const;
 /* How often the updates screen asks while an update runs. */
 const BUSY_POLL_MS = 2_000;
@@ -59,18 +57,16 @@ const bars = () => screen.queryAllByRole('alert').map(alert => alert.textContent
 /* Answers already given are taken in: a number of turns of the event loop, with no timer. */
 const takenIn = () => act(async () => { for (let i = 0; i < 20; i++) await new Promise<void>(resolve => setImmediate(resolve)); });
 const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name });
-/* The service road says the update in its one window, with its bar: how far it is, as the step it reports. A page area with
-   nothing cached says the same line and bar in its own place, so the window is where the bar is looked for. */
-const road = () => screen.getByRole('dialog', { name: 'Updating' });
-const progress = () => within(road()).getByRole('progressbar');
+/* These tests exercise the shell under the loading screen. App-level visibility is checked separately. */
+const updateScreen = () => expect(service.snapshot()).toMatchObject({ place: 'boot', message: { kind: 'updating' } });
 
 /* The Shell under a held server, with the panel saying maintenance after the next poll on the test's clock. */
 async function held(routes: Record<string, Answer>, available?: Record<string, Answer>) {
   const s = server(routes, 'running', available);
-  render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
-  await waitFor(progress);
+  render(<Shell me={ME} onSignOut={() => {}} />);
+  await waitFor(updateScreen);
   await act(() => vi.advanceTimersByTimeAsync(BUSY_POLL_MS));
-  await waitFor(() => expect(progress()).toHaveAttribute('aria-valuenow', '60'));
+  await waitFor(updateScreen);
   return s;
 }
 
@@ -157,8 +153,8 @@ describe('a maintenance refusal while the update panel shows', () => {
       'GET /api/updates': () => [200, updating ? view('install') : finished()],
       'GET /api/org': () => updating ? [...REFUSED] : [200, ORG],
     });
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
-    await waitFor(progress);
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await waitFor(updateScreen);
     await takenIn();
     expect(bars()).toEqual([]);
     const before = calls.filter(call => call.path === '/api/org').length;
@@ -180,8 +176,8 @@ describe('a maintenance refusal while the update panel shows', () => {
       },
       'GET /api/org': () => updating ? [...REFUSED] : [200, ORG],
     });
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
-    await waitFor(progress);
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await waitFor(updateScreen);
     await act(() => vi.advanceTimersByTimeAsync(BUSY_POLL_MS));
     await takenIn();
     const before = calls.filter(call => call.path === '/api/org').length;
@@ -232,8 +228,8 @@ describe('a maintenance refusal while the update panel shows', () => {
         return [...REFUSED];
       },
     });
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
-    await waitFor(progress);
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await waitFor(updateScreen);
     await act(() => vi.advanceTimersByTimeAsync(BUSY_POLL_MS));
     await userEvent.click(tab('People'));
     await waitFor(() => expect(calls.some(call => call.path === '/api/people')).toBe(true));
@@ -269,12 +265,12 @@ describe('a maintenance refusal while the update panel shows', () => {
     let held = true;
     const calls = mockApi({ [`GET ${path}`]: () => held ? [...REFUSED] : [200, answer] });
     /* The service road says the update while it runs, so a load it refuses has nothing to add. */
-    act(() => service.setUpdate(RUN));
+    act(() => service.setUpdate(true));
     render(content);
     await takenIn();
     const whileHeld = bars();
     held = false;
-    act(() => service.setUpdate(null));
+    act(() => service.setUpdate(false));
     await act(async () => { heardAgain(); });
     expect({ whileHeld, reads: calls.filter(call => call.path === path).length, loaded: found() !== null }).toEqual({
       whileHeld: [], reads: 2, loaded: true,
@@ -285,21 +281,18 @@ describe('a maintenance refusal while the update panel shows', () => {
 describe('what the service road says, and what still draws its bar', () => {
   it('a maintenance refusal with no update panel, as for a person who does not see the whole company: the road says it, the map adds no bar', async () => {
     server({ 'GET /api/org': [200, ORG] });
-    render(<><Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
-    await waitFor(road);
+    render(<Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} onSignOut={() => {}} />);
+    await waitFor(updateScreen);
     await takenIn();
-    /* No update run is known to this person, so the window has its line and no bar; the map says nothing of its own. */
-    expect(within(road()).queryByRole('progressbar')).not.toBeInTheDocument();
     expect(screen.queryByText(MAINTENANCE)).not.toBeInTheDocument();
     expect(bars()).toEqual([]);
   });
 
   it('a maintenance refusal while the updates screen has nothing to show yet: the road says it with no bar', async () => {
     server({ 'GET /api/org': [200, ORG] }, 'none');
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
-    await waitFor(road);
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await waitFor(updateScreen);
     await takenIn();
-    expect(within(road()).queryByRole('progressbar')).not.toBeInTheDocument();
     expect(screen.queryByText(MAINTENANCE)).not.toBeInTheDocument();
     expect(bars()).toEqual([]);
   });
@@ -311,9 +304,9 @@ describe('what the service road says, and what still draws its bar', () => {
       'GET /api/org': [...REFUSED],
       'GET /api/network/switch': [200, { self: null, moving: true, from: null, to: 'm1', since: null, cut: false, question: false }],
     });
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<Shell me={ME} onSignOut={() => {}} />);
     await waitFor(() => screen.getByText(/Moving the company to another machine/));
-    await waitFor(road);
+    await waitFor(updateScreen);
     await takenIn();
     expect(screen.queryByText(MAINTENANCE)).not.toBeInTheDocument();
     expect(bars()).toEqual([]);
@@ -321,8 +314,8 @@ describe('what the service road says, and what still draws its bar', () => {
 
   it('a failure other than maintenance while the update runs', async () => {
     mockApi({ 'GET /api/updates': [200, view('install')], 'GET /api/org': [...BROKEN] });
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
-    await waitFor(progress);
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await waitFor(updateScreen);
     await waitFor(() => expect(bars()).toEqual([expect.stringContaining(en.load.failed.server)]));
   });
 });

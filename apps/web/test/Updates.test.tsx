@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
-import { ServiceStrip, ServiceWindow } from '../src/ui/ServiceRoad';
+import { ServiceLayout } from '../src/ui/ServiceRoad';
 import { Versions } from '../src/screens/Versions';
 import type { Build, UpdatesView, UpdaterStatus } from '../src/types';
 import { page, type Updates } from '../src/updates';
@@ -55,7 +55,7 @@ async function openVersions(user: ReturnType<typeof userEvent.setup>) {
 describe('updates', () => {
   it('shows the banner when a newer build is out', async () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()] });
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     const banner = await screen.findByRole('status', { name: 'Hornhoof update' });
     expect(banner).toHaveTextContent('Hornhoof 0.4.1 (bbbbbbb) is out: Hire from the staff card');
     expect(within(banner).getAllByRole('button').map(b => b.textContent)).toEqual(['Update', 'Update when agents finish', 'Later']);
@@ -63,7 +63,7 @@ describe('updates', () => {
 
   it('hides the banner for people who do not see the whole company', async () => {
     const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()] });
-    render(<><Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} onSignOut={() => {}} /></ServiceLayout>);
     /* The screen would ask for updates as it mounts, before the map shows. */
     await screen.findByRole('button', { name: 'Map' });
     expect(calls.map(c => c.path)).not.toContain('/api/updates');
@@ -73,11 +73,11 @@ describe('updates', () => {
   it('keeps a build hidden after Later', async () => {
     const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()] });
     const user = userEvent.setup();
-    const { unmount } = render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    const { unmount } = render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     await user.click(await screen.findByRole('button', { name: 'Later' }));
     expect(screen.queryByRole('status', { name: 'Hornhoof update' })).not.toBeInTheDocument();
     unmount();
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     await screen.findByRole('button', { name: 'Map' });
     expect(calls.filter(c => c.path === '/api/updates')).toHaveLength(2);
     await act(answersTakenIn);
@@ -96,7 +96,7 @@ describe('updates', () => {
       'DELETE /api/updates': () => ((view = updates()), [204]),
     });
     const user = userEvent.setup();
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     await user.click(await screen.findByRole('button', { name: 'Update when agents finish' }));
     expect(calls.find(c => c.method === 'POST' && c.path === '/api/updates')!.body).toEqual({ version: 'latest', whenIdle: true });
     expect(await screen.findByText(`Hornhoof will update to 0.4.1 (bbbbbbb) when the agents finish. If they have not finished by ${hourOf(WAITS.until)}, the update is called off and nothing stops.`)).toBeInTheDocument();
@@ -104,10 +104,9 @@ describe('updates', () => {
     expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/updates')).toBe(true);
     await user.click(await screen.findByRole('button', { name: 'Update' }));
     expect(calls.filter(c => c.method === 'POST' && c.path === '/api/updates').pop()!.body).toEqual({ version: 'latest', whenIdle: false });
-    /* The service road says it at once, in its window, and the banner under the menu is gone; once the updater says it is at
-       its first step, the bar stands at the start. */
-    expect(await screen.findByRole('dialog', { name: 'Updating' })).toBeInTheDocument();
-    expect(await screen.findByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
+    /* The loading screen takes the place of the banner as soon as the update starts. */
+    expect(await screen.findByText('Updating…')).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'Hornhoof update' })).not.toBeInTheDocument();
   });
 
@@ -115,13 +114,13 @@ describe('updates', () => {
     let view = updates({}, { waiting: WAITS });
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': () => [200, view] });
     const user = userEvent.setup();
-    const { unmount } = render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    const { unmount } = render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     const until = hourOf(WAITS.until);
     expect(await screen.findByText(`Hornhoof will update to 0.4.1 (bbbbbbb) when the agents finish. If they have not finished by ${until}, the update is called off and nothing stops.`)).toBeInTheDocument();
     unmount();
 
     view = updates({}, { waiting: null, calledOff: { version: '0.4.1', commit: 'b'.repeat(40), at: WAITS.until, until: WAITS.until, reason: 'deadline', turns: [{ agent: 'Zed', task: 1032 }] } });
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     expect(await screen.findByText(`The update to 0.4.1 (bbbbbbb) was called off at ${until}: the agents had not finished. Nothing was stopped.`)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'OK' }));
     /* Seen once, it is not said again; the banner goes back to the build on offer. */
@@ -134,12 +133,12 @@ describe('updates', () => {
     const calledOff = { version: '0.4.1', commit: 'b'.repeat(40), at, until: WAITS.until, turns: [{ agent: 'Zed', task: 1032 }] };
     let view = updates({}, { calledOff: { ...calledOff, reason: 'cancelled' } });
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': () => [200, view] });
-    const { unmount } = render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    const { unmount } = render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     expect(await screen.findByText(`The update to 0.4.1 (bbbbbbb) was called off at ${hourOf(at)}. Nothing was stopped.`)).toBeInTheDocument();
     unmount();
 
     view = updates({}, { calledOff: { ...calledOff, reason: 'failed', error: 'the updater cannot take it, as another update runs.' } });
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     expect(await screen.findByText(`The update to 0.4.1 (bbbbbbb) was called off at ${hourOf(at)}: Hornhoof could not pass it to the updater. Nothing was stopped.`)).toBeInTheDocument();
     expect(screen.queryByText(/the agents had not finished/)).not.toBeInTheDocument();
   });
@@ -152,7 +151,7 @@ describe('updates', () => {
       'POST /api/updates': () => new Promise(resolve => (answer = () => resolve([202, { id: 'u1' }]))),
     });
     const user = userEvent.setup();
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     const update = await screen.findByRole('button', { name: 'Update' });
     await user.dblClick(update);
     expect(calls.filter(c => c.method === 'POST' && c.path === '/api/updates')).toHaveLength(1);
@@ -175,19 +174,19 @@ describe('updates', () => {
       'POST /api/updates': () => [202, { id: 'u2' }],
     });
     const user = userEvent.setup();
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     await user.click(await screen.findByRole('button', { name: 'Update' }));
     /* The updater has not picked it up yet, and the road already says it, with no bar. */
-    expect(await screen.findByRole('dialog', { name: 'Updating' })).toBeInTheDocument();
+    expect(await screen.findByText('Updating…')).toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     view = updates({}, { status: { ...status('running', 'install'), id: 'u2' } });
     /* While it updates, the screen asks every two seconds. */
     await act(() => vi.advanceTimersByTimeAsync(2000));
-    expect(screen.getByRole('progressbar', { name: 'Updating' })).toHaveAttribute('aria-valuenow', '60');
+    expect(screen.getByText('Updating…')).toBeInTheDocument();
     down = true;
     await act(() => vi.advanceTimersByTimeAsync(2000));
-    /* The server restarts: the road goes on saying the update, as far as it knew. */
-    expect(screen.getByRole('progressbar', { name: 'Updating' })).toHaveAttribute('aria-valuenow', '60');
+    /* The loading screen remains while the server restarts. */
+    expect(screen.getByText('Updating…')).toBeInTheDocument();
   });
 
   it('shows maintenance while the server answers with it', async () => {
@@ -198,21 +197,21 @@ describe('updates', () => {
       'GET /api/updates': () =>
         maintenance ? [503, { error: { code: 'unavailable', message: '', reason: 'maintenance' } }] : [200, view],
     });
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
-    const bar = () => screen.getByRole('progressbar', { name: 'Updating' });
-    await vi.waitFor(() => expect(bar()).toHaveAttribute('aria-valuenow', '60'));
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
+    const loader = () => screen.getByText('Updating…');
+    await vi.waitFor(() => expect(loader()).toBeInTheDocument());
     maintenance = true;
-    /* The server answers that it is in maintenance: still the update, with the bar as far as it knew. */
-    await vi.waitFor(() => expect(bar()).toHaveAttribute('aria-valuenow', '60'));
+    /* A maintenance refusal keeps the loading screen up. */
+    await vi.waitFor(() => expect(loader()).toBeInTheDocument());
     maintenance = false;
     view = updates({}, { status: { ...status('running', 'health'), id: 'u2' } });
-    await vi.waitFor(() => expect(bar()).toHaveAttribute('aria-valuenow', '80'));
+    await vi.waitFor(() => expect(loader()).toBeInTheDocument());
   });
 
   it('lists versions and marks the running one', async () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()] });
     const user = userEvent.setup();
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     const dialog = await openVersions(user);
     const rows = within(dialog).getAllByRole('listitem');
     expect(rows.map(r => r.querySelector('b')!.textContent)).toEqual(['0.4.1 (bbbbbbb)', '0.4.0 (aaaaaaa)', '0.3.0 (ccccccc)']);
@@ -227,7 +226,7 @@ describe('updates', () => {
     const view = updates({ latest: build('0.5.0', 'd'.repeat(40), { tag: 'latest' }), versions: [build('', 'e'.repeat(40), { tag: 'snapshot' })] });
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, view] });
     const user = userEvent.setup();
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     const dialog = await openVersions(user);
     expect(within(dialog).getAllByRole('listitem').map(r => r.querySelector('b')!.textContent)).toEqual(['0.5.0 (ddddddd)', 'snapshot (eeeeeee)']);
   });
@@ -243,13 +242,13 @@ describe('updates', () => {
       },
     });
     const user = userEvent.setup();
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     const dialog = await openVersions(user);
     await user.click(within(within(dialog).getAllByRole('listitem')[2]!).getByRole('button', { name: 'Install' }));
     await user.click(within(dialog).getByRole('button', { name: 'Go back to 0.3.0 (ccccccc)' }));
     expect(await within(dialog).findByText('Updating Hornhoof to 0.3.0 (ccccccc)')).toBeInTheDocument();
-    /* The service road says the update in its one window; the banner under the menu is not drawn while it runs. */
-    expect(await screen.findByRole('dialog', { name: 'Updating' })).toBeInTheDocument();
+    /* The loading screen replaces the app and its update banner while the update runs. */
+    expect(await screen.findByText('Updating…')).toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'Hornhoof update' })).not.toBeInTheDocument();
     expect(calls.find(c => c.method === 'POST' && c.path === '/api/updates')!.body).toEqual({ version: '0.3.0', whenIdle: false });
   });
@@ -258,7 +257,7 @@ describe('updates', () => {
     const legacy: UpdaterStatus = { id: 'legacy', version: '0.4.1', state: 'failed', step: 'finished', log: '', at: '2026-10-30T02:05:00Z' };
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates({}, { status: legacy })] });
     const user = userEvent.setup();
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     const dialog = await openVersions(user);
     expect(within(dialog).getByText('The update to 0.4.1 (?) failed. What the updater wrote is in Versions.')).toBeInTheDocument();
   });
@@ -266,7 +265,7 @@ describe('updates', () => {
   it('warns before going back past a database change', async () => {
     const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()], 'POST /api/updates': [202, { id: 'u2' }] });
     const user = userEvent.setup();
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     const dialog = await openVersions(user);
     const old = within(dialog).getAllByRole('listitem')[2]!;
     await user.click(within(old).getByRole('button', { name: 'Install' }));
@@ -282,7 +281,7 @@ describe('updates', () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': () => [200, view] });
     const reload = vi.spyOn(page, 'reload').mockImplementation(() => {});
     const user = userEvent.setup();
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     const dialog = await openVersions(user);
     expect(within(dialog).getByText('Updating Hornhoof to 0.4.1 (bbbbbbb)')).toBeInTheDocument();
     expect(within(dialog).getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 3 of 5: saving the database');
@@ -295,7 +294,7 @@ describe('updates', () => {
   it('says how the last update ended', async () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates({}, { status: status('rolled_back', 'finished', '0.4.1 did not answer within 120 seconds.\n') })] });
     const user = userEvent.setup();
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     const dialog = await openVersions(user);
     expect(within(dialog).getByText('The update to 0.4.1 (bbbbbbb) did not start. Hornhoof went back to 0.4.0 (aaaaaaa).')).toBeInTheDocument();
     expect(within(dialog).getByText(/did not answer within 120 seconds/)).toBeInTheDocument();
@@ -304,7 +303,7 @@ describe('updates', () => {
   it('says when the updater is missing', async () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates({}, { present: false })] });
     const user = userEvent.setup();
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     const dialog = await openVersions(user);
     expect(within(dialog).getByText('The updater is not running. Run the install command for this server again to add it.')).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
@@ -326,7 +325,7 @@ describe('updates', () => {
   it('checks for updates when asked and says when it could not', async () => {
     const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates({ available: false })], 'POST /api/updates/check': [200, updates({ available: false, error: 'The registry answered 429.' })] });
     const user = userEvent.setup();
-    render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+    render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
     const dialog = await openVersions(user);
     await user.click(within(dialog).getByRole('button', { name: 'Check now' }));
     expect(calls.some(c => c.method === 'POST' && c.path === '/api/updates/check')).toBe(true);
@@ -354,22 +353,22 @@ describe('updates', () => {
     it('says how many turns would stop and starts nothing until the person agrees', async () => {
       const calls = server(wouldStop(3), [202, { id: 'u1' }]);
       const user = userEvent.setup();
-      render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+      render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
       await user.click(await screen.findByRole('button', { name: 'Update' }));
       const ask = await screen.findByRole('alertdialog', { name: 'Update now?' });
       expect(ask).toHaveTextContent('3 agent turns are running. If you update now, they stop midway, and Hornhoof starts them again after the update.');
       expect(posts(calls)).toHaveLength(1);
-      expect(screen.queryByRole('dialog', { name: 'Updating' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Updating…')).not.toBeInTheDocument();
       await user.click(within(ask).getByRole('button', { name: 'Update now' }));
       expect(posts(calls).at(-1)!.body).toEqual({ version: 'latest', whenIdle: false, confirmTurns: 3 });
-      expect(await screen.findByRole('dialog', { name: 'Updating' })).toBeInTheDocument();
+      expect(await screen.findByText('Updating…')).toBeInTheDocument();
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     });
 
     it('words one turn as one', async () => {
       server(wouldStop(1));
       const user = userEvent.setup();
-      render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+      render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
       await user.click(await screen.findByRole('button', { name: 'Update' }));
       expect(await screen.findByRole('alertdialog')).toHaveTextContent('1 agent turn is running. If you update now, it stops midway, and Hornhoof starts it again after the update.');
     });
@@ -392,7 +391,7 @@ describe('updates', () => {
     it('goes nowhere when the person cancels', async () => {
       const calls = server(wouldStop(3));
       const user = userEvent.setup();
-      render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+      render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
       await user.click(await screen.findByRole('button', { name: 'Update' }));
       const ask = await screen.findByRole('alertdialog');
       expect(ask).toHaveFocus();
@@ -406,7 +405,7 @@ describe('updates', () => {
     it('asks again with the new number when more turns started meanwhile', async () => {
       const calls = server(wouldStop(3), wouldStop(5), [202, { id: 'u1' }]);
       const user = userEvent.setup();
-      render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+      render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
       await user.click(await screen.findByRole('button', { name: 'Update' }));
       await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Update now' }));
       expect(await screen.findByText(/^5 agent turns are running/)).toBeInTheDocument();
@@ -418,9 +417,9 @@ describe('updates', () => {
     it('asks nothing when no turn would stop', async () => {
       const calls = server([202, { id: 'u1' }]);
       const user = userEvent.setup();
-      render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+      render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
       await user.click(await screen.findByRole('button', { name: 'Update' }));
-      expect(await screen.findByRole('dialog', { name: 'Updating' })).toBeInTheDocument();
+      expect(await screen.findByText('Updating…')).toBeInTheDocument();
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
       expect(posts(calls)[0]!.body).toEqual({ version: 'latest', whenIdle: false });
     });
@@ -428,7 +427,7 @@ describe('updates', () => {
     it('asks before installing from Versions too, and Escape leaves Versions open', async () => {
       const calls = server(wouldStop(2));
       const user = userEvent.setup();
-      render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+      render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
       const versions = await openVersions(user);
       await user.click(within(versions).getAllByRole('button', { name: 'Install' })[0]!);
       expect(await screen.findByRole('alertdialog')).toHaveTextContent(/^Update now\?2 agent turns are running/);
@@ -441,18 +440,18 @@ describe('updates', () => {
     it('keeps the question open and says what went wrong when the update cannot start', async () => {
       server(wouldStop(3), [503, { error: { code: 'unavailable', message: 'The updater is not running. Run install.sh server again to update.', reason: 'updater_missing' } }]);
       const user = userEvent.setup();
-      render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+      render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
       await user.click(await screen.findByRole('button', { name: 'Update' }));
       const ask = await screen.findByRole('alertdialog');
       await user.click(within(ask).getByRole('button', { name: 'Update now' }));
       expect(await within(ask).findByRole('alert')).toHaveTextContent(/updater is not running/i);
-      expect(screen.queryByRole('dialog', { name: 'Updating' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Updating…')).not.toBeInTheDocument();
     });
 
     it('starts nothing and asks nothing when the refusal does not say how many', async () => {
       const calls = server([409, { error: { code: 'conflict', message: 'Running turns would stop.', reason: 'turns_would_stop' } }]);
       const user = userEvent.setup();
-      render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+      render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
       await user.click(await screen.findByRole('button', { name: 'Update' }));
       expect(await screen.findByRole('alert')).toBeInTheDocument();
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
@@ -462,7 +461,7 @@ describe('updates', () => {
     it('still shows any other refusal in the banner', async () => {
       server([409, { error: { code: 'conflict', message: 'An update is running already.', reason: 'update_running', details: { turns: 2 } } }]);
       const user = userEvent.setup();
-      render(<><Shell me={ME} onSignOut={() => {}} /><ServiceWindow /><ServiceStrip /></>);
+      render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
       await user.click(await screen.findByRole('button', { name: 'Update' }));
       expect(await screen.findByRole('alert')).toBeInTheDocument();
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();

@@ -4,7 +4,7 @@ import { defineConfig } from '@playwright/test';
 import { browserPort } from './browser-port';
 
 /* The pictures of the one road of service messages (#2099), before and after, in Chromium, on prepared browser executables
-   and a Vite server of this checkout. Motion is reduced, so a picture shows each state at rest. Workers inherit the runner's
+   and a Vite server of this checkout. Workers inherit the runner's
    chosen port instead of recomputing it from their own PID. */
 process.env.HORNHOOF_BROWSER_PORT ??= String(browserPort(process.pid, 4880));
 const port = process.env.HORNHOOF_BROWSER_PORT;
@@ -25,7 +25,7 @@ export default defineConfig({
     baseURL: origin,
     actionTimeout: 0,
     navigationTimeout: 0,
-    reducedMotion: 'reduce',
+    reducedMotion: process.env.SHOT_SIDE === 'before' ? 'reduce' : 'no-preference',
     timezoneId: 'UTC',
     deviceScaleFactor: 1,
     trace: { mode: 'retain-on-failure', screenshots: false },

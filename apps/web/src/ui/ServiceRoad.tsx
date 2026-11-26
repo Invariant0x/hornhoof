@@ -1,28 +1,26 @@
-import { useEffect, useId, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useId, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { BOOT_STYLE, SERVICE_CLOSE } from '@hornhoof/protocol/service-lines';
 import { useT } from '../i18n';
 import { service, type ServiceMessage, type ServiceView } from '../service-state';
 import { takeEscape } from './escape';
 import { LogoMark } from './icons';
+import { VersionMark } from './VersionMark';
 
-/* The one road of service messages (#2098, #2099), drawn as Design drew it (#2100): the window, the strip and the loader are
-   one family. Each says the one current message, the Hornhoof logo and its one line, and for an update its progress bar;
-   only where it stands differs. Nothing here asks the person to try again, and each goes by itself once the state ends.
-   The words are English in every language, as the protocol keeps them. */
-
-/* What the road shows now: nothing, or the one message and the one place it stands in. */
 export const useServiceView = (): ServiceView => useSyncExternalStore(service.subscribe, service.snapshot);
 
-/* How far the update has come, as a bar with no number on the screen: only a screen reader has it. Drawn only where the
-   server says how far it is. */
-function Progress({ message }: { message: ServiceMessage }) {
-  const progress = message.update?.progress;
-  if (progress === null || progress === undefined) return null;
-  const percent = Math.round(Math.min(1, Math.max(0, progress)) * 100);
+/* Keep the loaded app mounted so it can reconnect, poll the updater, and resume with its
+   cached data. The startup screen is the only visible content while the update lasts. */
+export function ServiceLayout({ starting = false, children }: { starting?: boolean; children: ReactNode }) {
+  const view = useServiceView();
+  const boot = starting || view?.place === 'boot';
   return (
-    <span className="svc-progress" role="progressbar" aria-label={message.line} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-valuetext={message.line}>
-      <i style={{ inlineSize: `${percent}%` }} />
-    </span>
+    <div className="app-layout">
+      {!boot && <ServiceStrip />}
+      <div className="app-screen" hidden={boot} inert={boot || view?.place === 'window'}>{children}</div>
+      {boot && <BootScreen message={view?.message} />}
+      <VersionMark />
+      {!boot && <ServiceWindow />}
+    </div>
   );
 }
 
@@ -90,16 +88,13 @@ export function ServiceWindow() {
         <button ref={close} className="btn ghost icon-btn window-close" type="button" aria-label={SERVICE_CLOSE} onClick={service.close}>{CLOSE_MARK}</button>
         <LogoMark className="svc-mark" />
         <Line message={view.message} id={line} />
-        <Progress message={view.message} />
       </div>
     </div>
   );
 }
 
-/* Once the window is closed, the same state stays here: a thin plaque at the top of every screen, under the menu, out of the
-   flow, so it never moves or shrinks what stands under it. It has no close and no button, takes no focus, and shows the
-   state, and the update's progress, until the state ends. Where a page area shows the loader line in its own place, the line
-   is said, and the strip is not drawn. */
+/* Once dismissed, the current message stays in a strip out of the page flow. An area
+   showing the loader already has the line in place, so the strip is hidden. */
 export function ServiceStrip() {
   const view = useServiceView();
   if (view?.place !== 'strip' || view.loader) return null;
@@ -107,7 +102,6 @@ export function ServiceStrip() {
     <div className="svc-strip glass" role="status" aria-live="polite">
       <LogoMark className="svc-mark" />
       <Line message={view.message} />
-      <Progress message={view.message} />
     </div>
   );
 }
@@ -121,35 +115,27 @@ export function useServiceNotice(id: string, on: boolean, line: string): void {
   }, [id, on, line]);
 }
 
-/* In the place of a page area that has nothing cached to show while a state stands: the logo, the ring and the same line, in
-   place. No window of its own and nothing to press. live: false where a second area of the screen shows it too, so the
-   screen has one status. */
-export function ServiceLoader({ live = true, boot = false }: { live?: boolean; boot?: boolean }) {
+/* A loaded page area with nothing cached uses the same loader inside its own room. */
+export function ServiceLoader({ live = true }: { live?: boolean }) {
   const view = useServiceView();
-  const shown = view !== null;
+  const message = view?.place === 'boot' ? undefined : view?.message;
+  const shown = message !== undefined;
   useEffect(() => (shown ? service.holdLoader() : undefined), [shown]);
-  if (!view) return null;
-  if (boot && view.message.kind === 'updating') return <BootScreen updating />;
-  return (
-    <section className="svc-loader" role={live ? 'status' : undefined} aria-live={live ? 'polite' : undefined} aria-busy="true">
-      <LogoMark className="svc-mark" />
-      <span className="svc-ring" aria-hidden="true" />
-      <Line message={view.message} />
-      <Progress message={view.message} />
-    </section>
-  );
+  return message ? <BootScreen message={message} live={live} inline /> : null;
 }
 
-export function BootScreen({ updating = false }: { updating?: boolean }) {
+function BootScreen({ message, live = true, inline = false }: { message?: ServiceMessage; live?: boolean; inline?: boolean }) {
   const t = useT();
-  const word = updating ? t.boot.updating : t.boot.loading;
+  const updating = message?.kind === 'updating';
+  const word = updating ? t.boot.updating : message?.line ?? t.boot.loading;
+  const label = updating || !message ? `${word}…` : word;
   return (
     <>
       <style>{BOOT_STYLE}</style>
-      <section className="boot-screen" role="status" aria-busy="true">
+      <section className={inline ? 'boot-screen svc-loader' : 'boot-screen'} role={live ? 'status' : undefined} aria-live={live ? 'polite' : undefined} aria-busy="true">
         <LogoMark className="boot-mark" />
-        <p className="boot-line">
-          <span className="boot-label">{word}…</span>
+        <p className="boot-line" lang={message && !updating && message.kind !== 'notice' ? 'en' : undefined}>
+          <span className="boot-label">{label}</span>
           <span className="boot-word" aria-hidden="true" data-word={word} />
           <span className="boot-dots" aria-hidden="true"><i /><i /><i /></span>
         </p>

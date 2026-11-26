@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connection } from '../src/connection';
 import { LanguageProvider } from '../src/i18n';
 import { SERVICE_LINES, service } from '../src/service-state';
-import { ServiceLoader, ServiceStrip, ServiceWindow, useServiceNotice } from '../src/ui/ServiceRoad';
+import { ServiceLayout, ServiceLoader, ServiceStrip, ServiceWindow, useServiceNotice } from '../src/ui/ServiceRoad';
 
 /* The service road, drawn (#2098, #2099, Design #2100): window, then strip, then gone; the loader in a page area's own place.
    The look is Design's; these tests hold what it must keep: one message at a time, the window and the strip never together,
@@ -120,33 +120,26 @@ describe('the window and the strip', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
-  it('carry an update with its bar through the window and then the strip, with no number on the screen', () => {
-    const { container } = road();
-    act(() => service.setUpdate({ progress: 0.4 }));
-    const dialog = screen.getByRole('dialog');
-    expect(dialog).toHaveTextContent(SERVICE_LINES.updating);
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '40');
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', SERVICE_LINES.updating);
-    expect(container.textContent).not.toMatch(/\d|%/);
-
-    act(() => service.close());
+  it('shows the shared loading screen for an update while the loaded page stays mounted', () => {
+    render(<LanguageProvider><ServiceLayout><button type="button">Page</button></ServiceLayout></LanguageProvider>);
+    act(() => service.setUpdate(true));
+    const loader = screen.getByRole('status');
+    expect(loader).toHaveTextContent('Updating…');
+    expect(loader.querySelectorAll('.boot-dots > i')).toHaveLength(3);
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.getByRole('status')).toHaveTextContent(SERVICE_LINES.updating);
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '40');
-
-    act(() => service.setUpdate({ progress: 0.8 }));
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '80');
-
-    act(() => service.setUpdate(null));
     expect(screen.queryByRole('progressbar')).toBeNull();
-    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Page' })).toBeNull();
+    expect(screen.getByText('Page')).not.toBeVisible();
+    act(() => service.setUpdate(false));
+    expect(screen.getByRole('button', { name: 'Page' })).toBeVisible();
   });
 
-  it('draw no bar where the server does not say how far the update is', () => {
-    road();
-    act(() => service.setUpdate({ progress: null }));
-    expect(screen.getByRole('dialog')).toHaveTextContent(SERVICE_LINES.updating);
-    expect(screen.queryByRole('progressbar')).toBeNull();
+  it('shows only the same boot loader when the connection drops before the app loads', async () => {
+    render(<LanguageProvider><ServiceLayout starting>{null}</ServiceLayout></LanguageProvider>);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading…');
+    await lose();
+    expect(screen.getByRole('status')).toHaveTextContent(SERVICE_LINES.lost);
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('say only the most important state: no internet over a lost server over a notice', async () => {
@@ -193,7 +186,7 @@ describe('the loader of a page area with nothing cached', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('shows the logo, the ring and the same line in place, with no window of its own and nothing to press', async () => {
+  it('shows the logo, the dots and the same line in place, with no window of its own and nothing to press', async () => {
     const { container } = render(<LanguageProvider><ServiceLoader /></LanguageProvider>);
     await lose();
     const loader = screen.getByRole('status');
@@ -201,19 +194,10 @@ describe('the loader of a page area with nothing cached', () => {
     expect(loader).toHaveAttribute('aria-live', 'polite');
     expect(loader).toHaveTextContent(SERVICE_LINES.lost);
     expect(loader.querySelector('svg .mk-dome')).not.toBeNull();
-    expect(loader.querySelector('.svc-ring')).not.toBeNull();
+    expect(loader.querySelectorAll('.boot-dots > i')).toHaveLength(3);
     expect(container.querySelectorAll('button, [role="dialog"]')).toHaveLength(0);
     await serverBack();
     expect(container).toBeEmptyDOMElement();
-  });
-
-  it('shows the same line whether the window or the strip stands for the state, and carries the update bar', () => {
-    render(<LanguageProvider><ServiceLoader /></LanguageProvider>);
-    act(() => service.setUpdate({ progress: 0.2 }));
-    expect(screen.getByRole('status')).toHaveTextContent(SERVICE_LINES.updating);
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '20');
-    act(() => service.close());
-    expect(screen.getByRole('status')).toHaveTextContent(SERVICE_LINES.updating);
   });
 
   it('keeps the strip off its screen, since the line is said there, and brings it back with the loader gone', async () => {

@@ -2,17 +2,13 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Page, type Route } from '@playwright/test';
 import { BUILTIN_SKINS } from '../src/skins/registry';
 import type { UpdatesView } from '../src/types';
 import { serveApi } from './api';
 
-/* The pictures of the one road of service messages (#2098, #2099, Design #2100), before and after, in every built-in theme:
-   no connection to the server, and an update that holds the server with its progress, each as the window (or what stood on
-   the page before it), as the strip once the window is closed, and as the loader line of a page opened with nothing cached.
-   It touches the page only through the theme key, the answers of the server, the clock and Escape, so the same file takes
-   the pictures of the code before (SHOT_SIDE=before) and after (SHOT_SIDE=after). They go to SHOTS_DIR, else beside this
-   test's results; each line SHOT names one and its sha256. */
+/* Capture the connection window and strip, and two frames of each centered loader,
+   in every built-in theme at phone and desktop widths. */
 test.describe.configure({ timeout: 0 });
 
 const SIDE = process.env.SHOT_SIDE === 'before' ? 'before' : 'after';
@@ -50,15 +46,36 @@ async function serveState(page: Page) {
   return server;
 }
 
-async function shot(page: Page, name: string): Promise<void> {
-  const png = await page.screenshot({ animations: 'disabled' });
+async function shot(page: Page, name: string, motion = false): Promise<void> {
+  const png = await page.screenshot({ animations: motion ? 'allow' : 'disabled' });
   mkdirSync(join(SHOTS, SIDE), { recursive: true });
   const file = `${SIDE}/${name}.png`;
   writeFileSync(join(SHOTS, file), png);
   console.log(`SHOT ${file} sha256=${createHash('sha256').update(png).digest('hex')}`);
 }
 
-/* The page comes to its state by its own clock: a few seconds, as a person would wait. */
+/* Freeze the real CSS animations at two points so the two frames can be compared.
+   Check that the states differ and the text and dots keep exactly the same box. */
+async function loaderFrames(page: Page, name: string): Promise<void> {
+  const line = page.locator('.boot-screen .boot-line');
+  await expect(line).toBeVisible();
+  const box = await line.boundingBox();
+  const sample = (time: number) => line.locator('.boot-dots > i').evaluateAll((dots, at) => dots.map(dot => {
+    for (const animation of dot.getAnimations()) {
+      animation.pause();
+      animation.currentTime = at;
+    }
+    return getComputedStyle(dot).opacity;
+  }), time);
+  const early = await sample(0);
+  await shot(page, `${name}-dots-early`, true);
+  const late = await sample(360);
+  await shot(page, `${name}-dots-late`, true);
+  expect(early).toHaveLength(3);
+  expect(late).not.toEqual(early);
+  expect(await line.boundingBox()).toEqual(box);
+}
+
 const wait = (page: Page, ms: number) => page.clock.runFor(ms);
 
 for (const skin of SKINS) for (const [width, height] of SIZES) for (const state of STATES) {
@@ -73,6 +90,10 @@ for (const skin of SKINS) for (const [width, height] of SIZES) for (const state 
     await page.getByRole('navigation').getByRole('button').first().waitFor();
     server.state = state;
     await wait(page, 12_000);
+    if (SIDE === 'after' && state === 'updating') {
+      await loaderFrames(page, `${name}-loaded`);
+      return;
+    }
     await shot(page, `${name}-first`);
     if (SIDE === 'before') return;
     await page.keyboard.press('Escape');
@@ -88,10 +109,10 @@ for (const skin of SKINS) for (const [width, height] of SIZES) for (const state 
     server.state = state;
     await page.goto('/');
     await wait(page, 12_000);
-    await shot(page, `${name}-cold-first`);
-    if (SIDE === 'before') return;
-    await page.keyboard.press('Escape');
-    await wait(page, 1_000);
-    await shot(page, `${name}-cold-then`);
+    if (SIDE === 'before') {
+      await shot(page, `${name}-cold-first`);
+      return;
+    }
+    await loaderFrames(page, `${name}-cold`);
   });
 }

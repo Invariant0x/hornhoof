@@ -21,19 +21,16 @@ const STYLE = `
 @media (prefers-color-scheme: dark) { :root { --bg: #141A22; --ink: #E3EAF1; --muted: #93A0AE; --cyan: #46E0EF; } }
 * { box-sizing: border-box; }
 body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg); color: var(--ink); font: 400 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-main { display: grid; justify-items: center; gap: 16px; max-inline-size: min(100%, 60ch); text-align: center; }
-p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
 `;
 
-const UPDATING = `<main class="boot-screen" role="status" aria-busy="true">
+function loader(kind: Away): string {
+  const word = LINE[kind];
+  const label = kind === 'updating' ? `${BOOT_WORDS.updating}…` : word;
+  return `<main class="boot-screen" role="status" aria-busy="true">
 ${SIGN}
-<p class="boot-line"><span class="boot-label">${BOOT_WORDS.updating}…</span><span class="boot-word" aria-hidden="true" data-word="${BOOT_WORDS.updating}"></span><span class="boot-dots" aria-hidden="true"><i></i><i></i><i></i></span></p>
+<p class="boot-line"><span class="boot-label">${label}</span><span class="boot-word" aria-hidden="true" data-word="${word}"></span><span class="boot-dots" aria-hidden="true"><i></i><i></i><i></i></span></p>
 </main>`;
-
-const LOST = `<main role="status">
-${SIGN}
-<p>${LINE.lost}</p>
-</main>`;
+}
 
 export function awayPage(kind: Away): string {
   return `<!doctype html>
@@ -47,7 +44,7 @@ export function awayPage(kind: Away): string {
 <style>${STYLE}${BOOT_STYLE}</style>
 </head>
 <body>
-${kind === 'updating' ? UPDATING : LOST}
+${loader(kind)}
 </body>
 </html>
 `;

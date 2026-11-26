@@ -193,12 +193,29 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
           if (reducedMotion === 'reduce') {
             expect(animations.every(([name]) => name === 'none')).toBe(true);
             expect((await animation(updating)).every(([name]) => name === 'none')).toBe(true);
-            await shot(startup, `startup-loading-${colorScheme}-${width}`);
-            await shot(update, `startup-updating-${colorScheme}-${width}`);
+            await shot(startup, `startup-loading-${colorScheme}-${width}-reduced`);
+            await shot(update, `startup-503-${colorScheme}-${width}-reduced`);
           } else {
             expect(await animation(updating)).toEqual(animations);
             expect(animations.every(([name]) => name !== 'none')).toBe(true);
             expect(new Set(animations.map(([, , delay]) => delay)).size).toBe(3);
+            for (const [label, page] of [['loading', startup], ['503', update]] as const) {
+              const line = page.locator('.boot-line');
+              const box = await line.boundingBox();
+              const frames = [];
+              for (const [phase, time] of [['early', 0], ['late', 360]] as const) {
+                frames.push(await line.locator('.boot-dots > i').evaluateAll((dots, at) => dots.map(dot => {
+                  for (const animation of dot.getAnimations()) {
+                    animation.pause();
+                    animation.currentTime = at;
+                  }
+                  return getComputedStyle(dot).opacity;
+                }), time));
+                await shot(page, `startup-${label}-${colorScheme}-${width}-${phase}`);
+              }
+              expect(frames[0]).not.toEqual(frames[1]);
+              expect(await line.boundingBox()).toEqual(box);
+            }
           }
         } finally {
           finishSetup?.();
@@ -311,7 +328,7 @@ test('places the connection strip under the desktop menu and clear of the phone 
         const server = await serveServer(page);
         await page.goto('/tasks');
         await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
-        await expect(page.getByText('My tasks', { exact: true }).first()).toBeVisible();
+        await expect(page.getByRole('heading', { name: en.tracker.where.mine, exact: true })).toBeVisible();
         const still = await placeOf(page);
 
         server.mode = 'refused';
@@ -353,7 +370,7 @@ test('places the connection strip under the desktop menu and clear of the phone 
         });
         expect(bar.position).toBe('fixed');
         if (width === 375) {
-          const heading = await page.getByText('My tasks', { exact: true }).first().boundingBox();
+          const heading = await page.getByRole('heading', { name: en.tracker.where.mine, exact: true }).boundingBox();
           expect(heading).not.toBeNull();
           expect(bar.top).toBeGreaterThan(heading!.y + heading!.height);
           expect(height - bar.top - bar.height).toBeCloseTo(8, 0);

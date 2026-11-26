@@ -11,8 +11,7 @@ import { Login } from './screens/Login';
 import { Setup } from './screens/Setup';
 import { Shell } from './screens/Shell';
 import type { Me } from './types';
-import { BootScreen, ServiceLoader, ServiceStrip, ServiceWindow, useServiceNotice, useServiceView } from './ui/ServiceRoad';
-import { VersionMark } from './ui/VersionMark';
+import { ServiceLayout, useServiceNotice } from './ui/ServiceRoad';
 import { parseRoute } from './routes';
 
 type Screen =
@@ -41,18 +40,14 @@ function useAskAgain(screen: Screen, ask: (welcome: boolean, tries: number) => u
   }, [screen, ask]);
 }
 
-/* The one place a service state is drawn: the strip over the top of the page, the window over everything, and the page itself
-   inert under the window. */
 export function App() {
-  const view = useServiceView();
+  const session = useScreen();
+  const [screen] = session;
+  const starting = screen.kind === 'loading' || screen.kind === 'away' || screen.kind === 'error';
   return (
-    <div className="app-layout">
-      <ServiceStrip />
-      {/* Under the window that says the state, nothing takes a key or a click. */}
-      <div className="app-screen" inert={view?.place === 'window'}><Screens /></div>
-      <VersionMark />
-      <ServiceWindow />
-    </div>
+    <ServiceLayout starting={starting}>
+      <Screens session={session} />
+    </ServiceLayout>
   );
 }
 
@@ -95,9 +90,9 @@ function validMe(me: Me | null): Me {
   return me;
 }
 
-function Screens() {
+function Screens({ session }: { session: ReturnType<typeof useScreen> }) {
   const t = useT();
-  const [screen, show, signOut] = useScreen();
+  const [screen, show, signOut] = session;
   useReloadToNewBuild(screen.kind === 'shell');
 
   const decide = useCallback(async (welcome = false, tries = 0) => {
@@ -132,10 +127,9 @@ function Screens() {
 
   switch (screen.kind) {
     case 'loading':
-      return <BootScreen />;
     case 'away':
     case 'error':
-      return <ServiceLoader boot />;
+      return null;
     case 'invite':
       return <AcceptInvite token={screen.token} onDone={home} />;
     case 'setup':
