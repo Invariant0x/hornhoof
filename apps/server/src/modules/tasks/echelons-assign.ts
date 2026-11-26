@@ -159,6 +159,14 @@ function requireIndependentChecker(task: Task, route: Route, agentId: string): v
   if (earlier) throw new ApiError(409, 'conflict', 'This employee already checked an earlier stage of the task. The head must assign another checker.', 'task_invalid');
 }
 
+async function requireEligiblePlan(db: Reader['db'], task: Task, pinned: CheckerIdentity, live: CheckerIdentity, producer: CheckerIdentity): Promise<void> {
+  const rule = reviewEligibility(producer, live);
+  if (!rule && sameChecker(live, pinned)) return;
+  if (!(await fellBack(db, task, pinned, live))) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
+  if (rule === 'weaker_model') throw new ApiError(409, 'conflict', 'The checker fell back to a weaker model than the producer. The head must assign another checker.', 'task_changed');
+  if (rule) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
+}
+
 /* A verdict and a repair use the live identity of the same checking owner. A saved automatic fallback may outlive its pin. */
 export async function checkingIdentity(ctx: Reader, task: Task, route: Route, candidate: HandedCandidate): Promise<CheckerIdentity> {
   const { identity: assignment, ability } = pinnedChecker(task, route);
@@ -168,11 +176,7 @@ export async function checkingIdentity(ctx: Reader, task: Task, route: Route, ca
   const [member] = await stageStaff(ctx.db, task, owner);
   const identity = member && canCheckTask(member, task, ability, owner) ? await agentIdentity(ctx.db, task.companyId, owner) : null;
   if (!identity) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
-  const rule = reviewEligibility(await checkedProducer(ctx.db, task, route, candidate), identity);
-  if (!rule && sameChecker(identity, assignment)) return identity;
-  if (!(await fellBack(ctx.db, task, assignment, identity))) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
-  if (rule === 'weaker_model') throw new ApiError(409, 'conflict', 'The checker fell back to a weaker model than the producer. The head must assign another checker.', 'task_changed');
-  if (rule) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
+  await requireEligiblePlan(ctx.db, task, assignment, identity, await checkedProducer(ctx.db, task, route, candidate));
   return identity;
 }
 

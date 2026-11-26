@@ -1,7 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, tasks } from '../../db/schema.js';
-import { checkerFor, checkingIdentity, keptFromReview, populateSecurityOwner, PRODUCER_REVIEW } from './echelons-assign.js';
+import { checkerFor, checkingIdentity, heldCheckingIdentity, keptFromReview, populateSecurityOwner, PRODUCER_REVIEW } from './echelons-assign.js';
 import { checkedProducer, currentHanded } from './echelons-candidates.js';
 import { isStaged, type EchelonStage, type HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { CheckerIdentity } from './echelons-policy.js';
@@ -63,6 +63,11 @@ export async function prepareRouteChange(ctx: Ctx, task: Task, route: Route, age
   return { ...owner, paths };
 }
 
+export async function applyRouteChange(tx: Tx, task: Task, route: Route, revised: RouteChange): Promise<void> {
+  if (revised.repin) await heldCheckingIdentity(tx, task, route, revised.repin.candidate, revised.repin.identity);
+  await changeRoute(tx, route, revised.state, revised.paths);
+}
+
 function futureStep(state: Route['state'], stage: EchelonStage | undefined): Route['state']['stages'][number] {
   const at = state.stages.findIndex(step => step.stage === state.stage);
   const index = state.stages.findIndex(step => step.stage === stage);
@@ -78,12 +83,16 @@ async function changedStageOwner(ctx: Ctx, task: Task, route: Route, state: Rout
     const identity = await checkingIdentity(ctx, task, route, candidate);
     return { state: { ...state, assignment: identity }, set: {}, repin: { candidate, identity } };
   }
-  const step = futureStep(state, change.echelonStage);
-  await requireAvailableOwner(ctx, task, change.ownerAgentId);
-  const ownerAgentId = await futureOwner(ctx, task, { ...route, state }, step.stage, change.ownerAgentId);
+  return changedFutureOwner(ctx, task, { ...route, state }, futureStep(state, change.echelonStage).stage, change.ownerAgentId);
+}
+
+async function changedFutureOwner(ctx: Ctx, task: Task, route: Route, stage: EchelonStage, ownerId: string): Promise<OwnerChange> {
+  await requireAvailableOwner(ctx, task, ownerId);
+  const ownerAgentId = await futureOwner(ctx, task, route, stage, ownerId);
   if (!ownerAgentId) throw refuse(409, 'task_invalid', 'The proposed future owner must be outside teams and have the required ability and known model capability.');
-  return { state: { ...state, stages: state.stages.map(item => item.stage === step.stage ? { ...item, ownerAgentId, reason: null } : item) },
-    set: step.stage === 'development' && !state.candidateId ? { executorAgentId: ownerAgentId } : {} };
+  const { state } = route;
+  return { state: { ...state, stages: state.stages.map(item => item.stage === stage ? { ...item, ownerAgentId, reason: null } : item) },
+    set: stage === 'development' && !state.candidateId ? { executorAgentId: ownerAgentId } : {} };
 }
 
 function requireProducerChange(state: Route['state'], executor: TaskChange['executor']): void {

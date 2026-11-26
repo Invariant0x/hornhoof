@@ -4,7 +4,7 @@ import { slotVerdict } from './slots.js';
 import { CLOSED, SILENT_TURNS, GOING_ON_TURNS, COMMIT, refuse, notYours, loadTask, stillOpen, listed, openAfter, taskSpot, giver, waitsForPerson, liveAgent, workingAgent, requireOwner, mayAsk, requestSubject, type Task, type Request, type Actor, type Wake, type Moved, type Tx, type Live } from './state.js';
 import { hideCredentialsIn } from '@hornhoof/protocol/redaction';
 import { countOnly, idOnly, only } from '../../db/selections.js';
-import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
+import { applyRouteChange, applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
 import { newTrackerFields, type TrackerFields, type TrackerInput } from '../tracker/task-fields.js';
 import { nudgeTrackerKeepers } from '../tracker/nudge.js';
 import { writeEdit, type TaskEdit } from '../tracker/edit.js';
@@ -780,8 +780,7 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   let edited: Task | null = null;
   const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields: Object.keys(c), ...independentData(declaration), ...(policy ? { turnCleanup: policy } : {}) } }, async (tx, row) => {
     if (policy) changed = await applyTurnCleanup(tx, task, policy.turnId, agentId, c.cleanup!, wakes);
-    if (revised.repin) await heldCheckingIdentity(tx, task, route, revised.repin.candidate, revised.repin.identity);
-    await changeRoute(tx, route, revised.state, revised.paths);
+    await applyRouteChange(tx, task, route, revised);
     if (set.after) await rebindAfter(tx, row, await checkAfter(tx, task.companyId, set.after), c.afterPlans, { agentId });
     independent = await insertIndependentChange(tx, row, agentId, independentChange, wakes);
     await wakeUpdatedHolder(tx, task, row, set, holder, wakes, c);
