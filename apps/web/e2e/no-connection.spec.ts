@@ -243,6 +243,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
 test('a hop 404 on the Machines route retries without showing a missing page when the server answers', async ({ page }) => {
   await page.clock.install();
   await serveServer(page);
+  await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: [] } }));
   const hop = { on: true, refusals: 0, recovered: false };
   page.on('response', response => {
     if (new URL(response.url()).pathname !== '/api/machines') return;
@@ -435,12 +436,14 @@ test('the phone strip leaves the loaded map the same size', async ({ page }) => 
   expect(await map.boundingBox()).toEqual(before);
   const blocked = await strip(page).evaluate(node => {
     const stripBox = node.getBoundingClientRect();
-    return [...document.querySelectorAll('.map :is(.zoom, .ticker, .map-version)')].some(control => {
+    return [...document.querySelectorAll('.map :is(.zoom, .ticker, .map-version)')].flatMap(control => {
       const box = control.getBoundingClientRect();
-      return box.width > 0 && box.height > 0 &&
+      const overlaps = box.width > 0 && box.height > 0 &&
         stripBox.left < box.right && stripBox.right > box.left &&
         stripBox.top < box.bottom && stripBox.bottom > box.top;
+      return overlaps ? [{ control: control.className, box: box.toJSON(), strip: stripBox.toJSON() }] : [];
     });
   });
-  expect(blocked).toBe(false);
+  expect(blocked).toEqual([]);
+  await shot(page, 'map-strip-light-375');
 });

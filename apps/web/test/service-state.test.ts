@@ -165,7 +165,7 @@ describe('the way of a state: window, strip, gone', () => {
     service.notify('relay', 'A notice');
     expect(service.snapshot()).toMatchObject({ place: 'strip', message: { kind: 'lost' } });
     await serverBack();
-    expect(service.snapshot()).toMatchObject({ place: 'strip', message: { kind: 'notice', line: 'A notice' } });
+    expect(service.snapshot()).toBeNull();
     service.clear('relay');
     expect(service.snapshot()).toBeNull();
   });
