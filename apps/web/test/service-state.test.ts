@@ -165,7 +165,7 @@ describe('the way of a state: window, strip, gone', () => {
     service.notify('relay', 'A notice');
     expect(service.snapshot()).toMatchObject({ place: 'strip', message: { kind: 'lost' } });
     await serverBack();
-    expect(service.snapshot()).toBeNull();
+    expect(service.snapshot()).toMatchObject({ place: 'window', message: { kind: 'notice' } });
     service.clear('relay');
     expect(service.snapshot()).toBeNull();
   });
@@ -180,17 +180,27 @@ describe('the way of a state: window, strip, gone', () => {
     expect(service.snapshot()).toBeNull();
   });
 
-  it('shows being signed out above everything else, until the person is signed in again', () => {
+  it('keeps a signed-out reminder until the person signs in, behind an active connection problem', () => {
     browserOnline(false);
     service.close();
     service.signedOut(true);
     expect(service.snapshot()).toMatchObject({ place: 'window', message: { kind: 'signedOut', line: SERVICE_LINES.signedOut } });
     service.close();
-    expect(service.snapshot()).toBeNull();
-    service.signedOut(false);
-    expect(service.snapshot()).toMatchObject({ message: { kind: 'offline' } });
+    expect(service.snapshot()).toMatchObject({ place: 'strip', message: { kind: 'offline' } });
     browserOnline(true);
+    expect(service.snapshot()).toMatchObject({ place: 'strip', message: { kind: 'signedOut' } });
+    service.signedOut(false);
     expect(service.snapshot()).toBeNull();
+  });
+
+  it('opens a new outage window after dismissing the signed-out notice', async () => {
+    service.signedOut(true);
+    service.close();
+    await lose();
+    expect(service.snapshot()).toMatchObject({ place: 'window', message: { kind: 'lost' } });
+    service.close();
+    await serverBack();
+    expect(service.snapshot()).toMatchObject({ place: 'strip', message: { kind: 'signedOut' } });
   });
 
   it('takes any other service notice by its id, once, and drops it when it is cleared', () => {

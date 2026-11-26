@@ -4,8 +4,8 @@ import { decodeViewChallenge, decodeViewSignature, encodeViewChallenge, type Bin
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
-import { service } from '../src/service-state';
 import * as testTerminal from '../src/ui/AgentTerminal';
+import { ServiceStrip, ServiceWindow } from '../src/ui/ServiceRoad';
 import type { EventView, OrchestratorState } from '../src/types';
 import { ME, mockApi, ORG } from './api-mock';
 import { decl } from './css';
@@ -387,15 +387,18 @@ describe("an agent's live terminal in its window", () => {
     await waitFor(() => expect(terminal.queryByRole('status')).not.toBeInTheDocument());
   });
 
-  it('says the state of the service road in place of its own words while one stands, and its own words again when it ends', async () => {
+  it('leaves the service strip visible while a terminal is still opening', async () => {
+    const road = render(<LanguageProvider><ServiceWindow /><ServiceStrip /></LanguageProvider>);
     const { container } = open();
     await socket();
     const terminal = within(container.querySelector<HTMLElement>('.t-term')!);
     expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
-    act(() => service.notify('t', 'A state of the service'));
-    expect(container.querySelector('.t-load .svc-loader')).toHaveTextContent('A state of the service');
-    expect(terminal.queryByText('Opening the Claude terminal…')).not.toBeInTheDocument();
-    act(() => service.clear('t'));
+    vi.stubGlobal('navigator', { ...navigator, onLine: false });
+    act(() => { window.dispatchEvent(new Event('offline')); });
+    expect(screen.getByRole('dialog', { name: 'No internet' })).toBeVisible();
+    fireEvent.click(within(road.container).getByRole('button', { name: 'Close' }));
+    expect(road.container.querySelector('.svc-strip')).toHaveTextContent('No internet');
+    expect(container.querySelector('.t-load .svc-loader')).toBeNull();
     expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
   });
 

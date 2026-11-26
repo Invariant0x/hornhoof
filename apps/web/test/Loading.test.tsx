@@ -177,6 +177,7 @@ describe('the wait of one load', () => {
     later(RING_DELAY_MS);
     expect(container.querySelector('.load-boot')).not.toBeNull();
     act(() => service.notify('x', 'A state'));
+    act(() => service.close());
     expect(container.querySelector('.load-boot')).toBeNull();
     const loader = container.querySelector('.svc-loader')!;
     expect(loader.textContent).toBe('A state');

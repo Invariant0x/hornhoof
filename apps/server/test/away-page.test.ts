@@ -61,7 +61,8 @@ function expectLogoAndOneLine(body: string, line: 'No connection' | 'Updating…
   expect(body).toContain('class="mk-dome"');
   expect(body).toContain('class="mk-base"');
   expect(body).toContain('class="mk-dot"');
-  expect(body).toContain('<main class="boot-screen" role="status" aria-busy="true">');
+  expect(body).toContain('<main class="boot-screen" role="status">');
+  expect(body).not.toContain('aria-busy="true"');
   expect(body).toContain(`<span class="boot-label">${line}</span>`);
   expect(body).toContain('<span class="boot-dots" aria-hidden="true"><i></i><i></i><i></i></span>');
   /* Nothing else: no card, heading, hint, counter, button, script or second language. */
