@@ -7,18 +7,16 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { serveApi } from './api';
 
-/* A server that cannot be reached or installs an update goes the one road of service messages (#2098, #2099, Design #2100):
-   the window first, once it is closed the thin strip under the menu, which never moves the page, and gone by itself once the
-   server answers, with no reload. Where a page area has nothing cached, the loader line stands in its place. The words are
-   English in every language. */
-const MODES = ['refused', 'relay', 'front', 'updating'] as const;
-type Mode = (typeof MODES)[number] | 'up';
+/* On a loaded page a connection loss opens a window, then becomes a strip. Cold starts
+   and updates use the startup loader, and the app recovers without a reload. */
+const MODES = ['refused', 'relay', 'front'] as const;
+type Mode = (typeof MODES)[number] | 'updating' | 'up';
 
 const SCREENSHOT_DIR = process.env.HH_SCREENSHOT_DIR;
 const RELAY_PAGE = '<!DOCTYPE html><html><head><title>Not Found</title></head><body><h1>The page you requested was not found.</h1></body></html>';
 const STARTING = { error: { code: 'unavailable', message: 'Hornhoof is starting.', reason: 'starting' } };
 const MAINTENANCE = { error: { code: 'unavailable', message: 'Hornhoof is installing an update and takes no changes until it ends.', reason: 'maintenance' } };
-const LINE = { lost: 'No connection', updating: 'Updating' } as const;
+const LINE = { lost: 'No connection', updating: 'Updating…' } as const;
 
 async function shot(page: Page, name: string): Promise<void> {
   if (!SCREENSHOT_DIR) return;
@@ -69,7 +67,7 @@ async function placeOf(page: Page) {
 }
 
 for (const mode of MODES) {
-  const title = mode === 'updating' ? LINE.updating : LINE.lost;
+  const title = LINE.lost;
 
   test(`${mode}: an open page shows the window ${title}, then the strip once it is closed, and both go by themselves`, async ({ page }) => {
     await page.clock.install();
@@ -107,23 +105,19 @@ for (const mode of MODES) {
     expect(loaded.n).toBe(1);
   });
 
-  test(`${mode}: a page opened or reloaded while it lasts shows the window and the loader in its place, and comes back by itself`, async ({ page }) => {
+  test(`${mode}: a page opened or reloaded while it lasts shows only the centered loader, and comes back by itself`, async ({ page }) => {
     await page.clock.install();
     const server = await serveServer(page);
     server.mode = mode;
     const loaded = loads(page);
     await page.goto('/');
-    await expect(windowOf(page, title)).toBeVisible();
     await expect(page.getByRole('heading', { name: en.app.notResponding })).toHaveCount(0);
     await expect(page.getByText(en.errors.codes.internal)).toHaveCount(0);
 
-    /* Once the window is closed, the page area with nothing cached says the same line in its place, and the strip is not
-       drawn: one status on the screen. */
-    await page.keyboard.press('Escape');
-    await expect(windowOf(page, title)).toHaveCount(0);
-    const loader = page.locator(mode === 'updating' ? '.boot-screen' : '.svc-loader');
-    await expect(loader).toBeVisible();
-    await expect(loader).toHaveText(mode === 'updating' ? 'Updating…' : title);
+    const loader = page.locator('.boot-screen');
+    await expect(loader).toHaveText(title);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(await loader.boundingBox()).toMatchObject({ x: 0, y: 0, ...page.viewportSize() });
     await expect(loader).toHaveAttribute('aria-busy', 'true');
     await expect(strip(page)).toHaveCount(0);
     await expect(page.getByRole('status')).toHaveCount(1);
@@ -135,14 +129,49 @@ for (const mode of MODES) {
   });
 }
 
+for (const cold of [false, true]) {
+  test(`an update uses only the loading screen on a ${cold ? 'cold' : 'loaded'} page`, async ({ page }) => {
+    const server = await serveServer(page);
+    const loaded = loads(page);
+    await page.clock.install();
+    if (cold) server.mode = 'updating';
+    await page.goto('/tasks');
+    if (!cold) {
+      await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
+      server.mode = 'updating';
+      await page.clock.runFor(NOTICE_MS);
+    }
+    const loader = page.locator('.boot-screen');
+    await expect(loader).toHaveText(LINE.updating);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('progressbar')).toHaveCount(0);
+    await expect(page.getByRole('navigation')).toBeHidden();
+    await page.keyboard.press('Escape');
+    await expect(loader).toBeVisible();
+    await expect(strip(page)).toHaveCount(0);
+
+    server.mode = 'up';
+    await until(page, async () => (await loader.count()) === 0);
+    await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
+    expect(loaded.n).toBe(1);
+  });
+}
+
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {
   test(`startup and standalone updating use the same loader with motion set to ${reducedMotion}`, async ({ browser }) => {
     for (const colorScheme of ['light', 'dark'] as const) {
       for (const [width, height] of [[1440, 900], [375, 700]] as const) {
         const context = await browser.newContext({ viewport: { width, height }, colorScheme, reducedMotion });
+        let finishSetup: (() => void) | undefined;
         try {
           const startup = await context.newPage();
-          await startup.route('**/api/setup', () => {});
+          await serveApi(startup);
+          // Keep setup pending until the screenshot is taken. Release it before closing the context.
+          const setup = new Promise<void>(resolve => { finishSetup = resolve; });
+          await startup.route('**/api/setup', async route => {
+            await setup;
+            await route.fallback();
+          });
           await startup.goto('/');
           const update = await context.newPage();
           await update.route('**/updating-test', route => route.fulfill({ status: 503, contentType: 'text/html', body: awayPage('updating') }));
@@ -161,16 +190,18 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
           }));
           const animations = await animation(loading);
           expect(animations).toHaveLength(3);
-          expect(await animation(updating)).toEqual(animations);
           if (reducedMotion === 'reduce') {
             expect(animations.every(([name]) => name === 'none')).toBe(true);
+            expect((await animation(updating)).every(([name]) => name === 'none')).toBe(true);
             await shot(startup, `startup-loading-${colorScheme}-${width}`);
             await shot(update, `startup-updating-${colorScheme}-${width}`);
           } else {
+            expect(await animation(updating)).toEqual(animations);
             expect(animations.every(([name]) => name !== 'none')).toBe(true);
             expect(new Set(animations.map(([, , delay]) => delay)).size).toBe(3);
           }
         } finally {
+          finishSetup?.();
           await context.close();
         }
       }
@@ -268,7 +299,7 @@ test('a click outside the window closes it, and a click inside does not', async 
   await expect(strip(page)).toBeVisible();
 });
 
-test('draws the window, the strip and the loader as Design drew them, across themes and widths, with the strip 8 px under the menu', async ({ browser }) => {
+test('places the connection strip under the desktop menu and clear of the phone heading', async ({ browser }) => {
   const skins = [['light', 'light'], ['dark', 'cyberpunk']] as const;
   for (const [scheme, skin] of skins) {
     for (const [width, height] of [[1440, 900], [375, 700]] as const) {
@@ -278,58 +309,64 @@ test('draws the window, the strip and the loader as Design drew them, across the
         await page.clock.install();
         await page.addInitScript(s => localStorage.setItem('hh-theme', s), skin);
         const server = await serveServer(page);
-        await page.goto('/');
+        await page.goto('/tasks');
         await expect(tab(page, en.shell.tabs.tasks)).toBeVisible();
+        await expect(page.getByText('My tasks', { exact: true }).first()).toBeVisible();
         const still = await placeOf(page);
 
-        for (const [state, mode] of [['lost', 'refused'], ['updating', 'updating']] as const) {
-          server.mode = mode;
-          const dialog = windowOf(page, LINE[state]);
-          await until(page, async () => (await dialog.count()) > 0);
-          await expect(dialog).toBeVisible();
-          const seen = await page.evaluate(() => {
-            const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect().toJSON() as { x: number; y: number; width: number; height: number; bottom: number; right: number };
-            const line = getComputedStyle(document.querySelector('.svc-window .svc-line')!);
-            return {
-              back: box('.dialog-back'),
-              window: box('.svc-window'),
-              mark: box('.svc-window .svc-mark'),
-              lineBox: box('.svc-window .svc-line'),
-              closeBox: box('.svc-window .window-close'),
-              lineFont: { size: line.fontSize, weight: line.fontWeight },
-              fitsWidth: document.documentElement.scrollWidth <= window.innerWidth,
-            };
-          });
-          expect(seen.back).toMatchObject({ x: 0, y: 0, width, height });
-          expect(seen.window.width).toBeCloseTo(Math.min(360, width - 32), 0);
-          expect(seen.mark).toMatchObject({ width: 72, height: 72 });
-          expect(seen.lineFont).toEqual({ size: '18px', weight: '600' });
-          expect(seen.closeBox).toMatchObject({ width: 44, height: 44 });
-          expect(Math.abs(seen.window.x + seen.window.width / 2 - width / 2)).toBeLessThanOrEqual(1);
-          expect(Math.abs(seen.window.y + seen.window.height / 2 - height / 2)).toBeLessThanOrEqual(2);
-          expect(seen.lineBox.y).toBeGreaterThanOrEqual(seen.mark.bottom);
-          expect(seen.fitsWidth).toBe(true);
-          await shot(page, `window-${state}-${width}-${scheme}`);
+        server.mode = 'refused';
+        const dialog = windowOf(page, LINE.lost);
+        await until(page, async () => (await dialog.count()) > 0);
+        await expect(dialog).toBeVisible();
+        const seen = await page.evaluate(() => {
+          const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect().toJSON() as { x: number; y: number; width: number; height: number; bottom: number; right: number };
+          const line = getComputedStyle(document.querySelector('.svc-window .svc-line')!);
+          return {
+            back: box('.dialog-back'),
+            window: box('.svc-window'),
+            mark: box('.svc-window .svc-mark'),
+            lineBox: box('.svc-window .svc-line'),
+            closeBox: box('.svc-window .window-close'),
+            lineFont: { size: line.fontSize, weight: line.fontWeight },
+            fitsWidth: document.documentElement.scrollWidth <= window.innerWidth,
+          };
+        });
+        expect(seen.back).toMatchObject({ x: 0, y: 0, width, height });
+        expect(seen.window.width).toBeCloseTo(Math.min(360, width - 32), 0);
+        expect(seen.mark).toMatchObject({ width: 72, height: 72 });
+        expect(seen.lineFont).toEqual({ size: '18px', weight: '600' });
+        expect(seen.closeBox).toMatchObject({ width: 44, height: 44 });
+        expect(Math.abs(seen.window.x + seen.window.width / 2 - width / 2)).toBeLessThanOrEqual(1);
+        expect(Math.abs(seen.window.y + seen.window.height / 2 - height / 2)).toBeLessThanOrEqual(2);
+        expect(seen.lineBox.y).toBeGreaterThanOrEqual(seen.mark.bottom);
+        expect(seen.fitsWidth).toBe(true);
+        await shot(page, `window-lost-${width}-${scheme}`);
 
-          await page.keyboard.press('Escape');
-          await expect(strip(page)).toBeVisible();
-          const bar = await page.evaluate(() => {
-            const el = document.querySelector('.svc-strip')!;
-            const box = el.getBoundingClientRect();
-            const menu = document.querySelector('.topbar')!.getBoundingClientRect();
-            const style = getComputedStyle(el);
-            return { top: box.top, height: box.height, menuBottom: menu.bottom, position: style.position, mark: document.querySelector('.svc-strip .svc-mark')!.getBoundingClientRect().width };
-          });
-          expect(bar.position).toBe('fixed');
+        await page.keyboard.press('Escape');
+        await expect(strip(page)).toBeVisible();
+        const bar = await page.evaluate(() => {
+          const el = document.querySelector('.svc-strip')!;
+          const box = el.getBoundingClientRect();
+          const menu = document.querySelector('.topbar')!.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          return { top: box.top, height: box.height, menuBottom: menu.bottom, position: style.position, mark: document.querySelector('.svc-strip .svc-mark')!.getBoundingClientRect().width };
+        });
+        expect(bar.position).toBe('fixed');
+        if (width === 375) {
+          const heading = await page.getByText('My tasks', { exact: true }).first().boundingBox();
+          expect(heading).not.toBeNull();
+          expect(bar.top).toBeGreaterThan(heading!.y + heading!.height);
+          expect(height - bar.top - bar.height).toBeCloseTo(8, 0);
+        } else {
           expect(Math.abs(bar.top - (bar.menuBottom + 8))).toBeLessThanOrEqual(1);
-          expect(bar.height).toBeGreaterThanOrEqual(36);
-          expect(bar.mark).toBe(24);
-          expect(await placeOf(page)).toEqual(still);
-          await shot(page, `strip-${state}-${width}-${scheme}`);
-
-          server.mode = 'up';
-          await until(page, async () => (await strip(page).count()) === 0);
         }
+        expect(bar.height).toBeGreaterThanOrEqual(36);
+        expect(bar.mark).toBe(24);
+        expect(await placeOf(page)).toEqual(still);
+        await shot(page, `strip-lost-${width}-${scheme}`);
+
+        server.mode = 'up';
+        await until(page, async () => (await strip(page).count()) === 0);
       } finally {
         await context.close();
       }
