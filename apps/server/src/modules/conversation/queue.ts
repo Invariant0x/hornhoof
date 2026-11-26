@@ -652,20 +652,30 @@ async function pumpPlan(ctx: Ctx, subscriptionId: string, requestedAgent?: strin
   }
 
   const after: PlanWake[] = [];
-  await onSubscription(ctx, subscriptionId, async () => {
-    const run = { ctx, active: true, after };
-    try {
-      await dispatchInProgress.run(run, () => pumpRanked(ctx, subscriptionId, requestedAgent, after));
-    } finally {
-      run.active = false;
-    }
-  });
-
-  for (const wake of after) {
-    const dispatch = pumpPlan(ctx, wake.subscriptionId, wake.agentId);
-    if (wake.deferred) await dispatch.catch((error: unknown) => ctx.log.error({ error: loggable(error) }, 'A queued turn could not be sent.'));
-    else await dispatch;
+  let failure: { error: unknown } | undefined;
+  try {
+    await onSubscription(ctx, subscriptionId, async () => {
+      const run = { ctx, active: true, after };
+      try {
+        await dispatchInProgress.run(run, () => pumpRanked(ctx, subscriptionId, requestedAgent, after));
+      } finally {
+        run.active = false;
+      }
+    });
+  } catch (error) {
+    failure = { error };
   }
+
+  /* The wakes are already stored. Send them after the lane settles, even if its pass failed. */
+  for (const wake of after) {
+    try {
+      await pumpPlan(ctx, wake.subscriptionId, wake.agentId);
+    } catch (error) {
+      if (wake.deferred || failure) ctx.log.error({ error: loggable(error) }, 'A queued turn could not be sent.');
+      else failure = { error };
+    }
+  }
+  if (failure) throw failure.error;
 }
 
 /* The job that freed a place can belong to a plan the agent has since left. Both lines can have work to send. */
