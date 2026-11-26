@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, jobs, subscriptions } from '../src/db/schema.js';
+import { onSubscription } from '../src/modules/conversation/line.js';
 import { agentState, pump } from '../src/modules/conversation/queue.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
@@ -133,6 +134,26 @@ describe('the line of an agent whose waiting turn may not go out now', () => {
     expect(await c.turnsOf(c.watcher.id)).toHaveLength(1);
     expect(await c.jobOf(first.id)).toMatchObject({ status: 'failed', error: 'cancelled' });
     expect(await c.jobOf(second.id)).toMatchObject({ status: 'queued' });
+  });
+
+  it('sends an already queued Operations notice after the outer dispatch rejects', async () => {
+    const c = await line('spent');
+    const held = await c.waiting(new Date(Date.now() - 1000), { task: true });
+    await c.db.update(jobs).set({ createdAt: new Date(Date.now() - 11 * MIN) }).where(eq(jobs.id, held.id));
+    const failure = new Error('The dispatch failed after storing the notice.');
+    const notifyHold = c.ctx.conversationEffects.notifyHold;
+    vi.spyOn(c.ctx.conversationEffects, 'notifyHold').mockImplementationOnce(async (...args) => {
+      await notifyHold(...args);
+      throw failure;
+    });
+
+    await expect(pump(c.ctx, c.agent.id)).rejects.toBe(failure);
+    await onSubscription(c.ctx, c.sub.id, () => Promise.resolve());
+
+    expect(await c.turnsOf(c.watcher.id)).toEqual([
+      expect.objectContaining({ status: 'running', prompt: expect.stringContaining('share set for tasks') }),
+    ]);
+    expect(await c.jobOf(held.id)).toMatchObject({ status: 'queued' });
   });
 
   it('tells Operations of a hold once while its reset moves by milliseconds only, and again once it moves by minutes', async () => {
