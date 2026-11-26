@@ -263,6 +263,13 @@ describe('migration 0046', () => {
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
+    const retryIndex = await db.execute(sql`select split_part(indexdef, ' WHERE ', 1) as definition,
+      regexp_replace(split_part(indexdef, ' WHERE ', 2), '[()]', '', 'g') as predicate
+      from pg_indexes where schemaname = 'public' and indexname = 'jobs_agent_conversation_retry_waiting'`);
+    expect(retryIndex.rows, 'the recovered database has the 0172 retry index').toEqual([{
+      definition: 'CREATE INDEX jobs_agent_conversation_retry_waiting ON public.jobs USING btree (company_id, agent_id, created_at)',
+      predicate: "kind = 'conversation'::text AND status = 'queued'::text AND not_before IS NOT NULL AND continue_of IS NOT NULL",
+    }]);
     const columns = (await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'jobs'`)).rows.map(c => c.column_name);
     expect(columns).toEqual(expect.arrayContaining(['failure', 'not_before', 'restarted_at']));
     const indexes = (await db.execute<{ indexname: string }>(sql`select indexname from pg_indexes where tablename = 'agent_events'`)).rows.map(i => i.indexname);
