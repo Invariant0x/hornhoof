@@ -405,15 +405,17 @@ describe('migration 0086 composable skills', () => {
       (${C}, 'worker', 'No role', null, '', null, '["retired-kept"]', '{"base":"Roleless assignment."}', '{}', null)`);
     /* Later migrations add the machine of an employee's built-in node and each card's own inbox mode, empty on every row,
        0125 the address and protocol of an API connection, empty on every plan, 0131 each plan's fallbacks, none yet, the
-       tracker's 0138 each card's timer nudge, none yet, and 0160 the name an agent had before a world renamed it, none yet. */
+       tracker's 0138 each card's timer nudge, none yet, and 0160 the name an agent had before a world renamed it, none yet.
+       0175 sets the turn limit of each existing plan to four. */
     const cards = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'role_key' - 'builtin_machine' - 'inbox_mode' - 'timer_nudged_at' - 'original_name')::text as data from agents a order by name`)).rows;
-    const plans = async () => (await db.execute<{ data: string }>(sql`select (to_jsonb(s) - 'base_url' - 'api_protocol' - 'fallbacks')::text as data from subscriptions s order by id`)).rows;
+    const plans = async () => (await db.execute<{ data: string }>(sql`select (to_jsonb(s) - 'base_url' - 'api_protocol' - 'fallbacks' - 'turn_limit')::text as data from subscriptions s order by id`)).rows;
     const before = { cards: await cards(), plans: await plans() };
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
     expect({ cards: await cards(), plans: await plans() }).toEqual(before);
+    expect((await db.execute(sql`select turn_limit from subscriptions`)).rows).toEqual(before.plans.map(() => ({ turn_limit: 4 })));
     expect((await db.execute<{ name: string; role_key: string | null }>(sql`select name, role_key from agents order by name`)).rows).toEqual([
       { name: 'Custom legacy', role_key: 'DEV-ENG' },
       { name: 'Existing developer', role_key: 'DEV-ENG' },
