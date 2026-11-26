@@ -4,7 +4,7 @@ import { LANGUAGES, type ShippedLanguage } from '../src/i18n/index';
 import { ru } from '../src/i18n/ru';
 import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
 import type { UpdatesView } from '../src/types';
-import { serveApi } from './api';
+import { ME, serveApi } from './api';
 
 /* A maintenance refusal uses the full loading screen. Genuine errors still have
    a row of their own once the app is usable. Cover the shipped languages and skins. */
@@ -45,9 +45,10 @@ function updates(step: 'install' | 'health'): UpdatesView {
 
 /* The server an update holds: the updates poll answers first with the update running, then with the maintenance refusal,
    as does every load of the company, until the update ends. */
-async function heldServer(page: Page) {
+async function heldServer(page: Page, theme: string) {
   const held = { on: true, polls: 0 };
   await serveApi(page);
+  await page.route('**/api/me', route => route.fulfill({ json: { ...ME, company: { ...ME.company, theme } } }));
   await page.route('**/api/updates', route => {
     held.polls++;
     if (held.on && held.polls > 1) return route.fulfill(REFUSED);
@@ -143,7 +144,7 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     await page.clock.install({ time: new Date('2026-11-18T13:00:00.000Z') });
     await page.clock.pauseAt(new Date('2026-11-18T13:35:00.000Z'));
     await look(page, lang, skin, width);
-    const server = await heldServer(page);
+    const server = await heldServer(page, skin);
     const orgRefused = page.waitForResponse(response => new URL(response.url()).pathname === '/api/org' && response.status() === 503);
     await page.goto('/');
     const loader = loaderOf(page);
@@ -164,6 +165,8 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     server.end();
     await page.clock.runFor(BUSY_POLL_MS);
     await loaded;
+    // The maintenance poll is complete. Let the lazy world render on the page clock.
+    await page.clock.resume();
     await expect(world ? page.locator(`.map[data-world-canvas="${world}"] > .ticker[role="button"]`) : page.getByRole('button', { name: /^Development/ })).toBeVisible();
     await expect(loader).toHaveCount(0);
     await expect(page.getByRole('alert')).toHaveCount(0);
