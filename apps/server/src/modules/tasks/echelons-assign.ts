@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, isNotNull, isNull, notLike } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, notLike } from 'drizzle-orm';
 import type { EchelonStage, HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
-import { agentFallbacks, agents, departments, subscriptions, turnTokens } from '../../db/schema.js';
+import { agentChanges, agentFallbacks, agents, departments, subscriptions, turnTokens } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Task, Tx } from './state.js';
@@ -141,14 +141,34 @@ function pinnedChecker(task: Task, route: Route): { identity: CheckerIdentity; a
   return { identity: assignment, ability };
 }
 
-/* The fallback row and the card are written together. A move by hand has no such proof. */
-async function fellBack(db: Reader['db'], task: Task, pinned: CheckerIdentity, live: CheckerIdentity): Promise<boolean> {
+/* Only card changes from the current fallback episode can connect a previous pin to the live plan. */
+async function fellBack(db: Reader['db'], task: Task, pinned: CheckerIdentity, live: CheckerIdentity, model: string): Promise<boolean> {
   if (pinned.subscriptionId === live.subscriptionId) return false;
-  const [fallback] = await db.select({ homeModel: agentFallbacks.homeModel }).from(agentFallbacks)
-    .where(and(eq(agentFallbacks.companyId, task.companyId), eq(agentFallbacks.agentId, pinned.agentId),
-      eq(agentFallbacks.homeSubscriptionId, pinned.subscriptionId), eq(agentFallbacks.subscriptionId, live.subscriptionId)));
-  /* Default is stored as an empty setting. The pin holds the model reported by its previous turn. */
-  return fallback !== undefined && (fallback.homeModel === '' || fallback.homeModel === pinned.model);
+  const changes = await db.select({
+    field: agentChanges.field, before: agentChanges.before, after: agentChanges.after,
+    personId: agentChanges.personId, actingAgentId: agentChanges.actingAgentId, byOrchestrator: agentChanges.byOrchestrator,
+  }).from(agentChanges)
+    .innerJoin(agentFallbacks, and(eq(agentFallbacks.agentId, agentChanges.agentId), eq(agentFallbacks.companyId, agentChanges.companyId),
+      gte(agentChanges.createdAt, agentFallbacks.createdAt)))
+    .where(and(eq(agentChanges.companyId, task.companyId), eq(agentChanges.agentId, pinned.agentId),
+      eq(agentFallbacks.subscriptionId, live.subscriptionId), inArray(agentChanges.field, ['subscription', 'model'])))
+    .orderBy(desc(agentChanges.createdAt), asc(agentChanges.field));
+  return automaticPathToPin(changes, pinned, { subscription: live.subscriptionId, model });
+}
+
+type FallbackChange = Pick<typeof agentChanges.$inferSelect, 'field' | 'before' | 'after' | 'personId' | 'actingAgentId' | 'byOrchestrator'>;
+
+/* A move writes its plan and any model change in one transaction. Read the model before its plan as we walk back. */
+function automaticPathToPin(changes: FallbackChange[], pinned: CheckerIdentity, setting: { subscription: string; model: string }): boolean {
+  for (const change of changes) {
+    if (change.personId || change.actingAgentId || change.byOrchestrator) return false;
+    const field = change.field === 'model' ? 'model' : 'subscription';
+    if (change.after !== setting[field] || typeof change.before !== 'string') return false;
+    setting[field] = change.before;
+    /* Default is stored as an empty setting. The pin holds the model reported by its previous turn. */
+    if (field === 'subscription' && setting.subscription === pinned.subscriptionId && (setting.model === '' || setting.model === pinned.model)) return true;
+  }
+  return false;
 }
 
 const CHECKING_STAGES: ReadonlySet<EchelonStage> = new Set(['review', 'cleanup', 'security', 'tests']);
@@ -171,10 +191,10 @@ export function requireIndependentChecker(task: Task, state: Route['state'], sta
   throw new ApiError(409, 'conflict', 'This employee already checked an earlier stage of the task. The head must assign another checker.', 'task_invalid');
 }
 
-async function requireEligiblePlan(db: Reader['db'], task: Task, pinned: CheckerIdentity, live: CheckerIdentity, producer: CheckerIdentity): Promise<void> {
+async function requireEligiblePlan(db: Reader['db'], task: Task, pinned: CheckerIdentity, live: CheckerIdentity, producer: CheckerIdentity, model: string): Promise<void> {
   const rule = reviewEligibility(producer, live);
   if (!rule && sameChecker(live, pinned)) return;
-  if (!(await fellBack(db, task, pinned, live))) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
+  if (!(await fellBack(db, task, pinned, live, model))) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
   if (rule === 'weaker_model') throw new ApiError(409, 'conflict', 'The checker fell back to a weaker model than the producer. The head must assign another checker.', 'task_changed');
   if (rule) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
 }
@@ -186,16 +206,17 @@ export async function checkingIdentity(ctx: Reader, task: Task, route: Route, ca
   if ((await keptFromReview(ctx.db, task, route.state.stage, candidate)).has(owner)) throw new ApiError(409, 'conflict', PRODUCER_REVIEW, 'task_invalid');
   requireIndependentChecker(task, route.state, route.state.stage, owner);
   const [member] = await stageStaff(ctx.db, task, owner);
-  const identity = member && canCheckTask(member, task, ability, owner) ? await agentIdentity(ctx.db, task.companyId, owner) : null;
+  if (!member || !canCheckTask(member, task, ability, owner)) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
+  const identity = await agentIdentity(ctx.db, task.companyId, owner);
   if (!identity) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
-  await requireEligiblePlan(ctx.db, task, assignment, identity, await checkedProducer(ctx.db, task, route, candidate));
+  await requireEligiblePlan(ctx.db, task, assignment, identity, await checkedProducer(ctx.db, task, route, candidate), member.model);
   return identity;
 }
 
 /* Hold the card until the result commits, so a concurrent change cannot invalidate the checked identity. */
-export async function heldCheckingIdentity(tx: Tx, task: Task, route: Route, candidate: HandedCandidate, expected?: CheckerIdentity): Promise<CheckerIdentity> {
+export async function heldCheckingIdentity(tx: Tx, task: Task, route: Route, candidate: HandedCandidate, expected: CheckerIdentity): Promise<CheckerIdentity> {
   if (task.assigneeAgentId) await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.id, task.assigneeAgentId), eq(agents.companyId, task.companyId))).for('share');
   const live = await checkingIdentity({ db: tx }, task, route, candidate);
-  if (expected && !sameChecker(live, expected)) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
+  if (!sameChecker(live, expected)) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
   return live;
 }

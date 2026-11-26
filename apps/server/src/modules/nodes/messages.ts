@@ -111,7 +111,14 @@ async function jobEnded(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { 
 async function keepTokens(ctx: Ctx, msg: Extract<NodeMessage, { type: 'job.done' }>, finished: { companyId: string; agentId: string | null; subscriptionId: string }[], now: Date): Promise<void> {
   const [job] = finished;
   if (!job) return;
-  await ctx.db.insert(turnTokens).values({ jobId: msg.jobId, companyId: job.companyId, agentId: job.agentId, subscriptionId: job.subscriptionId, ...tokenRow(msg.tokens), at: now }).onConflictDoNothing();
+  const values = { jobId: msg.jobId, companyId: job.companyId, agentId: job.agentId, subscriptionId: job.subscriptionId, ...tokenRow(msg.tokens), at: now };
+  await ctx.db.transaction(async tx => {
+    /* This model can change the effective identity of a Default checker. Serialize it with a checking write. */
+    if (job.agentId && values.model) {
+      await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.id, job.agentId), eq(agents.companyId, job.companyId))).for('no key update');
+    }
+    await tx.insert(turnTokens).values(values).onConflictDoNothing();
+  });
 }
 
 /* An event of a running turn's work, kept in its conversation; a sign that the turn goes on, whatever its program reports. */

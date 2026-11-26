@@ -8,6 +8,7 @@ import { AUTHOR_CHECK_PASSED, changeRoute, skippedAuthorReview, type Route } fro
 import { REVIEW_SKIP_ENABLED } from './author-check.js';
 import { reopenAuthorReview } from './echelons-handoff.js';
 import { checkingIdentity, departmentHead, heldCheckingIdentity } from './echelons-assign.js';
+import { sameChecker, type CheckerIdentity } from './echelons-policy.js';
 import { isTestPath, RepoPath, ReviewSha } from './review-schema.js';
 import { captureReview, exactComparison, type Review } from './review-context.js';
 import { repoAt } from '../departments/repository.js';
@@ -29,15 +30,19 @@ export type Verification = z.input<typeof Verification>;
 const Verified = z.object({ candidateId: z.uuid(), commit: ReviewSha, routeRevision: z.number().int().positive() });
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
 
+function fallbackCheckerRecord(route: Route, checker: CheckerIdentity) {
+  return sameChecker(checker, route.state.assignment) ? {} : { checker };
+}
+
 /* A failed check goes to the head with the candidate: Tests checks it locally, and only the release runs the full suite. */
-async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, candidate: EchelonCandidate): Promise<Moved> {
+async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, candidate: EchelonCandidate, checker: CheckerIdentity): Promise<Moved> {
   const headId = await departmentHead(ctx.db, task);
   const wakes = [{ agentId: headId, taskId: task.id, why: 'blocked' as const, text: summary }];
-  const state: Route['state'] = { ...route.state, phase: 'escalated', stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, reason: 'tests_failed' } : step) };
+  const state: Route['state'] = { ...route.state, phase: 'escalated', assignment: checker, stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, reason: 'tests_failed' } : step) };
   const row = await move(ctx, task, { status: 'blocked', assigneeAgentId: null, silent: 0 }, {
-    kind: 'report', actor: { agentId }, text: summary, data: { failedVerification: { candidateId: candidate.id, routeRevision: route.revision } }, returned: true,
+    kind: 'report', actor: { agentId }, text: summary, data: { ...fallbackCheckerRecord(route, checker), failedVerification: { candidateId: candidate.id, routeRevision: route.revision } }, returned: true,
   }, async tx => {
-    await heldCheckingIdentity(tx, task, route, candidate);
+    await heldCheckingIdentity(tx, task, route, candidate, checker);
     await changeRoute(tx, route, state);
   }, wakes);
   return { task: row, wakes };
@@ -113,24 +118,23 @@ async function returnWake(db: Reader['db'], task: Task, executorId: string | nul
   return { agentId: await departmentHead(db, task), taskId: task.id, why: 'blocked', text: `Tests returned #${task.number} for source repair (${delta}), and Development needs an available executor.` };
 }
 
-async function returnCandidateToExecutor(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, input: z.output<typeof Verification> & { delta: string }): Promise<Moved> {
-  const candidate = await currentCandidate(ctx.db, task, route);
+async function returnCandidateToExecutor(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, delta: string, candidate: EchelonCandidate, checker: CheckerIdentity): Promise<Moved> {
   const executorId = await availableExecutor(ctx.db, task);
   const state = returnedState(route, executorId, candidate.id);
-  const wakes = [await returnWake(ctx.db, task, executorId, input.delta)];
+  const wakes = [await returnWake(ctx.db, task, executorId, delta)];
   const row = await move(ctx, task, { status: executorId ? 'open' : 'waiting', assigneeAgentId: executorId, silent: 0 }, {
     kind: 'report', actor: { agentId }, text: summary, returned: true,
-    data: { rework: true, returnedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, fromRevision: route.revision, executorAgentId: executorId, delta: input.delta } },
+    data: { ...fallbackCheckerRecord(route, checker), rework: true, returnedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, fromRevision: route.revision, executorAgentId: executorId, delta } },
   }, async tx => {
-    await heldCheckingIdentity(tx, task, route, candidate);
+    await heldCheckingIdentity(tx, task, route, candidate, checker);
     await changeRoute(tx, route, state);
   }, wakes);
   return { task: row, wakes };
 }
 
-async function failedVerificationReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, input: z.output<typeof Verification>, candidate: EchelonCandidate): Promise<Moved> {
-  if (input.delta === undefined) return failedTestsReport(ctx, task, route, agentId, summary, candidate);
-  return returnCandidateToExecutor(ctx, task, route, agentId, summary, { ...input, delta: input.delta });
+async function failedVerificationReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, delta: string | undefined, candidate: EchelonCandidate, checker: CheckerIdentity): Promise<Moved> {
+  if (delta === undefined) return failedTestsReport(ctx, task, route, agentId, summary, candidate, checker);
+  return returnCandidateToExecutor(ctx, task, route, agentId, summary, delta, candidate, checker);
 }
 
 export async function testsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, value: Verification | undefined, done = true): Promise<Moved> {
@@ -138,19 +142,19 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
   const input = Verification.safeParse(value);
   if (!input.success || input.data.candidateId !== route.state.candidateId || input.data.revision !== route.revision) throw refuse(409, 'task_changed', 'Name the exact current candidate and route revision.');
   const candidate = await currentCandidate(ctx.db, task, route);
-  await checkingIdentity({ db: ctx.db }, task, route, candidate);
-  if (!done) return failedVerificationReport(ctx, task, route, agentId, summary, input.data, candidate);
+  const checker = await checkingIdentity(ctx, task, route, candidate);
+  if (!done) return failedVerificationReport(ctx, task, route, agentId, summary, input.data.delta, candidate, checker);
   if (input.data.delta !== undefined) throw refuse(400, 'task_invalid', 'A passing Tests report cannot carry a return delta.');
   if (!REVIEW_SKIP_ENABLED && skippedAuthorReview(route.state)) {
-    return reopenAuthorReview(ctx, task, route, candidate, agentId, tx => heldCheckingIdentity(tx, task, route, candidate));
+    return reopenAuthorReview(ctx, task, route, candidate, agentId, tx => heldCheckingIdentity(tx, task, route, candidate, checker));
   }
   const headId = await departmentHead(ctx.db, task);
   const wakes = [{ agentId: headId, taskId: task.id, why: 'reviewed' as const }];
   const state: Route['state'] = { ...route.state, phase: 'ready', assignment: null, stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, status: 'complete', candidateId: candidate.id } : step) };
   const row = await move(ctx, task, { status: 'open', assigneeAgentId: headId, silent: 0 }, {
-    kind: 'report', actor: { agentId }, text: summary, data: { verifiedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, testedRevision: route.revision } }, returned: true,
+    kind: 'report', actor: { agentId }, text: summary, data: { ...fallbackCheckerRecord(route, checker), verifiedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, testedRevision: route.revision } }, returned: true,
   }, async tx => {
-    await heldCheckingIdentity(tx, task, route, candidate);
+    await heldCheckingIdentity(tx, task, route, candidate, checker);
     await changeRoute(tx, route, state);
   }, wakes);
   return { task: row, wakes };

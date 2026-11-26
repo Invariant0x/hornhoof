@@ -1,8 +1,8 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentFallbacks, agents, jobs, subscriptions, taskEvents, taskRoutes, tasks } from '../src/db/schema.js';
+import { agentChanges, agentFallbacks, agents, jobs, subscriptions, taskEvents, taskRoutes, tasks, turnTokens } from '../src/db/schema.js';
 import { removeSubscription } from '../src/modules/subscriptions/routes.js';
-import { report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
+import { report, resumeWaitingRoutes, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { as } from './helpers.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 
@@ -21,15 +21,21 @@ async function atReview() {
 }
 
 type ReviewFixture = Awaited<ReturnType<typeof atReview>>;
+const fallbackAt = (minute: number) => new Date(Date.UTC(2026, 10, 26, 0, minute));
 
 /* A fallback committed the employee's move before the stage could be re-pinned. */
-async function savedFallback(f: ReviewFixture, model: string, agent = f.reviewer) {
+async function savedFallback(f: ReviewFixture, model: string, agent = f.reviewer, subscriptionId = f.codex.id, at = fallbackAt(1)) {
   await f.db.transaction(async tx => {
+    const [current] = await tx.select().from(agents).where(eq(agents.id, agent.id));
+    const change = { agentId: agent.id, companyId: agent.companyId, createdAt: at };
     await tx.insert(agentFallbacks).values({
-      agentId: agent.id, companyId: agent.companyId, homeSubscriptionId: agent.subscriptionId!,
-      homeModel: agent.model, subscriptionId: f.codex.id,
-    });
-    await tx.update(agents).set({ subscriptionId: f.codex.id, model }).where(eq(agents.id, agent.id));
+      ...change, homeSubscriptionId: current!.subscriptionId!, homeModel: current!.model, subscriptionId,
+    }).onConflictDoUpdate({ target: agentFallbacks.agentId, set: { subscriptionId } });
+    await tx.update(agents).set({ subscriptionId, model }).where(eq(agents.id, agent.id));
+    await tx.insert(agentChanges).values([
+      { ...change, field: 'subscription', before: current!.subscriptionId, after: subscriptionId },
+      ...(current!.model === model ? [] : [{ ...change, field: 'model' as const, before: current!.model, after: model }]),
+    ]);
   });
 }
 
@@ -69,6 +75,41 @@ describe('a checking stage whose automatic fallback left the old plan pinned', (
     expect(await f.route()).toEqual(before);
   });
 
+  it('refuses a later manual model edit on the fallback plan while the old pin is still active', async () => {
+    const f = await atReview();
+    const before = await f.route();
+    await savedFallback(f, FALLBACK_MODEL);
+    await f.db.transaction(async tx => {
+      const model = 'gpt-6.2-astra';
+      await tx.update(agents).set({ model }).where(eq(agents.id, f.reviewer.id));
+      await tx.insert(agentChanges).values({
+        agentId: f.reviewer.id, companyId: f.task.companyId, personId: f.codex.ownerPersonId,
+        field: 'model', before: FALLBACK_MODEL, after: model, createdAt: fallbackAt(2),
+      });
+    });
+
+    await expect(verdict(f.ctx, f.reviewer.id, f.task.id, pass)).rejects.toMatchObject({
+      status: 409, message: expect.stringContaining('checking assignment changed'),
+    });
+    expect(await f.route()).toEqual(before);
+  });
+
+  it.each([false, true])('accepts a second recorded automatic move with its first fallback pinned: %s', async firstPinned => {
+    const f = await atReview();
+    await savedFallback(f, FALLBACK_MODEL);
+    if (firstPinned) await updateTask(f.ctx, f.head.id, f.task.id, { echelonStage: 'review', ownerAgentId: f.reviewer.id });
+    const [next] = await f.db.insert(subscriptions).values({
+      companyId: f.task.companyId, provider: 'codex', kind: 'personal', label: 'Next fallback', ownerPersonId: f.codex.ownerPersonId, status: 'ready',
+    }).returning();
+    await savedFallback(f, 'gpt-6.2-astra', f.reviewer, next!.id, fallbackAt(2));
+
+    await verdict(f.ctx, f.reviewer.id, f.task.id, { ...pass, pass: false, comment: 'A repair is needed.' });
+    expect(await f.route()).toMatchObject({
+      stage: 'review', phase: 'active',
+      assignment: { agentId: f.reviewer.id, subscriptionId: next!.id, model: 'gpt-6.2-astra' },
+    });
+  });
+
   it('lets the department head re-pin the active checker without reassigning the stage', async () => {
     const f = await atReview();
     const before = await f.route();
@@ -83,6 +124,25 @@ describe('a checking stage whose automatic fallback left the old plan pinned', (
     expect(await f.route()).toMatchObject({
       stage: 'review', phase: 'active', candidateId: before.candidateId,
       stages: before.stages, assignment: { agentId: f.reviewer.id, subscriptionId: f.codex.id, model: FALLBACK_MODEL },
+    });
+  });
+
+  it('records the model the fallback plan actually ran when the setting is Default', async () => {
+    const f = await atReview();
+    await savedFallback(f, '');
+    const [job] = await f.db.insert(jobs).values({
+      companyId: f.task.companyId, agentId: f.reviewer.id, subscriptionId: f.codex.id,
+      kind: 'conversation', prompt: 'Review.', timeoutMs: 1_000, status: 'done',
+    }).returning();
+    await f.db.insert(turnTokens).values({
+      jobId: job!.id, companyId: f.task.companyId, agentId: f.reviewer.id, subscriptionId: f.codex.id,
+      model: FALLBACK_MODEL, at: fallbackAt(2),
+    });
+
+    await updateTask(f.ctx, f.head.id, f.task.id, { echelonStage: 'review', ownerAgentId: f.reviewer.id });
+    expect(await f.route()).toMatchObject({
+      stage: 'review', phase: 'active',
+      assignment: { agentId: f.reviewer.id, subscriptionId: f.codex.id, model: FALLBACK_MODEL },
     });
   });
 
@@ -141,6 +201,18 @@ describe('a checking stage whose automatic fallback left the old plan pinned', (
     expect(await f.route()).toMatchObject({ stage: 'tests', phase: 'ready' });
   });
 
+  it('keeps Tests waiting when a completed reviewer is the only checker with its ability', async () => {
+    const f = await atReview();
+    await f.db.update(agents).set({ skills: [...f.reviewer.skills, ...f.tester.skills] }).where(eq(agents.id, f.reviewer.id));
+    await f.db.update(agents).set({ skills: [] }).where(eq(agents.id, f.tester.id));
+    await updateTask(f.ctx, f.head.id, f.task.id, { echelonStage: 'tests', ownerAgentId: f.reviewer.id });
+    await verdict(f.ctx, f.reviewer.id, f.task.id, pass);
+    expect(await f.route()).toMatchObject({ stage: 'tests', phase: 'waiting' });
+
+    await resumeWaitingRoutes(f.ctx, { agentId: f.reviewer.id }, f.reviewer, 'Available.');
+    expect(await f.route()).toMatchObject({ stage: 'tests', phase: 'waiting', assignment: null });
+  });
+
   it('does not use a fallback to let a completed checker verify a later stage', async () => {
     const f = await atReview();
     await verdict(f.ctx, f.reviewer.id, f.task.id, pass);
@@ -172,6 +244,28 @@ describe('a checking stage whose automatic fallback left the old plan pinned', (
     expect(await f.route()).toMatchObject({
       stage: 'tests', phase: 'active',
       assignment: { agentId: f.tester.id, subscriptionId: f.codex.id, model: FALLBACK_MODEL },
+    });
+  });
+
+  it('refuses an in-flight Tests certification across a fallback and accepts a fresh report', async () => {
+    const f = await atReview();
+    await verdict(f.ctx, f.reviewer.id, f.task.id, pass);
+    const detail = (await f.detail()).echelons;
+    const db = f.db as { transaction: (...args: unknown[]) => Promise<unknown> };
+    const transaction = db.transaction.bind(db);
+    db.transaction = async (...args: unknown[]) => {
+      db.transaction = transaction;
+      await savedFallback(f, FALLBACK_MODEL, f.tester);
+      return transaction(...args);
+    };
+    const evidence = { done: true, summary: 'Tested.', verification: { candidateId: detail.candidateId!, revision: detail.revision } };
+    await expect(report(f.ctx, f.tester.id, f.task.id, evidence)).rejects.toMatchObject({ status: 409 });
+    expect(await f.route()).toMatchObject({ stage: 'tests', phase: 'active' });
+
+    await report(f.ctx, f.tester.id, f.task.id, evidence);
+    expect(await f.route()).toMatchObject({ stage: 'tests', phase: 'ready' });
+    expect((await f.detail()).log.findLast(row => row.kind === 'report')?.data).toMatchObject({
+      checker: { agentId: f.tester.id, subscriptionId: f.codex.id, model: FALLBACK_MODEL },
     });
   });
 });

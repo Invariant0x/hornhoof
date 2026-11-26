@@ -105,7 +105,8 @@ function changesOf(agent: Agent, next: { subscriptionId: string; model: string; 
 /* Moves the employee, if it is still where it was, and leaves its program on the plan it left for that plan's node to close. */
 async function moveAgent(ctx: Ctx, agent: Agent, next: { subscriptionId: string; model: string; effort: string | null }, keep: (tx: Parameters<Parameters<Ctx['db']['transaction']>[0]>[0]) => Promise<unknown>): Promise<boolean> {
   const moved = await ctx.db.transaction(async tx => {
-    const [row] = await tx.update(agents).set(next).where(and(eq(agents.id, agent.id), eq(agents.subscriptionId, agent.subscriptionId!))).returning({ id: agents.id });
+    const [row] = await tx.update(agents).set(next).where(and(eq(agents.id, agent.id), eq(agents.companyId, agent.companyId),
+      eq(agents.subscriptionId, agent.subscriptionId!), eq(agents.model, agent.model))).returning({ id: agents.id });
     if (!row) return false;
     await keep(tx);
     await tx.insert(agentChanges).values(changesOf(agent, next));
