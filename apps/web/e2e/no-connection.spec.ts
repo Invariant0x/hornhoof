@@ -243,25 +243,24 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
 test('a hop 404 on the Machines route retries without showing a missing page when the server answers', async ({ page }) => {
   await page.clock.install();
   await serveServer(page);
-  const hop = { on: true };
+  const hop = { on: true, refusals: 0, recovered: false };
+  page.on('response', response => {
+    if (new URL(response.url()).pathname !== '/api/machines') return;
+    if (response.status() === 404) hop.refusals++;
+    if (response.ok()) hop.recovered = true;
+  });
   await page.route('**/api/machines', route => (hop.on ? route.fulfill({ status: 404, contentType: 'text/html', body: RELAY_PAGE }) : route.fallback()));
   await page.goto('/');
-  await expect(tab(page, en.shell.tabs.machines)).toBeVisible();
-  const responseOf = (path: string, status: number) => page.waitForResponse(r => new URL(r.url()).pathname === path && r.status() === status);
-  const refused = responseOf('/api/machines', 404);
-  const healthy = responseOf('/api/build', 200);
   await tab(page, en.shell.tabs.machines).click();
-  await Promise.all([refused, healthy]);
+  await until(page, async () => hop.refusals >= 2);
   await expect(page.getByRole('heading', { name: en.machines.heading })).toBeVisible();
   await expect(page.getByRole('heading', { name: en.routes.accessDenied })).toHaveCount(0);
   await expect(page.getByText(en.routes.explanation)).toHaveCount(0);
   await expect(windowOf(page, LINE.lost)).toHaveCount(0);
   await expect(strip(page)).toHaveCount(0);
 
-  const recovered = responseOf('/api/machines', 200);
   hop.on = false;
-  await page.clock.runFor(NOTICE_MS);
-  await recovered;
+  await until(page, async () => hop.recovered);
   await expect(page.getByRole('heading', { name: en.machines.heading })).toBeVisible();
 });
 
