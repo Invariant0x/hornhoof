@@ -106,9 +106,11 @@ describe('the steps to connect a personal plan', () => {
     await user.type(second.getByLabelText('Password'), 'test password');
     await user.click(second.getByRole('button', { name: 'Next' }));
     for (const block of [first, second]) {
-      expect(await block.findByText(commandCode(withKey(COMMAND)))).toBeVisible();
+      await block.findByText(EN.run);
       expect(block.queryByLabelText('Password')).not.toBeInTheDocument();
+      expect(block.getAllByRole('code')[0]).toHaveTextContent(`${COMMAND} --owner-key`);
     }
+    expect(first.getAllByRole('code')[0]?.textContent).toBe(second.getAllByRole('code')[0]?.textContent);
   });
 
   it('shows the same steps in the install block shown right after a plan is added', async () => {
