@@ -5,10 +5,11 @@ import type { DiskPart, DiskReport } from '@hornhoof/protocol';
 
 /* What a cleaning leaves because it cannot come back, as the disk report names it, without its part. */
 export type Stay = Omit<NonNullable<DiskReport['kept']>[number], 'part'>;
+export type ListedCopy = NonNullable<DiskReport['copies']>[number];
 
 /* One part of Hornhoof's share of a disk: what it takes now, and the cleaning that removes what of it can come back. clean
    says how many bytes it freed; kept, where a part has it, what its last cleaning left because it cannot come back. */
-export type Cleaner = { part: DiskPart; size(): Promise<number>; clean(): Promise<number>; kept?(): Stay[] };
+export type Cleaner = { part: DiskPart; size(): Promise<number>; clean(): Promise<number>; kept?(): Stay[]; copies?(): ListedCopy[] };
 
 /* How long du may count one folder before the node gives up on it. */
 export const DU_TIMEOUT_MS = 5 * 60_000;

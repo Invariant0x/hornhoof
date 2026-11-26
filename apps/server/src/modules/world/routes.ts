@@ -40,8 +40,8 @@ import { createTask } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import { readWorldLiveState } from './live-data.js';
 import { isAllowedCompanyTheme, worldPackForTheme } from './packs/index.js';
-
-const MAX_STORED_RELOCATIONS = 200;
+import { registerWorldRewardsRoutes } from './rewards-routes.js';
+import { MAX_STORED_RELOCATIONS, WORLD_LAYOUT_BYTES } from './stored-layout.js';
 
 function requireWorldCeo(me: Person): void {
   if (!me.isOwner || me.viaHead) {
@@ -128,6 +128,7 @@ async function restoreCompanyAgentNames(db: Ctx['db'], me: Person): Promise<Worl
 
 export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
+  registerWorldRewardsRoutes(app, ctx);
 
   /* Strictly read-only live world snapshot of the signed-in person's company. */
   app.get('/api/world/state', async req => {
@@ -272,7 +273,7 @@ export function worldRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /* Persists the generated/grown city layout into the isolated world_layouts table without touching work tables. */
-  app.put('/api/world/layout', async req => {
+  app.put('/api/world/layout', { bodyLimit: WORLD_LAYOUT_BYTES }, async req => {
     const me = await requirePerson(req, db);
     const body = WorldLayoutSaveSchema.parse(req.body);
     await db

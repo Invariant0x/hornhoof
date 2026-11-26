@@ -507,6 +507,46 @@ describe('Machines', () => {
     expect(within(other).queryByText(/company backups/)).not.toBeInTheDocument();
   });
 
+  it("sets the room a machine gives the company's files, and shows what they take there and what its disk has free", async () => {
+    const store = { id: 'm1', limitBytes: null, areaBytes: 10 * GIB, usedBytes: 2 * GIB, diskFree: 40 * GIB };
+    const withStore = MACHINES.map(machine => ({ ...machine, fileStore: machine.id === 'm1' ? store : null }));
+    const calls = mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: withStore, builtin: BUILTIN }], 'PATCH /api/machines/m1': [200, { lendsTests: true, keepsBackups: false, fileStoreLimitBytes: 20 * GIB }] });
+    const user = userEvent.setup();
+    render(<Machines me={ME} />);
+    const mine = await openCard('dev-laptop');
+    const room = within(mine).getByRole('combobox', { name: "Room for the company's files on dev-laptop" });
+    expect(room).toHaveValue('default');
+    expect(within(room).getAllByRole('option').map(option => option.textContent).slice(0, 3)).toEqual(['Default, 10 GB', 'None', '5 GB']);
+    expect(fact(mine, 'They take')).toBe('2 of 10 GB');
+    expect(fact(mine, 'Free on its disk')).toBe('40 GB');
+    await user.selectOptions(room, String(20 * GIB));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/machines/m1', body: { fileStoreLimitBytes: 20 * GIB } }));
+    /* The list is read again, for what the setting gives. */
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'GET' && c.path === '/api/machines').length).toBe(2));
+    /* A machine without a keeper keeps none of them, and says nothing of them. */
+    expect(within(card('build-box')).queryByText('Company files')).not.toBeInTheDocument();
+  });
+
+  it("shows the server's own room for the company's files on the built-in card, for the CEO alone to set", async () => {
+    const own = { id: 'own-row', limitBytes: 0, areaBytes: 0, usedBytes: 0, diskFree: null };
+    const calls = lists({ 'PATCH /api/machines/own-row': [200, {}] }, { ...BUILTIN, fileStore: own });
+    const user = userEvent.setup();
+    const { unmount } = render(<Machines me={ME} />);
+    const server = await openCard('Built-in node');
+    const room = within(server).getByRole('combobox', { name: "Room for the company's files on Built-in node" });
+    expect(room).toHaveValue('0');
+    expect(within(server).queryByText('Free on its disk')).not.toBeInTheDocument();
+    await user.selectOptions(room, 'default');
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/machines/own-row', body: { fileStoreLimitBytes: null } }));
+    unmount();
+    /* Someone who sees the whole company but is not the CEO reads it. */
+    lists({}, { ...BUILTIN, fileStore: own });
+    render(<Machines me={{ ...ME, person: { ...ME.person, id: 'p9', isOwner: false } }} />);
+    const read = await openCard('Built-in node');
+    expect(within(read).queryByRole('combobox', { name: /company's files/ })).not.toBeInTheDocument();
+    expect(fact(read, 'Room for them')).toBe('None');
+  });
+
   it("shows whether another person's machine keeps backups, without the switch", async () => {
     const withCore = MACHINES.map(machine => ({ ...machine, keepsBackups: machine.id === 'm2', heldBackups: machine.id === 'm2' ? 1 : 0 }));
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: withCore, builtin: null }] });
@@ -724,6 +764,38 @@ describe('Machines', () => {
     shown(language, [{ ...MACHINES[0]!, id: 'g0', hostname: 'given-up', data: held({ number: 2, copy: { line: 'stopped', why: 'gave_up', attempts: 4, since: iso } }) }]);
     await shownTable();
     expect(within(card('given-up')).getByText(words(4, clock(language, iso)!))).toBeInTheDocument();
+  });
+
+  it('lets the CEO ask for a copy again once it was given up, and offers that for no other stop', async () => {
+    const iso = '2026-11-24T19:30:00.000Z';
+    const rows = [
+      { ...MACHINES[0]!, id: 'g1', hostname: 'given-up', data: held({ number: 2, copy: { line: 'stopped', why: 'gave_up', attempts: 4, since: iso } }) },
+      { ...MACHINES[0]!, id: 'g2', hostname: 'weak-link', data: held({ number: 3, copy: { line: 'stopped', why: 'path_slow', attempts: 0, since: iso } }) },
+      { ...MACHINES[0]!, id: 'g3', hostname: 'late-link', data: held({ number: 4, copy: { line: 'stopped', why: 'path_late', attempts: 0, since: iso } }) },
+      { ...MACHINES[0]!, id: 'g4', hostname: 'full-disk', data: held({ number: 5, copy: { line: 'stopped', why: 'disk_full' } }) },
+    ];
+    const { calls } = shown('en', rows, { 'POST /api/machines/g1/copy/retry': [204] });
+    const user = userEvent.setup();
+    const gone = await openCard('given-up');
+    await user.click(within(gone).getByRole('button', { name: 'Try again' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'POST' && c.path.endsWith('/copy/retry')).map(c => c.path)).toEqual(['/api/machines/g1/copy/retry']));
+    const slow = await openCard('weak-link');
+    expect(within(slow).getByText('Copy: not made: the connection between this machine and the company server is too slow for it')).toBeInTheDocument();
+    const late = await openCard('late-link');
+    expect(within(late).getByText('Copy: not made: the connection between this machine and the company server answers too late for it')).toBeInTheDocument();
+    const full = await openCard('full-disk');
+    for (const card of [slow, late, full]) expect(within(card).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
+  it('writes in Russian that a copy is not made over a path too weak for it', async () => {
+    shown('ru', [
+      { ...MACHINES[0]!, id: 'g2', hostname: 'weak-link', data: held({ number: 3, copy: { line: 'stopped', why: 'path_slow', attempts: 0, since: '2026-11-24T19:30:00.000Z' } }) },
+      { ...MACHINES[0]!, id: 'g3', hostname: 'late-link', data: held({ number: 4, copy: { line: 'stopped', why: 'path_late', attempts: 0, since: '2026-11-24T19:30:00.000Z' } }) },
+    ]);
+    const slow = await openCard('weak-link');
+    expect(within(slow).getByText('Копия: не делается: связь этой машины с сервером компании слишком медленная для нее')).toBeInTheDocument();
+    const late = await openCard('late-link');
+    expect(within(late).getByText('Копия: не делается: связь этой машины с сервером компании отвечает слишком поздно для нее')).toBeInTheDocument();
   });
 
   const names = () => screen.getAllByRole('button', { name: /^Open the card of / }).map(button => button.getAttribute('aria-label')!.replace('Open the card of ', ''));

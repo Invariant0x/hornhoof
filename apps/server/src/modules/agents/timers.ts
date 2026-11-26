@@ -12,7 +12,7 @@ import { STOPPED_ON_PURPOSE } from '../conversation/constants.js';
 import { dropOldConnections, serverStarted } from '../nodes/connections.js';
 import { tellOfCopySchemaFailures } from '../copies/schema-failures.js';
 import { tellOfMachinesAway } from '../nodes/machine-away.js';
-import { tellOfMachinesLow } from '../nodes/machine-low.js';
+import { tellOfMachinesLow } from '../nodes/machine-low-signal.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { storeRound } from '../files/sweep.js';
 import { moveOldFiles, type MoveRound } from '../files/mover.js';
@@ -122,6 +122,17 @@ async function sendWaiting(ctx: Ctx): Promise<void> {
   }
 }
 
+/* Runs independent sweeps with a cap on concurrent database pool use so a minute tick never starves live requests. */
+export async function runBounded(work: readonly (() => Promise<unknown>)[], limit: number): Promise<void> {
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < work.length) await work[next++]!();
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), work.length) }, worker));
+}
+
+const MINUTE_ROUND_CONCURRENCY = 3;
+
 /* What Hornhoof does every minute: due rounds, turns that task moves kept and nobody queued, turns left waiting though
    their agent is free, department turns their release tags close and turns that hold nothing for a release, files of turns closed a month ago, the old history of node connections, test run times, and Codex plans
    to move; and files an older Hornhoof kept in the database, a few at a time, into the store. */
@@ -130,32 +141,32 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
   await checkExternalWaits(ctx, now).catch(failed('ending external task waits failed'));
   await checkWaitHealth(ctx, now).catch(failed('checking task waits failed'));
   await checkOperatorHealth(ctx, now).catch(failed('checking program operator cases failed'));
-  await Promise.all([
-    timerTick(ctx, now, failed('timer round failed')).catch(failed('timer tick failed')),
-    wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
-    retryCallBatches(ctx).catch(failed('recovering one-shot call batches failed')),
-    reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
-    releaseRound(ctx).catch(failed('closing turns by the tags of their releases failed')),
-    releaseCiRound(ctx).catch(failed('recording the releases that wait for CI failed')),
-    closeIdleTurns(ctx).catch(failed('closing turns that hold nothing for a release failed')),
-    sendWaiting(ctx).catch(failed('sending waiting turns failed')),
-    dropOldFiles(ctx, now).then(() => storeRound(ctx, now)).catch(failed('removing the files of old turns failed')),
-    moveOldFiles(ctx)
+  await runBounded([
+    () => timerTick(ctx, now, failed('timer round failed')).catch(failed('timer tick failed')),
+    () => wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
+    () => retryCallBatches(ctx).catch(failed('recovering one-shot call batches failed')),
+    () => reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
+    () => releaseRound(ctx).catch(failed('closing turns by the tags of their releases failed')),
+    () => releaseCiRound(ctx).catch(failed('recording the releases that wait for CI failed')),
+    () => closeIdleTurns(ctx).catch(failed('closing turns that hold nothing for a release failed')),
+    () => sendWaiting(ctx).catch(failed('sending waiting turns failed')),
+    () => dropOldFiles(ctx, now).then(() => storeRound(ctx, now)).catch(failed('removing the files of old turns failed')),
+    () => moveOldFiles(ctx)
       .then(round => tellMoveRound(ctx, round))
       .catch(failed('moving files from the database into the store failed')),
-    dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
-    checkTestTimes(ctx).catch(failed('checking test run times failed')),
-    harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),
-    moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
-    tellOfCopySchemaFailures(ctx, now).catch(failed('telling of copy schema failures failed')),
-    tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
-    tellOfMachinesLow(ctx).catch(failed('telling of machines short of disk space failed')),
-  ]);
+    () => dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
+    () => checkTestTimes(ctx).catch(failed('checking test run times failed')),
+    () => harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),
+    () => moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
+    () => tellOfCopySchemaFailures(ctx, now).catch(failed('telling of copy schema failures failed')),
+    () => tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
+    () => tellOfMachinesLow(ctx).catch(failed('telling of machines short of disk space failed')),
+  ], MINUTE_ROUND_CONCURRENCY);
 }
 
 /* What a round of the mover did, in the log of the server. */
 function tellMoveRound(ctx: Ctx, round: MoveRound): void {
-  if (round.moved > 0) ctx.log.info({ moved: round.moved }, 'Files copied from the database into the store and checked there.');
+  if (round.moved > 0 || round.waiting > 0) ctx.log.info({ moved: round.moved, waiting: round.waiting }, 'Files copied from the database into the store and checked there.');
   if (round.ready) {
     ctx.log.warn({ ...round.ready }, 'Every file of the database on this machine is in the store and checked. Its bytes stay in the database until the CEO says yes to this reconciliation (POST /api/files/move/approve with its digest).');
   }

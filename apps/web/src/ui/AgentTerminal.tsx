@@ -775,6 +775,17 @@ function useNotesFoot(label: string, notes: WindowNote[], onNotes?: (notes: Wind
   return onNotes ? null : <WindowFoot label={label} notes={notes} />;
 }
 
+/* A terminal opening has its own progress. The service road owns any outage message. */
+function TerminalOpening({ program }: { program: string }) {
+  const t = useT();
+  return (
+    <div className="t-load" role="status">
+      <span className="spinner" aria-hidden="true" />
+      <span>{t.window.opening(program)}</span>
+    </div>
+  );
+}
+
 /* A live agent terminal or a proof-only standalone test view, both using the same renderer and local history. */
 export function AgentTerminal({ path, program, onGone, watching = false, testSession, onNotes }: Props) {
   const t = useT();
@@ -863,12 +874,7 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
         <div className="t-xterm" ref={box} />
         <CopyMenu menu={menu} termRef={termRef} onClose={() => setMenu(null)} label={t.common.copy} pasteLabel={t.common.paste} />
         {dragging && <div className="t-drop" role="status">{t.window.dropPictures}</div>}
-        {!up && (
-          <div className="t-load" role="status">
-            <span className="spinner" aria-hidden="true" />
-            <span>{t.window.opening(program)}</span>
-          </div>
-        )}
+        {!up && <TerminalOpening program={program} />}
       </div>
       {foot}
     </>

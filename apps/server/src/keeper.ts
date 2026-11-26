@@ -32,7 +32,7 @@ async function dataKeeper(): Promise<Running> {
   const { statfsSync } = await import('node:fs');
   const { KEEPER_DIR } = await import('./modules/keeper/machine-keys.js');
   const { InternetMeasures } = await import('./modules/keeper/internet.js');
-  const { Measures } = await import('./modules/keeper/measures.js');
+  const { commitProbe, Measures, PROBE_TIMEOUT_MS } = await import('./modules/keeper/measures.js');
   const { queryTimeoutMs } = await import('./modules/keeper/lease.js');
   const { pgSubscription, probeLink, Promoter } = await import('./modules/keeper/taking.js');
   const { othersFinished } = await import('./modules/keeper/proofs.js');
@@ -43,9 +43,15 @@ async function dataKeeper(): Promise<Running> {
   const config = loadConfig(process.env);
   const db = config.databaseUrl ? openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 }) : null;
   /* What the keeper measures of this machine, its disk's fsync p99 among it: what it reports, and what the keeper's
-     own statements on the lease and the copies may take. */
-  const measures = new Measures({ dir: KEEPER_DIR, internet: new InternetMeasures({ dir: KEEPER_DIR, log }) });
-  const paced = (url: string) => keeperSql(url, { timeoutMs: () => queryTimeoutMs(measures.fsyncP99()) });
+     own statements on the lease and the copies may take. The disk is the database's, timed by a commit on a session of
+     its own; what it times while a backup keeps the disk busy is left out of the report, not out of the lease's view. */
+  let keeper: { backupsBusy(): boolean } | null = null;
+  const measures = new Measures({
+    dir: KEEPER_DIR, filesDir: config.filesDir, internet: new InternetMeasures({ dir: KEEPER_DIR, log }),
+    busy: () => keeper?.backupsBusy() ?? false,
+    ...(config.databaseUrl ? { probe: commitProbe(keeperSql(config.databaseUrl, { timeoutMs: PROBE_TIMEOUT_MS })) } : {}),
+  });
+  const paced = (url: string) => keeperSql(url, { timeoutMs: () => queryTimeoutMs(measures.leaseFsyncP99()) });
   /* Where this machine's database listens, for the peers that keep data too. */
   const dbTarget = (): { host: string; port: number } | null => {
     if (!config.databaseUrl) return null;
@@ -68,7 +74,7 @@ async function dataKeeper(): Promise<Running> {
     config.databaseUrl && config.machineId && slow
       ? { catalog: pgCatalog(paced(config.databaseUrl), slow, config.machineId), relay: new Relay(config.relayUrl), slots: { sql: slow, diskFree } }
       : undefined;
-  return new Keeper({
+  return (keeper = new Keeper({
     config, db, app: { host: 'app', port: 8080 }, frontHost: 'front', log, lease: leaseOfMachine(config, log, paced),
     published: publishedFrom(process.env), dbTarget: dbTarget(), addresses: addressesIn(process.env), hostname: process.env.HORNHOOF_HOSTNAME || null,
     /* The role copies read this machine's database with, made on a connection of its own each time. */
@@ -161,7 +167,7 @@ async function dataKeeper(): Promise<Running> {
             });
           }
         : undefined,
-  });
+  }));
 }
 
 /* A machine that keeps a copy of the company's data and does not lead: it holds the company's secret and a database of
@@ -177,6 +183,7 @@ async function followKeeper(): Promise<Running> {
   const { Relay } = await import('./modules/link/relay.js');
   const { probeLink } = await import('./modules/keeper/taking.js');
   const { bundleSecrets } = await import('./modules/keeper/keeper.js');
+  const { commitProbe, PROBE_TIMEOUT_MS } = await import('./modules/keeper/measures.js');
   const config = followConfig(process.env, log);
   const whole = loadConfig(process.env);
   const db = openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 });
@@ -192,7 +199,8 @@ async function followKeeper(): Promise<Running> {
     sql: database => keeperSql(urlOf(database), { timeoutMs: 20_000 }),
     /* While the copy is being made its database has no link to read yet. */
     settings: () => tunnelSettings(db, whole).catch(() => undefined),
-    worker: { internet: new InternetMeasures({ dir: config.dir, log }) },
+    /* Its disk is its database's, timed by a commit on a session of its own. */
+    worker: { internet: new InternetMeasures({ dir: config.dir, log }), probe: commitProbe(keeperSql(config.databaseUrl, { timeoutMs: PROBE_TIMEOUT_MS })) },
     /* What its watch over the leader asks: hornhoof.org of the company's name, and the company's link of who answers there. */
     relay: new Relay(whole.relayUrl),
     probe: (nonce, url) => probeLink(process.env.HORNHOOF_LINK_PROBE || url, nonce),

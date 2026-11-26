@@ -113,6 +113,7 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
     lendsTests: machine.lendsTests,
     keepsBackups: machine.keepsBackups,
     ...(typeof machine.computerClosed === 'boolean' ? { computerClosed: machine.computerClosed } : {}),
+    ...areaOf(machine),
     ...holdsNow(machine),
   }).where(eq(machines.id, machine.id));
   await carryLink(db, company.id, carry);
@@ -132,15 +133,33 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   ctx.bus.publish(company.id, { type: 'computer' });
 }
 
-/* The key the company's files are sealed with, as the old database had it: the files the store keeps are sealed with it,
-   whatever the restored database says, so it is the one kept. */
+/* The key the company's files are sealed with, as the old database had it: the files the machines keep are sealed with
+   it, whatever the restored database says, so it is the one kept. And how many machines keep each, as the CEO set it,
+   and the days the store's backup keeps a file and the machine it is on, so what only that machine keeps is not left. */
 async function carryFileStore(db: Db, carry: Carry): Promise<void> {
   if (carry.fileKeyEnc) await db.execute(sql`INSERT INTO net.file_key (key_enc) VALUES (${carry.fileKeyEnc}) ON CONFLICT (one) DO UPDATE SET key_enc = excluded.key_enc`);
+  if (carry.fileCopies) {
+    await db.execute(sql`INSERT INTO net.file_settings (copies, set_by) VALUES (${carry.fileCopies.copies}, ${carry.fileCopies.setBy})
+      ON CONFLICT (one) DO UPDATE SET copies = excluded.copies, set_by = excluded.set_by`);
+  }
+  if (carry.fileBackup) {
+    const { keepDays, setBy, machineId } = carry.fileBackup;
+    await db.execute(sql`INSERT INTO net.file_backup_settings (keep_days, set_by, machine_id) VALUES (${keepDays}, ${setBy}, ${machineId})
+      ON CONFLICT (one) DO UPDATE SET keep_days = excluded.keep_days, set_by = excluded.set_by, machine_id = excluded.machine_id`);
+  }
 }
 
 /* Whether a machine holds the company's data now, as the old database had it when it closed: an older bundle would
    else give the data back to a machine that stopped holding it. One that holds it no more has no place either; the
    ranking gives the places anew. */
+/* The area a machine gives the company's files as the old database had it, the default or none included: a carry from an
+   updater before the areas names none, and the restored database's stays. */
+function areaOf(machine: Carry['machines'][number]): Partial<typeof machines.$inferInsert> {
+  const limit = machine.fileStoreLimitBytes;
+  if (limit === null) return { fileStoreLimitBytes: null };
+  return Number.isSafeInteger(limit) && limit! >= 0 ? { fileStoreLimitBytes: limit } : {};
+}
+
 function holdsNow(machine: Carry['machines'][number]): Partial<typeof machines.$inferInsert> {
   if (machine.role === undefined) return {};
   const left = machine.role !== 'data' ? { serverOrder: null, serverWhy: null } : {};

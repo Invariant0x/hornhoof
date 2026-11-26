@@ -68,6 +68,9 @@ import { replicationOf, type Replication } from './modules/copies/slots.js';
 import { Merger } from './modules/merge/merger.js';
 import { mergeRoutes } from './modules/merge/routes.js';
 import { backupRoutes } from './modules/backups/routes.js';
+import { fileNetworkRoutes } from './modules/files/network.js';
+import { backupRestoreRoutes } from './modules/files/backup-restore.js';
+import { fileCopiesRoutes } from './modules/files/copies.js';
 import { fileMoveRoutes } from './modules/files/move.js';
 import { Computers } from './modules/computer/access.js';
 import { computerRoutes } from './modules/computer/routes.js';
@@ -167,7 +170,7 @@ export type Ctx = Deps & {
   totalLoss: TotalLoss;
   /* The merges of the databases that came back. */
   merger: Merger;
-  /* The company's files: kept by their sha256 in the store on this server's disk. */
+  /* The company's files: kept by their sha256 in the store of this machine and of the machines that hold them. */
   files: Files;
   /* The numbering of the machines that may hold the company's data. */
   ranking: Ranking;
@@ -529,7 +532,10 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   copiesRoutes(app, ctx);
   keyRoutes(app, ctx);
   backupRoutes(app, ctx);
+  fileNetworkRoutes(app, ctx);
   fileMoveRoutes(app, ctx);
+  fileCopiesRoutes(app, ctx);
+  backupRestoreRoutes(app, ctx);
   totalLossRoutes(app, ctx);
   mergeRoutes(app, ctx);
   challengeRoutes(app, ctx.challenges);
