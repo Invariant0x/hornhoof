@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connection } from '../src/connection';
-import { LanguageProvider } from '../src/i18n';
+import { LanguageProvider, loadMessages } from '../src/i18n';
+import { ru } from '../src/i18n/ru';
 import { SERVICE_LINES, service } from '../src/service-state';
 import { ServiceLayout, ServiceLoader, ServiceStrip, ServiceWindow, useServiceNotice } from '../src/ui/ServiceRoad';
 
@@ -135,9 +136,12 @@ describe('the window and the strip', () => {
   });
 
   it('uses the English service line while the page language is Russian', async () => {
+    const words = await loadMessages('ru');
+    expect(words.boot.loading).toBe(ru.boot.loading);
     localStorage.setItem('hh-lang', 'ru');
     render(<LanguageProvider><ServiceLayout starting>{null}</ServiceLayout></LanguageProvider>);
-    expect(await screen.findByText('Загрузка…')).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute('lang', 'ru');
+    expect(screen.getByRole('status')).toHaveTextContent(ru.common.loading);
     act(() => service.setUpdate(true));
     expect(screen.getByText('Updating…').closest('p')).toHaveAttribute('lang', 'en');
   });
