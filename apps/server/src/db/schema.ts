@@ -573,6 +573,10 @@ export const nodeCodes = pgTable('node_codes', {
 }, t => [index('node_codes_active_owner').on(t.personId).where(sql`${t.usedAt} is null`)]);
 
 /* needs_setup: signed in, but its program waits for a first setup only the plan's owner may pass on the machine. */
+export const MIN_SUBSCRIPTION_TURNS = 1;
+export const MAX_SUBSCRIPTION_TURNS = 5;
+export const DEFAULT_SUBSCRIPTION_TURNS = 4;
+
 export const SUBSCRIPTION_STATUSES = ['waiting_machine', 'needs_login', 'needs_setup', 'ready'] as const;
 
 export const subscriptions = pgTable(
@@ -599,6 +603,7 @@ export const subscriptions = pgTable(
     /* The share of each limit window, in percent, that task turns may use; past it they wait for the window to start
        over while people's own messages still go. Null: the whole limit. */
     budget: integer('budget'),
+    turnLimit: integer('turn_limit').notNull().default(DEFAULT_SUBSCRIPTION_TURNS),
     /* The models its node says it can run; null until a node reports them. An API connection's are the ones it was given. */
     models: jsonb('models').$type<ModelOption[]>(),
     /* The plans its employees go on to, in this order, when it reaches its limit or the share set for tasks, each with the
@@ -615,7 +620,10 @@ export const subscriptions = pgTable(
     removedAt: timestamp('removed_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
-  t => [index('subscriptions_owner_person_id').on(t.ownerPersonId)],
+  t => [
+    index('subscriptions_owner_person_id').on(t.ownerPersonId),
+    check('subscriptions_turn_limit_range', sql`${t.turnLimit} between 1 and 5`),
+  ],
 );
 
 /* One plan a plan's employees go on to at its limit: model null runs the one their role asks for there. */
@@ -880,6 +888,8 @@ export const jobs = pgTable(
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
   t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status),
+    index('jobs_subscription_running_turns').on(t.subscriptionId, t.nodeId, t.builtinMachine)
+      .where(sql`${t.kind} = 'conversation' and ${t.status} = 'running'`),
     /* What the quiet check of a department asks of its conversations (whether one runs, when the last one ended), answered from the index alone. */
     index('jobs_conversation_activity').on(t.agentId, t.companyId, t.status, t.startedAt, t.finishedAt).where(sql`${t.kind} = 'conversation'`),
     check('jobs_builtin_machine', sql`builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'`),

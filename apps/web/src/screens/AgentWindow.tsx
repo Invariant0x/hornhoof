@@ -357,6 +357,8 @@ function WindowAfter({ offerByHand, needsOrchestrator, failure, t, onPickByHand 
    column of its own. */
 function stateNotes(t: Messages, language: Language, state: OrchestratorState, ready: boolean, sub: SubView | null): WindowNote[] {
   const w = t.window.notes;
+  const wait = state.subscriptionWait;
+  const numbers = new Intl.NumberFormat(language);
   const notes: (WindowNote | false | null)[] = [
     !ready && { id: 'reason', word: w.wait, text: reasonText(t, state.reason, sub), tone: 'wait' },
     state.turnRefused ? { id: 'refused', word: w.notSent, text: t.window.turnRefused[state.turnRefused], tone: 'bad' } : null,
@@ -364,6 +366,7 @@ function stateNotes(t: Messages, language: Language, state: OrchestratorState, r
     state.limitUntil ? { id: 'limit', word: w.wait, text: t.window.limitUntil(clock(language, state.limitUntil)!), tone: 'wait' } : null,
     !state.limitUntil && state.budgetUntil ? { id: 'budget', word: w.wait, text: t.window.budgetUntil(clock(language, state.budgetUntil)!), tone: 'wait' } : null,
     state.machineDrain ? { id: 'drain', word: w.wait, text: t.window.machineDrain, tone: 'wait' } : null,
+    wait ? { id: 'subscription-room', word: w.wait, text: t.window.subscriptionWait(wait.label, numbers.format(wait.running), numbers.format(wait.limit)), tone: 'wait' } : null,
   ];
   return notes.filter((note): note is WindowNote => Boolean(note));
 }

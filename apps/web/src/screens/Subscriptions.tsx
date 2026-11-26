@@ -1,5 +1,5 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { api, ApiFailure } from '../api';
 import { useStream } from '../live';
 import { doneOf, useHeldRows, useLoad } from '../ui/Loading';
@@ -27,6 +27,7 @@ import { ApiForm } from '../ui/ApiForm';
 import { TokenCount, TokenGauges } from '../ui/Tokens';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
+import { Field } from '../ui/Field';
 import { clock, limitState, planStateOnMachine, shortName, stateOf, subName, TERMINAL_SIGNIN, waitsThere, windowName, windowUsage } from '../ui/subscription';
 import { keepUnits } from '../ui/units';
 import { replaceSubscription } from './subscription-list';
@@ -252,6 +253,7 @@ type PlanControls = {
   note: SignNote | null;
   keying: boolean;
   setBudget: (sub: SubView, budget: number | null) => unknown;
+  setTurnLimit: (sub: SubView, limit: number) => Promise<boolean>;
   setFallbacks: (sub: SubView, fallbacks: PlanFallback[]) => unknown;
   /* Every plan of the company this person sees, which a plan's fallbacks are named from. */
   plans: SubView[];
@@ -277,8 +279,39 @@ type PlanControls = {
 
 type PlanProps = { sub: SubView; me: Me; controls: PlanControls };
 
-/* The share of the plan's limits its tasks may use, a field under its label in a band of its own. */
-function PlanSettings({ sub: s, me, controls }: PlanProps) {
+function PlanTurnLimit({ value, save }: { value: number; save(limit: number): Promise<boolean> }) {
+  const t = useT();
+  const field = useRef<HTMLInputElement>(null);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [invalid, setInvalid] = useState(false);
+  const [saving, setSaving] = useState(false);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (saving) return;
+    const limit = Number(draft ?? value);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 5) {
+      setInvalid(true);
+      field.current?.focus();
+      return;
+    }
+    setSaving(true);
+    try {
+      if (await save(limit)) setDraft(null);
+    } finally {
+      setSaving(false);
+    }
+  }
+  return <form noValidate onSubmit={event => void submit(event)} aria-busy={saving}>
+    <Field label={t.subs.turnLimit} problem={invalid ? t.subs.turnLimitProblem : undefined}>
+      {input => <input {...input} ref={field} type="number" min={1} max={5} step={1} value={draft ?? String(value)} disabled={saving}
+        onChange={event => { setDraft(event.target.value); setInvalid(false); }} />}
+    </Field>
+    <button type="submit" className="btn ghost" disabled={saving || draft === null}>{saving ? t.common.saving : t.common.save}</button>
+  </form>;
+}
+
+/* What a plan may run on each machine and how much of its usage budget tasks may spend. */
+function PlanSettings({ sub: s, me, controls, showBudget }: PlanProps & { showBudget: boolean }) {
   const t = useT();
   const heading = useId();
   const field = useId();
@@ -286,7 +319,7 @@ function PlanSettings({ sub: s, me, controls }: PlanProps) {
   return (
     <section className="plan-settings" aria-labelledby={heading}>
       <h4 id={heading}>{t.tables.settings}</h4>
-      <div className="field">
+      {showBudget && <div className="field">
         {editable ? <>
           <label htmlFor={field}>{t.subs.share}</label>
           <span className="select-wrap">
@@ -299,7 +332,10 @@ function PlanSettings({ sub: s, me, controls }: PlanProps) {
           <span className="label">{t.subs.share}</span>
           <span>{s.budget === null ? t.subs.shareAll : `${s.budget}%`}</span>
         </>}
-      </div>
+      </div>}
+      {editable || changesApi(s, me)
+        ? <PlanTurnLimit key={s.id} value={s.turnLimit ?? 4} save={limit => controls.setTurnLimit(s, limit)} />
+        : <div className="field"><span className="label">{t.subs.turnLimit}</span><span>{s.turnLimit ?? 4}</span></div>}
     </section>
   );
 }
@@ -501,7 +537,7 @@ function PlanWorking({ sub: s, me, controls, now }: PlanProps & { now: number })
       <h4>{t.cards.machinesOf}</h4>
       <PlanMachines sub={s} now={now} />
     </section>
-    {s.kind === 'personal' && <PlanSettings sub={s} me={me} controls={controls} />}
+    <PlanSettings sub={s} me={me} controls={controls} showBudget={s.kind === 'personal'} />
     <PlanFallbacks sub={s} plans={controls.plans} editable={s.owner.id === me.person.id || me.person.scopeKind === 'company' || changesApi(s, me)} onChange={list => controls.setFallbacks(s, list)} />
     <PlanFoot sub={s} me={me} controls={controls} />
   </>;
@@ -514,7 +550,10 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
     <CardFrame label={`${subName(t, s)}, ${s.owner.name}`} accent={s.isOrchestrator}
       head={<CardHead mark={<ProviderMark provider={s.provider} protocol={s.api?.protocol} />} name={shortName(t, s)} sign={<KindSign kind={s.kind} />} under={s.isOrchestrator && t.subs.orchestrator} state={<SubscriptionStatus sub={s} now={now} />} line={stateLine(t, language, s, now)} />}
       extra={<PlanExtra sub={s} controls={controls} now={now} />}>
-      {needsFix(s, controls.note) ? <PlanFix sub={s} me={me} controls={controls} /> : <PlanWorking sub={s} me={me} controls={controls} now={now} />}
+      {needsFix(s, controls.note) ? <>
+        <PlanFix sub={s} me={me} controls={controls} />
+        <PlanSettings sub={s} me={me} controls={controls} showBudget={false} />
+      </> : <PlanWorking sub={s} me={me} controls={controls} now={now} />}
     </CardFrame>
   );
 }
@@ -646,6 +685,16 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
       setSubs(list => replaceSubscription(list, subscription, 'update'));
     });
 
+  const setTurnLimit = async (sub: SubView, turnLimit: number): Promise<boolean> => {
+    let kept = false;
+    await run(async () => {
+      const { subscription } = await api.patch<{ subscription: SubView }>(`/api/subscriptions/${sub.id}`, { turnLimit });
+      setSubs(list => replaceSubscription(list, subscription, 'update'));
+      kept = true;
+    });
+    return kept;
+  };
+
   const setFallbacks = (sub: SubView, fallbacks: PlanFallback[]) =>
     run(async () => {
       const { subscription } = await api.patch<{ subscription: SubView }>(`/api/subscriptions/${sub.id}`, { fallbacks });
@@ -725,7 +774,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
             keying: keyFor === s.id,
             editing: editFor === s.id, setEditFor,
             saved: subscription => { setEditFor(null); setSubs(list => replaceSubscription(list, subscription, 'update')); }, places,
-            setBudget, setFallbacks, plans, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn, retryConnection, cancelConnection,
+            setBudget, setTurnLimit, setFallbacks, plans, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn, retryConnection, cancelConnection,
             done: () => { setKeyFor(null); void load(); },
           }} />}
         />

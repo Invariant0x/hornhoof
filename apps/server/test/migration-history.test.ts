@@ -39,7 +39,7 @@ async function oldMigrations(history: typeof mainHistory): Promise<string> {
 function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[] {
   /* Migration 0125 gives no subscription an address or protocol of its own: only a compatible API, which none was, names one.
      Migration 0131 gives every plan no fallbacks of its own. */
-  if (table === 'subscriptions') return rows.map(row => ({ row: { ...row.row, limits_updated_at: null, base_url: null, api_protocol: null, fallbacks: [] } }));
+  if (table === 'subscriptions') return rows.map(row => ({ row: { ...row.row, limits_updated_at: null, base_url: null, api_protocol: null, fallbacks: [], turn_limit: 4 } }));
   /* Every head and member gets the speed skill its role lists, and everyone the machine of a built-in node, empty.
      Migration 0124 gives every card an empty inbox mode of its own, every company the inbox and every turn no inbox wake.
      The tracker's migration gives every card no nudge of its timer yet. */

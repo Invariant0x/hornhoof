@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [0.44.5] - 2026-11-26
+
+### Added
+
+- A subscription runs four turns at a time on each of its machines by default. Its card can set a limit from one to five, and extra turns show why they wait. Urgent work gets the next place first. One-shot calls do not count toward the limit.
+
 ## [0.44.4] - 2026-11-26
 
 ### Fixed

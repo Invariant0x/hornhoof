@@ -732,7 +732,7 @@ async function checkHeld(ctx: Ctx, job: HeldJob, task: Task, worked: boolean): P
 export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   const program = clearTurnProgram(ctx, jobId);
   const [job] = await ctx.db
-    .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, failure: jobs.failure, inboxWake: jobs.inboxWake })
+    .select({ companyId: jobs.companyId, agentId: jobs.agentId, subscriptionId: jobs.subscriptionId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, failure: jobs.failure, inboxWake: jobs.inboxWake })
     .from(jobs)
     .where(eq(jobs.id, jobId));
   forgetEndedTurn(ctx, jobId, job);
@@ -749,7 +749,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   } else if (!handled && job.error === 'machine_restarted') await afterRestartOutsideTask(ctx, jobId);
   await explainEnded(ctx, jobId);
   await leaveIfOff(ctx, job.agentId);
-  await pump(ctx, job.agentId);
+  await pump(ctx, job.agentId, job.subscriptionId);
 }
 
 /* What the program itself says in a turn: only that shows it got the turn's prompt. A typed mark is a person's Enter or
