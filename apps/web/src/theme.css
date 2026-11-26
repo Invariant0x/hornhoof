@@ -405,7 +405,7 @@ select:disabled { opacity: .55; }
   .svc-window.dialog { padding-inline: 28px; }
   .svc-strip.glass { inset-block-start: auto; inset-block-end: calc(8px + env(safe-area-inset-bottom, 0px)); }
   /* The map's zoom controls take the start of the lower edge. Fit the strip beside them. */
-  .app-layout:has(.app-screen .map .map-version) > .svc-strip.glass {
+  .app-layout:has(.app-screen .body:not(.page) .map .map-version) > .svc-strip.glass {
     inset-inline: auto 16px; margin-inline: 0; max-inline-size: calc(100vw - 224px);
     padding-inline: 8px; gap: 4px 8px;
   }
