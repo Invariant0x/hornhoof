@@ -277,17 +277,16 @@ describe('updates', () => {
     expect(calls.find(c => c.method === 'POST' && c.path === '/api/updates')!.body).toEqual({ version: '0.3.0', whenIdle: false });
   });
 
-  it('shows the step and the output while updating, and reloads on the new build', async () => {
+  it('keeps the loading screen up until it reloads the new build', async () => {
     heldPolls();
     let view = updates({}, { status: status('running', 'backup', 'Downloading 0.4.1.\nSaving the database.\n') });
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': () => [200, view] });
     const reload = vi.spyOn(page, 'reload').mockImplementation(() => {});
-    const user = userEvent.setup();
     render(<ServiceLayout><Shell me={ME} onSignOut={() => {}} /></ServiceLayout>);
-    const dialog = await openVersions(user);
-    expect(within(dialog).getByText('Updating Hornhoof to 0.4.1 (bbbbbbb)')).toBeInTheDocument();
-    expect(within(dialog).getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 3 of 5: saving the database');
-    expect(within(dialog).getByText(/Saving the database\./)).toBeInTheDocument();
+    expect(await screen.findByText('Updating…')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Account' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
     view = updates({ current: { version: '0.4.1', commit: 'b'.repeat(40), migrations: 6 }, available: false }, { status: status('done', 'finished') });
     await act(() => vi.advanceTimersByTimeAsync(2000));
     expect(reload).toHaveBeenCalled();

@@ -1,5 +1,4 @@
 import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
-import { BOOT_WORDS } from '@hornhoof/protocol/service-lines';
 import type { BuiltinSkinId } from '../skins/registry';
 import type { SkinErrorCode } from '../skins/validate';
 import type { EmployeeStatus, FailureKind, LetterKind } from '../types';
@@ -74,7 +73,7 @@ export const en = {
       telegram: 'Set up Telegram so I can talk to you there', assistant: 'Set up my personal assistant',
     },
   },
-  boot: { loading: BOOT_WORDS.loading },
+  boot: { loading: 'Loading' },
   common: {
     loading: 'Loading…',
     /* Something under way that took longer than its one limit: it may still finish. */
