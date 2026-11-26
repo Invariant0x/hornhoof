@@ -365,13 +365,13 @@ for (const lang of ['en', 'ru'] as const) for (const width of WIDTHS) {
     const dialog = page.getByRole('dialog', { name: t.settings.title, exact: true });
     const google = dialog.getByRole('article', { name: t.googleSheets.title, exact: true });
     await google.getByRole('button', { name: t.googleSheets.remove, exact: true }).click();
-    const googleAsk = page.getByRole('alertdialog', { name: t.googleSheets.confirm.disconnect.title });
-    await expect(googleAsk).toHaveAccessibleDescription(t.googleSheets.confirm.disconnect.effect('sheets-bot@acme.iam.gserviceaccount.com'));
+    await expect(google.getByText(t.googleSheets.removeAsk, { exact: true })).toBeVisible();
+    const ask = await google.locator('.repo-actions').evaluate(row => [...row.querySelectorAll('.btn')].map(button => button.className));
+    expect(ask, `${name}: Disconnect the main button of the question, Keep beside it`).toEqual(['btn small', 'btn small ghost']);
     await shot(page, info, `settings-integrations-ask-${name}`);
-    await googleAsk.getByRole('button', { name: t.common.cancel, exact: true }).click();
     await page.goto('/settings/company');
     await dialog.getByRole('button', { name: t.settings.remove, exact: true }).click();
-    await expect(page.getByRole('alertdialog', { name: t.confirm.removeLink.title })).toHaveAccessibleDescription(t.settings.removeAsk('https://acme.hornhoof.org'));
+    await expect(dialog.getByText(t.settings.removeAsk('https://acme.hornhoof.org'), { exact: true })).toBeVisible();
     await shot(page, info, `settings-company-ask-${name}`);
     expect(problems).toEqual([]);
   });

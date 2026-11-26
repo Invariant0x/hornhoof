@@ -60,7 +60,9 @@ test('the first visit shows the loading screen with the real bytes; reopening an
   expect(art[0]).toBe(`0/${total} 0.0 of ${(total / 1048576).toFixed(1)} MB`);
   const bytes = art.filter(a => a.endsWith(' MB')).map(a => Number(a.split('/')[0]));
   for (let i = 1; i < bytes.length; i++) expect(bytes[i], 'the bytes only grow').toBeGreaterThanOrEqual(bytes[i - 1]!);
-  expect(shown.some(row => row[0] === '1/1 Done' && row[1] !== '0/1 Waiting'), 'the pictures finish before the map step').toBe(true);
+  const mapGoing = shown.filter(row => row[1] !== '0/1 Waiting');
+  expect(mapGoing.length, 'the map step starts').toBeGreaterThan(0);
+  expect(mapGoing.filter(row => row[0] !== '1/1 Done'), 'the pictures finish before the map step').toEqual([]);
   expect(shown[shown.length - 1]![2], 'the ground step is the last one going on').not.toBe('0/1 Waiting');
   expect([...pictures].sort(), 'each picture downloads once').toEqual([...folder.current.keys()].sort());
 

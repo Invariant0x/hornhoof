@@ -8,6 +8,7 @@ import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as } from './helpers.js';
 import { operatorCompany } from './program-operator-company.js';
 import { ownPictures } from '../src/modules/conversation/pictures.js';
+import { stored } from './files-fixture.js';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7ioAAAAASUVORK5CYII=', 'base64');
 
@@ -24,7 +25,7 @@ async function fixture() {
   const orchestratorTurn = await turn(orchestrator!.id);
   await c.db.insert(programInstances).values({ id: c.fact.instance, companyId: c.companyId, agentId: c.agent.id, nodeId: c.identity.nodeId });
   const [incident] = await c.db.insert(programOperatorCases).values({ companyId: c.companyId, agentId: c.agent.id, jobId: c.job.id, nodeId: c.identity.nodeId, instance: c.fact.instance, reason: 'assignment_unrecorded', evidenceKey: c.delivery.id, capability: randomUUID(), deadlineAt: new Date(Date.now() + 60000), operatorAgentId: c.operator!.id, operatorJobId: operator.job.id, escalationJobId: head.job.id }).returning();
-  const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.agent.id, jobId: c.job.id, operatorCaseId: incident!.id, mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+  const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.agent.id, jobId: c.job.id, operatorCaseId: incident!.id, mediaType: 'image/png', sha256: await stored(c.db, PNG, c.app.ctx.config), size: PNG.length }).returning();
   await c.db.update(programOperatorCases).set({ pictureId: picture!.id }).where(eq(programOperatorCases.id, incident!.id));
   const fetchPicture = (token: string, file = picture!.id, ref = `operator-case:${incident!.id}`) => c.app.inject({ method: 'GET', url: `/api/attachments/file?task=${encodeURIComponent(ref)}&file=${encodeURIComponent(file)}`, headers: { authorization: `Bearer ${token}` } });
   /* Someone of the whole company, unless more says otherwise. */
@@ -128,11 +129,15 @@ it('accepts only the exact case and PNG attachment identity with bounded bytes',
   const c = await fixture();
   for (const file of ['program-question.png', `../${c.picture.id}`, c.picture.id + '/else']) expect((await c.fetchPicture(c.operatorTurn.token, file)).statusCode).toBe(404);
   for (const ref of ['operator-case:missing', `operator-case:${randomUUID()}`, `operator-case:${c.incident.id}/else`]) expect((await c.fetchPicture(c.operatorTurn.token, c.picture.id, ref)).statusCode).toBe(404);
-  for (const change of [{ mediaType: 'image/jpeg' }, { bytes: Buffer.from('plain') }, { bytes: Buffer.concat([PNG, Buffer.alloc(3 * 1024 * 1024)]) }, { agentId: c.watcher.id }, { jobId: c.headTurn.job.id }]) {
+  const big = Buffer.concat([PNG, Buffer.alloc(3 * 1024 * 1024)]);
+  /* The row of the too big one still says the size of the picture, so the bytes the store holds are what bound it. */
+  const plain = { sha256: await stored(c.db, 'plain', c.app.ctx.config), size: 5 };
+  const tooBig = { sha256: await stored(c.db, big, c.app.ctx.config) };
+  for (const change of [{ mediaType: 'image/jpeg' }, plain, tooBig, { size: big.length }, { agentId: c.watcher.id }, { jobId: c.headTurn.job.id }]) {
     await c.db.update(attachments).set(change).where(eq(attachments.id, c.picture.id));
     expect((await c.fetchPicture(c.operatorTurn.token)).statusCode).toBe(404);
     expect((await c.app.inject({ method: 'GET', url: `/api/attachments/${c.picture.id}`, ...as(c.ceo) })).statusCode).toBe(404);
-    await c.db.update(attachments).set({ mediaType: 'image/png', bytes: PNG, agentId: c.agent.id, jobId: c.job.id }).where(eq(attachments.id, c.picture.id));
+    await c.db.update(attachments).set({ mediaType: 'image/png', sha256: c.picture.sha256, size: PNG.length, agentId: c.agent.id, jobId: c.job.id }).where(eq(attachments.id, c.picture.id));
   }
 });
 

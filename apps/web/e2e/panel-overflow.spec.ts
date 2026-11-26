@@ -114,7 +114,6 @@ for (const lang of ['en', 'ru'] as const) {
             await notebook.getByRole('button', { name: m.notebook.cancel, exact: true }).tap();
           }
           await remove.click();
-          await page.getByRole('alertdialog').getByRole('button', { name: m.notebook.confirm.remove.yes, exact: true }).click();
           await expect.poll(() => removed.length).toBe(1);
           expect(errors).toEqual([]);
         });
@@ -180,25 +179,6 @@ async function prepareRoutes(page: Page, lang: 'en' | 'ru', theme: 'light' | 'da
   return errors;
 }
 
-async function expectConfirmLayout(page: Page, info: Parameters<typeof capture>[1], ask: Locator, shotName: string) {
-  const box = ask.locator('.dialog');
-  const question = box.locator('p').first();
-  const group = box.locator('.entry-actions');
-  await expect(group).toHaveAttribute('role', 'group');
-  const buttons = group.getByRole('button');
-  for (const button of await buttons.all()) await expect(button).toHaveCSS('min-height', '44px');
-  await capture(page, info, shotName);
-  await expectWrappedText(question);
-  await expectInside(box, [question, ...await buttons.all()]);
-  const questionBox = (await question.boundingBox())!;
-  const yesBox = (await buttons.nth(0).boundingBox())!;
-  const noBox = (await buttons.nth(1).boundingBox())!;
-  expect(yesBox.y).toBeGreaterThanOrEqual(questionBox.y + questionBox.height - 1);
-  expect(noBox.y).toBe(yesBox.y);
-  await buttons.nth(1).click();
-  await expect(ask).toHaveCount(0);
-}
-
 for (const lang of ['en', 'ru'] as const) {
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [1440, 375]) {
@@ -240,8 +220,22 @@ for (const lang of ['en', 'ru'] as const) {
         const card = page.getByRole('article', { name: LONG_HOST, exact: true });
         await expect(card).toBeVisible();
         await card.getByRole('button', { name: m.machines.disconnectLabel(LONG_HOST), exact: true }).click();
-        const ask = page.getByRole('alertdialog', { name: m.machines.confirm.disconnect.title, exact: true });
-        await expectConfirmLayout(page, info, ask, `machine-confirm-${look}`);
+        const ask = card.locator('.ask');
+        const question = ask.locator('.entry-main');
+        const group = ask.locator('.entry-actions');
+        await expect(group).toHaveAttribute('role', 'group');
+        const buttons = group.getByRole('button');
+        for (const button of await buttons.all()) await expect(button).toHaveCSS('min-height', '44px');
+        await capture(page, info, `machine-confirm-${look}`);
+        await expectWrappedText(question);
+        await expectInside(ask, [question, ...await buttons.all()]);
+        const questionBox = (await question.boundingBox())!;
+        const yesBox = (await buttons.nth(0).boundingBox())!;
+        const noBox = (await buttons.nth(1).boundingBox())!;
+        expect(yesBox.y).toBeGreaterThanOrEqual(questionBox.y + questionBox.height - 1);
+        expect(noBox.y).toBe(yesBox.y);
+        await buttons.nth(1).click();
+        await expect(ask).toHaveCount(0);
         expect(errors).toEqual([]);
       });
 
@@ -252,8 +246,22 @@ for (const lang of ['en', 'ru'] as const) {
         const dialog = page.getByRole('dialog', { name: m.settings.title, exact: true });
         await expect(dialog).toBeVisible();
         await dialog.getByRole('button', { name: m.settings.remove, exact: true }).click();
-        const ask = page.getByRole('alertdialog', { name: m.confirm.removeLink.title, exact: true });
-        await expectConfirmLayout(page, info, ask, `settings-remove-${look}`);
+        /* The actions that hold the question: the settings show other actions beside the link's. */
+        const actions = dialog.locator('.settings-actions').filter({ has: page.locator('.entry-main') });
+        const question = actions.locator('.entry-main');
+        const group = actions.locator('.entry-actions');
+        await expect(group).toHaveAttribute('role', 'group');
+        const buttons = group.getByRole('button');
+        for (const button of await buttons.all()) await expect(button).toHaveCSS('min-height', '44px');
+        await capture(page, info, `settings-remove-${look}`);
+        await expectWrappedText(question);
+        await expectInside(actions, [question, ...await buttons.all()]);
+        const questionBox = (await question.boundingBox())!;
+        const yesBox = (await buttons.nth(0).boundingBox())!;
+        const noBox = (await buttons.nth(1).boundingBox())!;
+        expect(yesBox.y).toBeGreaterThanOrEqual(questionBox.y + questionBox.height - 1);
+        expect(noBox.y).toBe(yesBox.y);
+        await buttons.nth(1).click();
         await expect(dialog.getByRole('button', { name: m.settings.remove, exact: true })).toBeVisible();
         expect(errors).toEqual([]);
       });

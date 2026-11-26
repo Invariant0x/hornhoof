@@ -11,7 +11,7 @@ import { DUNGEON_WORLD_PACK } from '../src/world-packs/dungeon/pack';
 import { EGYPT_WORLD_PACK } from '../src/world-packs/egypt/pack';
 import { SPACE_WORLD_PACK } from '../src/world-packs/space/pack';
 
-/* #2001, Ivan 23.11: a resident brings its stone to the building itself. Every delivery and every build ends on a work
+/* #2001, 23.11: a resident brings its stone to the building itself. Every delivery and every build ends on a work
    spot of the building, facing it, never on a road tile. */
 
 const tile = (col: number, row: number): string => `${Math.round(col)},${Math.round(row)}`;

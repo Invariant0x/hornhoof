@@ -100,10 +100,9 @@ for (const lang of ['en', 'ru'] as const) {
         await capture(dialog, 'settings-saved', info);
 
         await part.getByRole('button', { name: t.repoHost.remove, exact: true }).click();
-        const removeAsk = page.getByRole('alertdialog', { name: t.repoHost.confirm.remove.title });
-        await expect(removeAsk).toHaveAccessibleDescription(t.repoHost.confirm.remove.effect(OWNER));
-        await fits(page, '[role="alertdialog"]', width);
-        await capture(removeAsk, 'settings-remove', info);
+        await expect(part.getByText(t.repoHost.removeAsk)).toBeVisible();
+        await fits(page, '.dialog', width);
+        await capture(dialog, 'settings-remove', info);
         expect(errors).toEqual([]);
       });
 

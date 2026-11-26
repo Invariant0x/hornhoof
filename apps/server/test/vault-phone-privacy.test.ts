@@ -38,7 +38,8 @@ it('keeps phone execution private after a vault value, while ordinary replay and
   if (open?.type !== 'phone.open') throw new Error('The phone received no session.');
   const frame = (sequence: number) => ({ type: 'phone.frame' as const, sessionId: session.id, generation: open.grant.generation, sequence, at: '2026-11-16T12:00:00Z', capture: { jpeg: JPEG, width: 1, height: 1, elements: [] } });
   await recordPhoneFrame(c.app.ctx, { kind: 'node', nodeId: c.executor.id }, frame(1));
-  expect((await c.db.select().from(attachments)).map(file => Buffer.from(file.bytes))).toEqual([Buffer.from(JPEG, 'base64')]);
+  const kept = await c.db.select().from(attachments);
+  expect(await Promise.all(kept.map(file => c.app.ctx.files.bytes(c.db, file.sha256!)))).toEqual([Buffer.from(JPEG, 'base64')]);
   await call(c, turn.token, 'vault_entry', { entry: 'Partner' });
   const urlId = randomUUID();
   await call(c, turn.token, 'phone_action', { session: session.id, operation: { kind: 'url', url: `https://example.test/?value=${PASSWORD}` } }, urlId);

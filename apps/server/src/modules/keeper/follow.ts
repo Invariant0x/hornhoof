@@ -1,4 +1,5 @@
 import { createReadStream, statfsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { DbDoor, composeAllowed } from '../../net/db-door.js';
 import { PeerDoor } from '../../net/peer-door.js';
@@ -8,8 +9,10 @@ import { peerClientFor, peerClientId, type PeerServices } from '../link/peer-cli
 import type { Route } from '../link/relay.js';
 import { holdThroughOneEmptyRead, TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
 import type { BundleSecrets } from '../backups/bundle.js';
+import { BundleStore } from '../backups/store.js';
 import type { MakerView } from '../backups/types.js';
 import { ageKey } from './age-key.js';
+import { BUNDLES_DIR } from './backups.js';
 import { Beats, type Beat } from './beats.js';
 import { CopyMaker, NEXT_DB, type CopyMakerOptions, type CopyReport } from './copy.js';
 import { KEEPER_PORTS } from './doors.js';
@@ -97,9 +100,9 @@ export type FollowKeeperOptions = {
   peerClientFor?: (services: PeerServices, clientId: string, local: { data: number; app: number }) => Client;
 };
 
-/* Whether the copy is being poured in: made or made again, or not begun yet, as the leader says of a copy that said
-   nothing. */
-const pouring = (copy: CopyReport | null): boolean => copy === null || copy.state === 'making' || copy.state === 'remaking';
+/* Whether the copy keeps the machine's disk busy by itself: it is poured in, made or made again, or not begun yet, as
+   the leader says of a copy that said nothing; or what a database of this machine that led held is saved. */
+export const copyBusy = (copy: CopyReport | null): boolean => copy === null || copy.state === 'making' || copy.state === 'remaking' || copy.state === 'saving';
 
 /* The keeper of a machine that keeps a copy of the company's data and does not lead. It is a worker's keeper with a
    database: it reaches the leader as a worker does and serves the company on its own address, and besides that it
@@ -154,10 +157,12 @@ export class FollowKeeper {
     this.clocks = opts.clocks ?? (() => ({ wall: Date.now(), mono: performance.now() }));
     this.asksRelay = Boolean(opts.relay ?? opts.watcher?.relay);
     this.copySql = opts.sql(COPY_DB);
+    const bundles = new BundleStore(join(config.dir, BUNDLES_DIR));
     this.saver = opts.secrets
       ? new LedSaver({
           dir: config.dir,
           controlDir: config.controlDir,
+          bundles,
           sql: this.copySql,
           key: machineKey(config.dir),
           held: () => this.worker.parts().certificates.current(),
@@ -185,13 +190,14 @@ export class FollowKeeper {
       password: replicaPassword(config.secret),
       diskFree: () => this.diskFree(),
       updating: () => this.updating.holds(),
-      ...(saver ? { saver: { tick: () => saver.tick(), done: () => saver.done(), state: () => saver.state(), forget: () => saver.forget() } } : {}),
+      ...(saver ? { saver: { tick: applied => saver.tick(applied), done: () => saver.done(), state: () => saver.state(), forget: () => saver.forget() } } : {}),
       log,
       now: opts.now,
       ...opts.maker,
     });
     this.worker = new WorkerKeeper({
       config,
+      bundles,
       frontHost: opts.frontHost,
       host: opts.host,
       log,
@@ -202,7 +208,7 @@ export class FollowKeeper {
       updating: () => this.updating.holds(),
       switchMore: () => ({ cut: this.watcher.cut(), question: this.asking !== null }),
       extraReport: () => this.replicaReport(),
-      copying: () => pouring(this.maker.report()),
+      copying: () => copyBusy(this.maker.report()),
       onView: view => this.heard(view),
       ...opts.worker,
     });

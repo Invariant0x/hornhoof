@@ -374,11 +374,51 @@ disk_clean_labs() {
   printf '%s %s' "$freed_c" "$freed_v"
 }
 
-# Prunes Docker build cache unused for HORNHOOF_BUILD_CACHE_UNTIL (default 72h) only when Docker's disk is under its
-# threshold or the cache exceeds its limit (max of share and amount). Prints reclaimed bytes.
+# Whether Docker's disk is short of free space against max(share% of total, HORNHOOF_DISK_GB in decimal GB).
+disk_is_short() {
+  local total=$1 free=$2 disk_share disk_gb ans
+  disk_share=$(disk_setting "${HORNHOOF_DISK_SHARE:-}" 90 10)
+  disk_gb=$(disk_setting "${HORNHOOF_DISK_GB:-}" 4096 20)
+  # shellcheck disable=SC2016 # the dollars belong to jq
+  ans=$(jq -nr \
+    --argjson total "${total:-0}" \
+    --argjson free "${free:-0}" \
+    --argjson dshare "$disk_share" \
+    --argjson dgb "$disk_gb" \
+    '
+    def max_of($a; $b): if $a > $b then $a else $b end;
+    if $total <= 0 then "no"
+    else
+      max_of((($total * $dshare) / 100) | round; $dgb * 1000000000) as $dthresh |
+      if $free < $dthresh then "yes" else "no" end
+    end
+  ' 2> /dev/null || printf 'no')
+  [ "$ans" = yes ]
+}
+
+# Prunes dangling (<none>:<none>) images unused by any running or stopped container when the machine is short of space.
+# Never passes -a/--all so tagged images and images referenced by stopped rollback containers stay untouched.
+disk_clean_dangling_images() {
+  local total=$1 free=$2 out line reclaimed=0
+  if disk_is_short "$total" "$free"; then
+    out=$(docker image prune -f --filter dangling=true 2> /dev/null || true)
+    line=$(printf '%s\n' "$out" | sed -n 's/^Total reclaimed space:[[:space:]]*//p' | tail -n 1 || true)
+    if [ -n "$line" ]; then
+      reclaimed=$(printf '%s\n' "$line" | jq -R -r "$DISK_JQ_HELPERS"' to_bytes' 2> /dev/null || true)
+    fi
+    plain_number "${reclaimed:-}" || reclaimed=0
+    if [ "$reclaimed" -gt 0 ]; then
+      printf 'Pruned %s bytes of dangling Docker images.\n' "$reclaimed" >&2
+    fi
+  fi
+  printf '%s' "$reclaimed"
+}
+
+# Prunes all unused Docker build cache when the disk is below its decimal GB threshold, or build cache unused for
+# HORNHOOF_BUILD_CACHE_UNTIL (default 72h) when the cache exceeds its limit. Prints reclaimed bytes.
 disk_clean_build_cache() {
   local cache_bytes=$1 total=$2 free=$3
-  local disk_share disk_gb cache_share cache_gb until_dur until_re should_prune out reclaimed=0
+  local disk_share disk_gb cache_share cache_gb until_dur until_re mode out reclaimed=0
   disk_share=$(disk_setting "${HORNHOOF_DISK_SHARE:-}" 90 10)
   disk_gb=$(disk_setting "${HORNHOOF_DISK_GB:-}" 4096 20)
   cache_share=$(disk_setting "${HORNHOOF_BUILD_CACHE_SHARE:-}" 90 10)
@@ -388,7 +428,7 @@ disk_clean_build_cache() {
   [[ "$until_dur" =~ $until_re ]] || until_dur=72h
 
   # shellcheck disable=SC2016 # the dollars belong to jq
-  should_prune=$(jq -nr \
+  mode=$(jq -nr \
     --argjson total "${total:-0}" \
     --argjson free "${free:-0}" \
     --argjson cache "${cache_bytes:-0}" \
@@ -400,22 +440,32 @@ disk_clean_build_cache() {
     def max_of($a; $b): if $a > $b then $a else $b end;
     if $total <= 0 then "no"
     else
-      max_of((($total * $dshare) / 100) | round; $dgb * 1073741824) as $dthresh |
-      max_of((($total * $cshare) / 100) | round; $cgb * 1073741824) as $climit |
-      if ($free < $dthresh) or ($cache > $climit) then "yes" else "no" end
+      max_of((($total * $dshare) / 100) | round; $dgb * 1000000000) as $dthresh |
+      max_of((($total * $cshare) / 100) | round; $cgb * 1000000000) as $climit |
+      if $free < $dthresh then "all"
+      elif $cache > $climit then "aged"
+      else "no" end
     end
   ' 2> /dev/null || printf 'no')
 
-  if [ "$should_prune" = yes ]; then
+  if [ "$mode" = all ] || [ "$mode" = aged ]; then
     local line
-    out=$(docker builder prune -f --filter "until=$until_dur" 2> /dev/null || true)
+    if [ "$mode" = all ]; then
+      out=$(docker builder prune -f 2> /dev/null || true)
+    else
+      out=$(docker builder prune -f --filter "until=$until_dur" 2> /dev/null || true)
+    fi
     line=$(printf '%s\n' "$out" | sed -n 's/^Total reclaimed space:[[:space:]]*//p' | tail -n 1 || true)
     if [ -n "$line" ]; then
       reclaimed=$(printf '%s\n' "$line" | jq -R -r "$DISK_JQ_HELPERS"' to_bytes' 2> /dev/null || true)
     fi
     plain_number "${reclaimed:-}" || reclaimed=0
     if [ "$reclaimed" -gt 0 ]; then
-      printf 'Pruned %s bytes of Docker build cache (unused for %s).\n' "$reclaimed" "$until_dur" >&2
+      if [ "$mode" = all ]; then
+        printf 'Pruned %s bytes of Docker build cache.\n' "$reclaimed" >&2
+      else
+        printf 'Pruned %s bytes of Docker build cache (unused for %s).\n' "$reclaimed" "$until_dur" >&2
+      fi
     fi
   fi
   printf '%s' "$reclaimed"
@@ -669,6 +719,20 @@ disk_care_pass() {
     read -r freed_c freed_v <<< "${lab_res:-0 0}" || true
     plain_number "${freed_c:-}" || freed_c=0
     plain_number "${freed_v:-}" || freed_v=0
+  fi
+  read -r total free <<< "$(disk_fs_space || printf '0 0')" || true
+  plain_number "${total:-}" || total=0
+  plain_number "${free:-}" || free=0
+  if [ "$have_images" = 1 ] && [ "$have_containers" = 1 ]; then
+    local freed_dangling=0
+    freed_dangling=$(disk_clean_dangling_images "$total" "$free")
+    plain_number "${freed_dangling:-}" || freed_dangling=0
+    freed_i=$((freed_i + freed_dangling))
+    if [ "$freed_dangling" -gt 0 ]; then
+      read -r total free <<< "$(disk_fs_space || printf '0 0')" || true
+      plain_number "${total:-}" || total=0
+      plain_number "${free:-}" || free=0
+    fi
   fi
   if [ "$have_cache" = 1 ]; then
     freed_b=$(disk_clean_build_cache "$cache_bytes" "$total" "$free")

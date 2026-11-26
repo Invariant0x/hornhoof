@@ -169,10 +169,8 @@ async function chooseLocales(page: Page, state: FixtureState): Promise<{ ranked:
     strings.push(...await renderedStrings(card));
     await card.getByRole('button', { name: words.common.cancel, exact: true }).click();
     await card.getByRole('button', { name: words.agent.reset, exact: true }).click();
-    const resetDialog = page.getByRole('alertdialog', { name: words.agent.confirm.reset.title });
-    await expect(resetDialog).toHaveAccessibleDescription(words.agent.confirm.reset.effect(EMPLOYEE_NAME));
-    strings.push(...await renderedStrings(card), ...await renderedStrings(resetDialog));
-    await resetDialog.getByRole('button', { name: words.common.cancel, exact: true }).click();
+    await expect(card.getByText(words.agent.resetAsk(EMPLOYEE_NAME), { exact: true })).toBeVisible();
+    strings.push(...await renderedStrings(card));
     ranked.push({ id, strings, characters: strings.reduce((sum, text) => sum + text.length, 0) });
   }
   ranked.sort((a, b) => a.characters - b.characters || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -306,10 +304,8 @@ for (const width of [375, 1280]) {
 
           const resets = state.resets;
           await card.getByRole('button', { name: words.agent.reset, exact: true }).click();
-          const resetDialog = page.getByRole('alertdialog', { name: words.agent.confirm.reset.title });
-          await expect(resetDialog).toHaveAccessibleDescription(words.agent.confirm.reset.effect(EMPLOYEE_NAME));
-          await expect(resetDialog).toContainText(words.agent.confirm.reset.warning);
-          await resetDialog.getByRole('button', { name: words.agent.confirm.reset.yes, exact: true }).click();
+          await expect(card.getByText(words.agent.resetAsk(EMPLOYEE_NAME), { exact: true })).toBeVisible();
+          await card.getByRole('button', { name: words.agent.yesReset, exact: true }).click();
           await expect.poll(() => state.resets).toBe(resets + 1);
           await expect(assignment).toHaveValue(FINAL_ASSIGNMENT);
           await expect(identity).toHaveValue(ROLE_IDENTITY);

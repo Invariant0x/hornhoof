@@ -507,12 +507,14 @@ export function canPlaceFootprint(
   return true;
 }
 
+/* `ignore` names a building whose own footprint does not block: one that moves, judged at its new place. */
 function canWalkRoad(
   city: CityState,
   map: GeneratedWorldMap,
   col: number,
   row: number,
   allowBridge: boolean,
+  ignore?: string,
 ): boolean {
   const spec = map.kindSpecAt(col, row);
   if (!spec) return false;
@@ -521,9 +523,8 @@ function canWalkRoad(
   } else if (!spec.walkable && !spec.excavatable) {
     return false;
   }
-  const k = tileKey(col, row);
-  if (city.footprintOccupant.has(k)) return false;
-  return true;
+  const occupant = city.footprintOccupant.get(tileKey(col, row));
+  return occupant === undefined || occupant === ignore;
 }
 
 /* The door tile of a pack rule: on the named front wall, fromFront tile rows back from the front corner.
@@ -547,10 +548,11 @@ function pickDoorForFootprint(
   spanRow: number,
   target: TileCoord,
   rule?: BuildingLayoutSpec,
+  ignore?: string,
 ): TileCoord | null {
   if (rule) {
     const door = ruleDoorTile(col, row, spanCol, spanRow, rule);
-    return canWalkRoad(city, map, door.col, door.row, false) ? door : null;
+    return canWalkRoad(city, map, door.col, door.row, false, ignore) ? door : null;
   }
   const candidates: TileCoord[] = [];
   for (let r = row; r < row + spanRow; r++) candidates.push({ col: col + spanCol, row: r });
@@ -559,7 +561,7 @@ function pickDoorForFootprint(
   let best: TileCoord | null = null;
   let bestScore = Infinity;
   for (const cand of candidates) {
-    if (!canWalkRoad(city, map, cand.col, cand.row, false)) continue;
+    if (!canWalkRoad(city, map, cand.col, cand.row, false, ignore)) continue;
     const k = tileKey(cand.col, cand.row);
     const alreadyRoad = city.roads.has(k);
     const insideOtherLot = !alreadyRoad && city.lotReservation.has(k);
@@ -1759,14 +1761,22 @@ export function densifyCity(
   return { upgraded, merged };
 }
 
-/* Relocation by God's Word: creates a pending request without moving the building until the task is accepted. */
 /* Whether a street could reach the door a building would have at (toCol, toRow): the lot search's rule (landReach), so
-   that a move never takes a building to land the streets cannot come to, as the far bank of a map with no bridge. */
+   that a move never takes a building to land the streets cannot come to, as the far bank of a map with no bridge. The
+   building's own footprint, which it leaves, does not block that door. */
 function movedDoorReached(city: CityState, map: GeneratedWorldMap, building: CityBuilding, toCol: number, toRow: number): boolean {
   const nearestRoad = findNearestRoadTile(city, { col: toCol, row: toRow });
-  const door = pickDoorForFootprint(city, map, toCol, toRow, building.spanCol, building.spanRow, nearestRoad, city.buildingLayout[building.kind]);
+  const door = pickDoorForFootprint(city, map, toCol, toRow, building.spanCol, building.spanRow, nearestRoad, city.buildingLayout[building.kind], building.id);
   return reachableDoor(landReach(city, map), door) !== null;
 }
+
+/* Whether a building may be moved to (toCol, toRow): its footprint fits there and a street can reach its door. The map's
+   preview and the move itself ask the same, so a move the map shows as possible is never dropped when it is applied. */
+export function canMoveBuildingTo(city: CityState, map: GeneratedWorldMap, building: CityBuilding, toCol: number, toRow: number): boolean {
+  return canPlaceFootprint(city, map, toCol, toRow, building.spanCol, building.spanRow, building.id, true) && movedDoorReached(city, map, building, toCol, toRow);
+}
+
+/* Relocation by God's Word: creates a pending request without moving the building until the task is accepted. */
 
 export function requestRelocation(
   city: CityState,
@@ -1778,10 +1788,7 @@ export function requestRelocation(
   const map = mapRef ?? (city as CityState & { _map?: GeneratedWorldMap })._map;
   const building = city.buildings.find(b => b.id === buildingId);
   if (!building || !map) return null;
-  if (!canPlaceFootprint(city, map, toCol, toRow, building.spanCol, building.spanRow, building.id, true)) {
-    return null;
-  }
-  if (!movedDoorReached(city, map, building, toCol, toRow)) return null;
+  if (!canMoveBuildingTo(city, map, building, toCol, toRow)) return null;
 
   const rel: CityRelocation = {
     id: `reloc-${city.relocations.length + 1}`,
@@ -1858,6 +1865,7 @@ export function advanceRelocationStep(
           building.spanRow,
           nearestRoad,
           city.buildingLayout[building.kind],
+          building.id,
         ) ?? {
           col: rel.toCol,
           row: rel.toRow + building.spanRow,

@@ -80,6 +80,20 @@ describe('Tree plates', () => {
     expect(openAgent).toHaveBeenCalledWith(agent);
   });
 
+  it('names the lane role in English on a Russian page where the role has no Russian title', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      const user = userEvent.setup();
+      const department = TREE_ORG.departments.find(d => d.id === 'd2')!;
+      const english = { ...department, employees: department.employees.map(e => (e.id === agent ? { ...e, title: { en: 'Backend engineer' } } : e)) };
+      render(<AgentWindowContext.Provider value={() => {}}><LanguageProvider><TreeView tree={DEV_TREE} department={english} onOpenTask={() => {}} /></LanguageProvider></AgentWindowContext.Provider>);
+      await user.click(await screen.findByText((_, el) => el?.matches(`.dept-chip[data-row="${agent}"] .schip`) ?? false));
+      expect(screen.getByRole('dialog')).toHaveTextContent('Backend engineer');
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
   it('keeps the current task workflow and findings beside its owner lane', async () => {
     const user = userEvent.setup(), line = REVIEW_TREE.lines.find(line => line.echelons.stage === 'review')!;
     render(view(REVIEW_TREE));

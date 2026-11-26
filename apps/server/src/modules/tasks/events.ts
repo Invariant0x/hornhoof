@@ -13,7 +13,7 @@ export const actorColumns = (a: Actor) => ({ personId: a.personId ?? null, agent
    endsWorkUnder: what goes with the move closes the open work under the task before it is done. */
 export type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown>; inlineText?: true; returned?: true; automatic?: NotificationSource; endsWorkUnder?: true };
 
-export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note, config?: Pick<Ctx['config'], 'taskFilesBytes'>): Promise<{ id: number; createdAt: Date }> {
+export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note, config?: Ctx['config']): Promise<{ id: number; createdAt: Date }> {
   n = hideCredentialsIn(n);
   const kept = await preserveNote(tx, task, n, config);
   const [row] = await tx

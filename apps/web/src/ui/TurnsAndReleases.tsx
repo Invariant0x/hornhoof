@@ -110,7 +110,9 @@ function ShowPicker({ value, onChange }: { value: Show; onChange: (show: Show) =
 function queueBatches(tasks: TaskLine[]): { ahead: number; trees: TaskTree[] }[] {
   const waiting = tasks.filter(task => task.queue).sort((a, b) => a.queue!.position - b.queue!.position);
   const ahead = [...new Set(waiting.map(task => task.queue!.ahead))].sort((a, b) => a - b);
-  return ahead.map(n => ({ ahead: n, trees: taskTrees(waiting.filter(task => task.queue!.ahead === n)) }));
+  /* taskTrees puts roots in number order; a batch keeps the queue's own order. */
+  const place = (tree: TaskTree) => tree.task.queue?.position ?? Number.MAX_SAFE_INTEGER;
+  return ahead.map(n => ({ ahead: n, trees: taskTrees(waiting.filter(task => task.queue!.ahead === n)).sort((a, b) => place(a) - place(b)) }));
 }
 
 /* What waits for a turn with a free slot: why, and a section for each turn ahead. */

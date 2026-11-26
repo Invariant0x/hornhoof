@@ -115,9 +115,6 @@ for (const width of [375, 1440]) for (const skin of BUILTIN_SKINS) for (const la
     await fits(card);
     if (width === 1440) await partsInLine(card);
     await card.getByRole('button', { name: t.phones.stop, exact: true }).click();
-    const stopAsk = page.getByRole('alertdialog', { name: t.phones.confirm.stop.title });
-    await expect(stopAsk).toHaveAccessibleDescription(t.phones.confirm.stop.effect(phone.name));
-    await stopAsk.getByRole('button', { name: t.phones.confirm.stop.yes, exact: true }).click();
     await expect(card.getByText(t.phones.paused, { exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: t.phones.resume })).toBeEnabled();
     // Neither shipped language is RTL; this checks the same controls in a synthetic RTL direction.

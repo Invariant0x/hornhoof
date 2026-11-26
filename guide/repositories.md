@@ -69,7 +69,7 @@ Not after Hornhoof has. Name the repository's full test command, the one that ru
 
 When a test run of exactly this command ends, Hornhoof puts a commit status called `hornhoof/tests` on the commit that run pinned: `success` when it passed, `failure` when it did not. It stays on that commit even when the branch has moved on. A run of one file, or of any other command, marks nothing.
 
-A GitHub workflow can read this status and skip its own tests on a commit that has `success`. Hornhoof's own image build does. A release does not rest on such a run: a skipped test job makes its run red, so a commit that already carries the status needs a new commit before a release can be recorded.
+A GitHub workflow can read this status and skip its own tests on a commit that has `success`. Hornhoof's own image build does. A release does not rest on such a run: only a full run of the release workflow counts, and a full run reads no status, so it runs every test of a commit that already carries one.
 
 The token needs the right to write commit statuses: **Commit statuses: Read and write** on a fine-grained token, `repo:status` on a classic one. Without it, or when GitHub does not answer, the task's log and the run's result say so and what to give the token. The run stays passed, and GitHub tests that commit itself.
 

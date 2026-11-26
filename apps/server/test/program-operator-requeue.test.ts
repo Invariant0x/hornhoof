@@ -17,6 +17,7 @@ import { incomingEnvelope } from '../src/modules/events/parties.js';
 import { addressed } from '../src/modules/conversation/prompt.js';
 import { listen, mcp } from './helpers.js';
 import { operatorCompany } from './program-operator-company.js';
+import { stored } from './files-fixture.js';
 
 it('durably requeues finalized live words before acknowledging evidence even when agent.unheard is lost', async () => {
   const c = await operatorCompany();
@@ -130,7 +131,7 @@ describe('words of a message that went into a running turn', () => {
       expect(answer.isError).toBeFalsy();
     } else {
       const [ceo] = await c.db.select().from(people);
-      const [picture] = how === 'picture' ? await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.agent.id, personId: ceo!.id, name: 'shot.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning() : [];
+      const [picture] = how === 'picture' ? await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.agent.id, personId: ceo!.id, name: 'shot.png', mediaType: 'image/png', sha256: await stored(c.db, PNG, c.app.ctx.config), size: PNG.length }).returning() : [];
       const answer = await c.app.inject({ method: 'POST', url: `/api/agents/${c.agent.id}/messages`, payload: { text: 'Look at the login.', ...(picture ? { pictures: [picture.id] } : {}) }, ...c.as(c.ceo) });
       expect(answer.statusCode).toBe(202);
     }

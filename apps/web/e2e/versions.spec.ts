@@ -69,9 +69,7 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
     const dialog = page.getByRole('dialog', { name: language === 'en' ? 'Versions' : 'Версии' });
     if (state === 'confirm') {
       await dialog.getByRole('listitem').filter({ hasText: '0.4.0 (ccccccc)' }).getByRole('button', { name: language === 'en' ? 'Install' : 'Установить', exact: true }).click();
-      const confirm = page.getByRole('alertdialog', { name: language === 'en' ? 'Do you really want to go back to this build?' : 'Вы действительно хотите вернуться к этой сборке?' });
-      await expect(confirm).toContainText('0.4.0 (ccccccc)');
-      await expect(confirm.getByRole('button', { name: language === 'en' ? 'Go back' : 'Вернуться', exact: true })).toBeVisible();
+      await expect(dialog.getByRole('button', { name: language === 'en' ? 'Go back to 0.4.0 (ccccccc)' : 'Вернуться к 0.4.0 (ccccccc)', exact: true })).toBeVisible();
     }
     if (state === 'running') {
       await expect(dialog.getByText(`${language === 'en' ? 'Updating Hornhoof to' : 'Hornhoof обновляется до'} 0.5.1 (bbbbbbb)`, { exact: true })).toBeVisible();
@@ -89,8 +87,7 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
       await expect(dialog.getByText(result, { exact: true })).toBeVisible();
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    const active = state === 'confirm' ? page.getByRole('alertdialog').locator('.dialog') : dialog;
-    expect(await active.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath(`versions-${state}-${language}-${theme}.png`), fullPage: true });
     expect(problems).toEqual([]);
   });

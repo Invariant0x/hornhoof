@@ -260,7 +260,7 @@ describe('templates', () => {
     expect(body('dev-adversarial')).toMatch(/only preview or sandbox builds your task names, never production and never real customer data/);
     expect(body('dev-threat-model')).toMatch(/trust boundaries[\s\S]*Name the safeguard[\s\S]*case with no safeguard is a finding/i);
     expect(body('dev-security-review')).toMatch(/Report only weak spots you confirmed in the code/);
-    expect(body('dev-gates')).toMatch(/Every executable work result of an echelon task passes Review/);
+    expect(body('dev-gates')).toMatch(/Review, Security and Tests run once each on the whole turn branch/);
     expect(body('dev-gates')).toMatch(/Tests verifies the exact final candidate including[\s\S]*repairs/);
     expect(body('dev-review-verdict')).toMatch(/only the fixes[\s\S]*paths they affect/);
     expect(body('dev-qa-acceptance')).toMatch(/exact candidate[\s\S]*do not assume[\s\S]*shared turn/);
@@ -471,7 +471,7 @@ describe('templates', () => {
     expect([watch.timer?.forWork, bugs.timer?.forWork]).toEqual([true, true]);
     expect(watch.skills.find(s => s.id === 'ops-task-watch')?.on).toBe(true);
     expect(bugs.skills.find(s => s.id === 'ops-failure-review')?.on).toBe(true);
-    expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee', 'restart_program', 'settle']);
+    expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'hangs', 'message_employee', 'restart_program', 'settle']);
     expect(templates.skills.get('ops-failure-review')!.grants).toEqual(['failures', 'agents', 'message_employee', 'improvements']);
     expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['BIZ-PM', 'DEV-PM', 'DSN-PM', 'FIN-PM', 'HHD-PM', 'HOM-PM', 'MKT-PM', 'OPS-BUGS', 'OPS-PM', 'OPS-WATCH', 'SAL-PM', 'SUP-PM', 'VID-PM']);
   });
@@ -487,6 +487,11 @@ describe('templates', () => {
     expect(skill.body).toMatch(/duplicate[\s\S]*Ask the head of its department; never close it blind\. Never touch paused work on your own/);
     expect(skill.body).toMatch(/settle_task[\s\S]*head of that department is told/);
     expect(templates.roles.get('OPS-WATCH')!.timer?.order).toMatch(/Close the tasks whose work is done by the rule for their kind of result/);
+    /* #2066: the stuck check reads one list only, and nothing closes a turn on silence alone. */
+    expect(skill.body).toMatch(/Find the agents that may be stuck from one list only: call suspected_hangs\./);
+    expect(skill.body).toMatch(/Never walk every agent to look for stuck ones: an agent that is not listed is not looked at\./);
+    expect(skill.body).toMatch(/Nothing closes a turn on silence alone: you decide\./);
+    expect(templates.roles.get('OPS-WATCH')!.timer?.order).toMatch(/^Call suspected_hangs and check only the agents it lists/);
     for (const text of [skill.description, templates.roles.get('OPS-WATCH')!.description]) expect(text.ru).toMatch(/[а-я]/i);
     expect(skill.description.en).toMatch(/closes the tasks whose work is done/);
   });
@@ -549,7 +554,8 @@ describe('templates', () => {
     const teams = [...templates.teams.values()];
     expect(teams.map(team => team.department).sort()).toEqual([...new Set(roles.map(r => r.department))].sort());
     for (const team of teams) {
-      expect(team.turnkey, team.id).toBe(team.department !== 'video_production');
+      /* Every department's team does its tasks whole, but the video team, which is on the checked route, and Development's, which takes only urgent work. */
+      expect(team.turnkey, team.id).toBe(team.department !== 'video_production' && team.department !== 'development');
       expect(templates.teamsOf(team.department), team.id).toEqual([team]);
       expect(team.title.ru, team.id).toMatch(/[а-я]/i);
       expect(team.description.en.length, team.id).toBeGreaterThan(20);
@@ -561,7 +567,8 @@ describe('templates', () => {
       /* No id of a team is the id of a role. */
       expect(templates.roles.has(team.id), team.id).toBe(false);
     }
-    expect(templates.teams.get('DEV-TEAM')!.members).toEqual([{ role: 'DEV-ENG', count: 2 }]);
+    expect(templates.teams.get('DEV-TEAM')).toMatchObject({ turnkey: false, urgentOnly: true, members: [{ role: 'DEV-ENG', count: 1 }] });
+    expect(templates.teams.get('DEV-TEAM')!.title.en).toBe('Hotfix');
   });
 
   it('has the full development roster', () => {
@@ -1848,10 +1855,10 @@ const SINGLE_RELEASE_RUN_RULES: { id: string; holds: (s: SingleReleaseRunSkills)
 describe('work joins the turn at once and leaves no record-only commits', () => {
   const skill = (id: string) => templates.skills.get(id)!.body;
 
-  it('has a turnkey holder take its checked branch into the turn branch itself, waiting for no go-ahead and no release', () => {
-    expect(skill('dev-task-flow')).toMatch(/turnkey[\s\S]*take it into the turn branch yourself/);
+  it('has a developer take its checked branch into the turn branch itself, waiting for no go-ahead and no release', () => {
+    expect(skill('dev-task-flow')).toMatch(/Hand in the branch yourself[\s\S]*take the open turn branch into it[\s\S]*fast-forward the turn branch/);
     expect(skill('dev-task-flow')).toMatch(/Wait for nobody's go-ahead, for no release to ship and for no next turn to open/);
-    expect(skill('dev-task-flow')).toMatch(/A clean merge of the turn branch needs no new checks/);
+    expect(skill('dev-task-flow')).toMatch(/a clean merge needs no new checks/);
   });
 
   it('keeps the turn branch going while the repository\'s CI checks a frozen candidate', () => {
@@ -1860,8 +1867,8 @@ describe('work joins the turn at once and leaves no record-only commits', () => 
     expect(skill('dev-ci-release')).toMatch(/record the checked release revision with release_turn[\s\S]*green CI records the release with no run, red or unfinished CI refuses[\s\S]*a repository with no CI records with no run/i);
   });
 
-  it('uses the turnkey holder evidence when the autonomous route accepts it', () => {
-    expect(skill('dev-ci-release')).toMatch(/when the applicable autonomous route accepts turnkey evidence[\s\S]*holder's own review, security check and tests/i);
+  it('uses the evidence of the turn\'s batch stages when the autonomous route accepts it', () => {
+    expect(skill('dev-ci-release')).toMatch(/when the applicable autonomous route accepts the evidence of the turn's batch stages[\s\S]*Review, Security and Tests results of the turn branch/i);
   });
 
   /* One rule on proof, beside the rule that everything made goes into the repository: an agent reads no exception into

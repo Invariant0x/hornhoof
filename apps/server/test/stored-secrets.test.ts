@@ -7,6 +7,8 @@ import { appendEvent } from '../src/modules/events/store.js';
 import { keepMail } from '../src/modules/conversation/inbox.js';
 import { insertTurn } from '../src/modules/conversation/queue.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { sha256Of, stored } from './files-fixture.js';
+import { dropDue } from '../src/modules/files/sweep.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -54,7 +56,7 @@ describe('secrets in stored prose', () => {
     const { task } = await createTask(app.ctx, { agentId: agent.id }, { title: 'Old text', brief: '', body: marker, departmentId: null, assigneeAgentId: agent.id });
     await comment(app.ctx, { agentId: agent.id }, task.id, `copy ${marker}`);
     await appendEvent(app.ctx, { companyId, agentId: agent.id, kind: 'text', data: { text: marker, nested: [{ [marker]: marker }] } });
-    await db.insert(attachments).values({ companyId, taskId: task.id, agentId: agent.id, name: 'old-comment.txt', mediaType: 'text/plain', bytes: Buffer.from(marker), size: Buffer.byteLength(marker) });
+    await db.insert(attachments).values({ companyId, taskId: task.id, agentId: agent.id, name: 'old-comment.txt', mediaType: 'text/plain', sha256: await stored(db, marker, app.ctx.config), size: Buffer.byteLength(marker) });
     const response = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(ceo), payload: { value: marker } });
     expect(response.statusCode, response.body).toBe(200);
     expect(response.body).not.toContain(marker);
@@ -65,9 +67,39 @@ describe('secrets in stored prose', () => {
     }
     expect((await db.select().from(tasks))[0]!.body).toBe('[hidden]');
     expect((await app.inject({ url: `/api/tasks/${task.id}`, ...as(ceo) })).body).not.toContain(marker);
-    expect(Buffer.from((await db.select().from(attachments))[0]!.bytes).toString()).toBe('[hidden]');
+    /* The file is kept again as it reads now, and the store lets the one it was go at its next round. */
+    const [file] = await db.select().from(attachments);
+    expect([file!.sha256, file!.size, (await app.ctx.files.bytes(db, file!.sha256!)).toString()]).toEqual([sha256Of('[hidden]'), 8, '[hidden]']);
+    await dropDue(app.ctx, new Date());
+    expect(app.ctx.files.store().has(sha256Of(marker))).toBe(false);
     /* An old copy brings the value back only through a merge, which checks its rows against the fingerprint. */
     expect(await db.select().from(secretRedactions)).toEqual([expect.objectContaining({ characters: marker.length, fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) })]);
+  });
+
+  it('hides a selection from the text an open merge conflict names, though another text file of the company is lost', async () => {
+    const { app, db, agent, companyId, ceo } = await company();
+    const marker = 'conflictMarker_2102!';
+    const { task } = await createTask(app.ctx, { agentId: agent.id }, { title: 'Old text', brief: '', body: marker, departmentId: null, assigneeAgentId: agent.id });
+    /* A text file whose copy the store has no more, as on a machine that leads after another kept it. */
+    const lost = await stored(db, `lost ${marker}`, app.ctx.config);
+    await db.insert(attachments).values({ companyId, taskId: task.id, agentId: agent.id, name: 'lost.txt', mediaType: 'text/plain', sha256: lost, size: Buffer.byteLength(`lost ${marker}`) });
+    await app.ctx.files.store().remove(lost);
+    /* A merge kept both sides of a text file for someone to pick, and the side not taken names a text with the value. */
+    const [notes] = await db.insert(attachments).values({ companyId, taskId: task.id, agentId: agent.id, name: 'notes.txt', mediaType: 'text/plain', sha256: await stored(db, 'notes', app.ctx.config), size: 5 }).returning();
+    const there = await stored(db, `notes ${marker}`, app.ctx.config);
+    const [merge] = (await db.execute(sql`insert into net.merges (source, label) values ('machine:other', 'other') returning id`) as { rows: { id: string }[] }).rows;
+    await db.execute(sql`insert into net.merge_conflicts (merge, tbl, key, op, kind, topic, task_id, cols, here, there, why)
+      values (${merge!.id}::uuid, 'attachments', ${JSON.stringify({ id: notes!.id })}::jsonb, 'update', 'differs', 'work', ${task.id}::uuid, '{sha256,size}',
+        ${JSON.stringify({ sha256: notes!.sha256, size: 5 })}::jsonb, ${JSON.stringify({ sha256: there, size: Buffer.byteLength(`notes ${marker}`) })}::jsonb, 'Both sides changed it.')`);
+    const response = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(ceo), payload: { value: marker } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect((await db.select().from(tasks))[0]!.body).toBe('[hidden]');
+    /* The side a pick would bring back names the text as it reads now, and the one it named leaves the store. */
+    const [conflict] = (await db.execute(sql`select there from net.merge_conflicts`) as { rows: { there: { sha256: string; size: number } }[] }).rows;
+    expect(conflict!.there).toEqual({ sha256: sha256Of('notes [hidden]'), size: 14 });
+    expect((await app.ctx.files.bytes(db, conflict!.there.sha256)).toString()).toBe('notes [hidden]');
+    await dropDue(app.ctx, new Date());
+    expect(app.ctx.files.store().has(there)).toBe(false);
   });
 
   it('never sends the selected value in SQL text or parameters', async () => {
@@ -198,9 +230,10 @@ describe('secrets in stored prose', () => {
     await comment(app.ctx, { agentId: agent.id }, task.id, `${'ordinary prose '.repeat(400)}password=archiveValue1077!`);
     const before = await db.select().from(attachments);
     expect(before).toHaveLength(2);
-    expect(before.map(file => Buffer.from(file.bytes).toString()).join('')).not.toContain('archiveValue1077!');
+    const said = async (rows: { sha256: string | null }[]) => (await Promise.all(rows.map(file => app.ctx.files.bytes(db, file.sha256!)))).map(String).join('');
+    expect(await said(before)).not.toContain('archiveValue1077!');
     const response = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(ceo), payload: { value: marker } });
     expect(response.statusCode, response.body).toBe(200);
-    for (const file of await db.select().from(attachments)) expect(Buffer.from(file.bytes).toString()).not.toContain(marker);
+    expect(await said(await db.select().from(attachments))).not.toContain(marker);
   });
 });

@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:
 import { hostname, uptime } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isNumbered, LOAD_MS, NodeBuild, type AgentEvent, type ApiEndpoint, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+import { isNumbered, LOAD_MS, NodeBuild, type AgentEvent, type ApiEndpoint, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage, type TaskStates } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS, type SigninStep } from '@hornhoof/protocol/signin';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { bootFacts } from './boot.js';
@@ -277,7 +277,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let confirmed = false;
   let send: ((m: ProgramNodeMessage) => boolean) | null = null;
   let online = false;
-  const checks = startCheckClient(dir, terminal, () => send);
+  const checks = startCheckClient(dir, terminal, () => send, writeLog);
   /* The kind of sign-in Hornhoof hands this plan, and what that sign-in was when the plan's program refused it, empty when
      Hornhoof gave it none: until it changes, the node stays signed out, so turns do not go round on a sign-in that no
      longer works, each in a terminal, while the program itself still says it is signed in. */
@@ -434,7 +434,22 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     const { diskTotal, diskFree } = machine();
     return diskTotal ? { total: diskTotal, free: Math.min(diskFree ?? 0, diskTotal) } : null;
   };
-  const diskCare = startDiskCare({ dir, owner: { user: credUser, home: credHome }, checking: () => testing.size > 0 || checks.leaseIds().length > 0, log, disk: diskOfMachine });
+  let tasksWaiters: ((tasks: TaskStates | null) => void)[] = [];
+  const askOpenTasks = (): Promise<TaskStates | null> => {
+    if (!online || !send) return Promise.resolve(null);
+    return new Promise<TaskStates | null>(resolve => {
+      const done = (value: TaskStates | null) => {
+        clearTimeout(waitTimer);
+        tasksWaiters = tasksWaiters.filter(w => w !== done);
+        resolve(value);
+      };
+      const waitTimer = setTimeout(() => done(null), 5_000);
+      waitTimer.unref();
+      tasksWaiters.push(done);
+      send?.({ type: 'tasks.read' });
+    });
+  };
+  const diskCare = startDiskCare({ dir, owner: { user: credUser, home: credHome }, checking: () => testing.size > 0 || checks.leaseIds().length > 0, log, disk: diskOfMachine, readTasks: askOpenTasks });
   const load = (): NodeLoad => {
     const { oomKills, ...now } = machine();
     const disk = diskCare.report();
@@ -491,6 +506,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       /* A drop stops no part: its leases wait for the node to come back, and end, with what runs under them, if it does not
          within a lease (#1060). */
       online = false; outside.closed(); checks.online(false); testMessages.cancelDescriptions(); phones.close();
+      for (const waiter of tasksWaiters.splice(0)) waiter(null);
     },
     onRefused: () => {
       log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.');
@@ -523,6 +539,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (acknowledged(m, outbox)) return removal.settle();
     if (m.type === 'programs.update') return programs.update(tellStatus, onMachine);
     if (isNodeTestMessage(m)) return testMessages.handle(m);
+    if (m.type === 'tasks.open') {
+      for (const waiter of tasksWaiters.splice(0)) waiter(m.tasks);
+      return;
+    }
     if (m.type === 'jobs.check') return emit(heldJobs(m.jobIds, holds()));
     if (m.type === 'node.log.read') return emit({ type: 'node.log', requestId: m.requestId, log: life.tail() });
     if (m.type === 'phone.probe' || m.type === 'phone.list' || m.type === 'phone.baseline' || m.type === 'phone.open' || m.type === 'phone.action' || m.type === 'phone.renew' || m.type === 'phone.revoke') return phones.handle(m);

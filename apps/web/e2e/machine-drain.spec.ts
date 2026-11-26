@@ -9,8 +9,6 @@ const BUILD = { tag: 'latest', version: '0.6.2', commit: 'b'.repeat(40), created
 const LINE = { en: 'Waiting since 21:30 for agents to finish before the update: 3 turns left. It takes no new work until then', ru: 'С 21:30 ждет конца работы агентов перед обновлением: осталось 3 хода. До тех пор новой работы не берет' };
 const ASK = { en: '3 agent turns are running.', ru: 'Идут 3 хода агентов.' };
 const UPDATE = { en: 'Update', ru: 'Обновить' };
-const CUT_TITLE = { en: 'Update now?', ru: 'Обновить сейчас?' };
-const CANCEL = { en: 'Cancel', ru: 'Отмена' };
 /* Tall enough at phone width to show the whole card without scrolling under the top bar. */
 const SIZES = [[1440, 900], [375, 1800]] as const;
 
@@ -65,10 +63,9 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await page.setViewportSize({ width, height });
     await openMachines(page, language, theme, WAITING, true);
     await page.getByRole('button', { name: UPDATE[language], exact: true }).click();
-    await page.getByRole('alertdialog').getByRole('button', { name: UPDATE[language], exact: true }).click();
-    const ask = page.getByRole('alertdialog', { name: CUT_TITLE[language] });
+    const ask = page.getByRole('alertdialog');
     await expect(ask.getByText(ASK[language])).toBeVisible();
-    await expect(ask.getByRole('button', { name: CANCEL[language], exact: true })).toBeFocused();
+    await expect(ask).toBeFocused();
     const [yes, no] = await Promise.all((await ask.getByRole('button').all()).map(button => button.boundingBox()));
     expect(no!.x - (yes!.x + yes!.width)).toBeGreaterThanOrEqual(8);
     expect(await noSideScroll(page)).toBe(true);

@@ -71,17 +71,11 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
     await update.focus();
     await expect(update).toBeFocused();
     await page.keyboard.press('Enter');
-    const dialog = page.getByRole('alertdialog', { name: language === 'en' ? 'Do you really want to update agent programs?' : 'Вы действительно хотите обновить программы агентов?' });
-    const confirm = dialog.locator('.entry-actions > button').first();
-    await expect(confirm).toHaveAccessibleName(language === 'en' ? 'Update' : 'Обновить');
-    await expect(confirm).toBeFocused();
-    await page.keyboard.press('Enter');
-    await expect(confirm).toBeDisabled();
-    await expect(card.locator('[role="status"]')).toContainText(language === 'en' ? 'Updating programs...' : 'Обновляем программы...');
+    await expect(update).toBeDisabled();
+    await expect(card.getByRole('status')).toContainText(language === 'en' ? 'Updating programs...' : 'Обновляем программы...');
     expect(requests()).toBe(1);
     await page.screenshot({ path: info.outputPath(`programs-progress-${language}-${theme}-${width}.png`), fullPage: true });
     release();
-    await expect(dialog).toHaveCount(0);
     await expect(card.getByText('2.0.1', { exact: true })).toBeVisible();
     await expect(update).toBeEnabled();
     await page.evaluate(async () => { await document.fonts.ready; });
@@ -117,7 +111,7 @@ for (const state of ['offline', 'unknown', 'empty'] as const) {
   });
 }
 
-test('a failed request can be retried from the confirmation dialog', async ({ page }, info) => {
+test('a failed request can be retried from the card', async ({ page }, info) => {
   await page.setViewportSize({ width: 375, height: 1000 });
   const { card } = await prepare(page, 'ru', 'dark');
   let attempts = 0;
@@ -126,14 +120,11 @@ test('a failed request can be retried from the confirmation dialog', async ({ pa
     : route.fulfill({ status: 202, json: { updating: true } }));
   const button = card.getByRole('button', { name: 'Обновить программы' });
   await button.click();
-  const dialog = page.getByRole('alertdialog', { name: 'Вы действительно хотите обновить программы агентов?' });
-  const confirm = dialog.getByRole('button', { name: 'Обновить', exact: true });
-  await confirm.click();
-  await expect(dialog.getByRole('alert')).toHaveText('Программы на этой машине сейчас обновить нельзя.');
-  await expect(confirm).toBeEnabled();
+  await expect(card.getByRole('alert')).toHaveText('Программы на этой машине сейчас обновить нельзя.');
+  await expect(button).toBeEnabled();
   await page.screenshot({ path: info.outputPath('programs-request-failed.png'), fullPage: true });
-  await confirm.click();
-  await expect(dialog).toHaveCount(0);
+  await button.click();
+  await expect(card.getByRole('alert')).toHaveCount(0);
   expect(attempts).toBe(2);
 });
 
@@ -148,7 +139,6 @@ test('keeps an active connection command while updating the programs', async ({ 
   const { card, release } = await prepare(page, 'en', 'light', { activeCommand: true });
   await expect(card.getByText('connect-the-pending-plan')).toBeVisible();
   await card.getByRole('button', { name: 'Update programs', exact: true }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: 'Update', exact: true }).click();
   release();
   await expect(card.getByText('2.0.1', { exact: true })).toBeVisible();
   await expect(card.getByText('connect-the-pending-plan')).toBeVisible();

@@ -1,11 +1,13 @@
 import { parseTimingLines, SLOWEST_TESTS, type EnvironmentSnapshot, type FileOutcome, type PartTimings, type TestFileTiming } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray } from 'drizzle-orm';
 import { basename, posix } from 'node:path';
+import { buffer } from 'node:stream/consumers';
 import type { Db } from '../../db/client.js';
 import { attachments, testPartTimings, testParts, testRuns } from '../../db/schema.js';
-import { only } from '../../db/selections.js';
 import type { Tx } from '../tasks/state.js';
 import { logName } from './run-records.js';
+import type { Files } from '../files/files.js';
+import { oldFileStream } from '../files/legacy.js';
 
 const RUNNER_START = /\bRUN\s+v\S+\s+(\S.*?)\s*$/;
 const FILE_LINE = /^\s*[✓❯×]\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\s+\(\d+ tests?[^)]*\)\s+(\d+(?:\.\d+)?)(ms|s)\s*$/;
@@ -61,7 +63,7 @@ export async function keepPartTimings(db: Db | Tx, run: Pick<typeof testRuns.$in
 
 /* Reads the log of each ended part of a test run of these tasks that was not read yet, once: what it said stays as it was
    read. A part whose log has not come yet waits for the next time. Runs of work print nothing of the kind. */
-export async function keepTimings(db: Db | Tx, companyId: string, taskIds: string[]): Promise<void> {
+export async function keepTimings(db: Db | Tx, companyId: string, taskIds: string[], files?: Files): Promise<void> {
   const waiting = await db
     .select({ id: testParts.id, part: testParts.part, runId: testRuns.id, number: testRuns.number, kind: testRuns.kind, taskId: testRuns.taskId })
     .from(testParts)
@@ -69,9 +71,12 @@ export async function keepTimings(db: Db | Tx, companyId: string, taskIds: strin
     .leftJoin(testPartTimings, eq(testPartTimings.partId, testParts.id))
     .where(and(inArray(testRuns.taskId, taskIds), eq(testRuns.kind, 'tests'), isNull(testPartTimings.partId), notInArray(testParts.status, ['queued', 'running'])));
   for (const part of waiting) {
-    const [log] = await db.select(only(attachments, 'bytes')).from(attachments).where(and(eq(attachments.taskId, part.taskId), eq(attachments.name, logName(part, part.part)))).limit(1);
+    const [log] = await db.select({ id: attachments.id, sha256: attachments.sha256 }).from(attachments).where(and(eq(attachments.taskId, part.taskId), eq(attachments.name, logName(part, part.part)))).limit(1);
     if (!log) continue;
-    const said = timingsOfLog(Buffer.from(log.bytes).toString('utf8'));
+    /* A log of the store is read where the store is; one from before it, as it was kept. */
+    if (log.sha256 && !files) continue;
+    const bytes = log.sha256 ? await files!.bytes(db, log.sha256) : await buffer(await oldFileStream({ db, config: {} }, log.id));
+    const said = timingsOfLog(bytes.toString('utf8'));
     await db.insert(testPartTimings).values({ partId: part.id, companyId, runId: part.runId, ...said }).onConflictDoNothing();
   }
 }

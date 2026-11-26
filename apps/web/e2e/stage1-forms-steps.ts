@@ -155,7 +155,6 @@ export const FORMS: Form[] = [
     await people(page);
     await page.getByRole('button', { name: words.people.editLabel('Ava'), exact: true }).click();
     await page.getByRole('button', { name: words.people.replaceKey, exact: true }).click();
-    await page.getByRole('alertdialog', { name: words.people.confirm.replaceKey.title }).getByRole('button', { name: words.people.confirm.replaceKey.yes, exact: true }).click();
     const card = page.locator('.form-card', { has: page.getByText(MADE.key, { exact: true }) });
     await expect(card).toBeVisible();
     return card;

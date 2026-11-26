@@ -1,5 +1,5 @@
-import { randomBytes, randomUUID } from 'node:crypto';
-import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { createReadStream, existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import type { Peer } from '../../net/peer-server.js';
@@ -16,6 +16,10 @@ export const BUNDLE_EVERY_MS = 6 * 3_600_000;
 export const DUMP_GAP_MS = 600_000;
 /* A dump not sealed within this long is deleted. */
 export const DUMP_LIFE_MS = 86_400_000;
+/* A request or a file of a dump keeps the disk busy while it changed within this long: pg_dump writes its file all along,
+   so one that stood still this long is no dump under way, and a request no updater took holds the measures back no
+   longer. */
+export const DUMP_BUSY_MS = 600_000;
 /* How many of its own bundles the machine that makes them keeps. */
 const KEEP_OWN = 2;
 /* In the keeper's volume. */
@@ -86,6 +90,8 @@ export class BackupKeeper {
   /* The forks of other machines the app said it has a record of, to a request that brought one: a refused request
      never removes a bundle that has one. */
   private readonly recordedLed = new Set<string>();
+  /* Whether it seals a dump now, which reads the whole dump and writes the whole bundle. */
+  private sealing = false;
 
   constructor(private readonly opts: BackupKeeperOptions) {
     this.bundles = new BundleStore(join(opts.dir, BUNDLES_DIR));
@@ -116,6 +122,20 @@ export class BackupKeeper {
   round(): Promise<void> {
     this.running ??= this.look().finally(() => { this.running = null; });
     return this.running;
+  }
+
+  /* Whether a backup keeps the machine's disk busy now: the keeper seals a dump, or the updater was asked for one or
+     writes one, as its request or one of its files changed within DUMP_BUSY_MS. */
+  dumping(): boolean {
+    if (this.sealing) return true;
+    const since = this.now() - DUMP_BUSY_MS;
+    return [this.request, ...this.files().map(name => join(this.dumps, name))].some(path => {
+      try {
+        return statSync(path).mtimeMs >= since;
+      } catch {
+        return false;
+      }
+    });
   }
 
   /* What the app said last of the company's backups. */
@@ -388,19 +408,22 @@ export class BackupKeeper {
     }
     let head = this.bundles.list().find(bundle => bundle.id === id)?.head;
     if (!head) {
-      mkdirSync(join(this.opts.dir, BUNDLES_DIR), { recursive: true, mode: 0o700 });
-      const out = join(this.opts.dir, BUNDLES_DIR, `${id}.${randomBytes(6).toString('hex')}.part`);
+      this.sealing = true;
       try {
-        const sealed = await sealBundle({
-          dump: createReadStream(file), id, company, dumpedAt: dump.at, now: new Date(this.now()), reason: dump.reason, migrations: dump.migrations,
-          secrets: this.opts.secrets(), recipients: [...view.recipients, this.opts.age.recipient], recovery: view.recovery?.recipient ?? null,
-          recoveryLink: view.recovery?.link ?? null, key: this.opts.key, held, out,
-        });
-        head = this.bundles.put(sealed.head, sealed.manifest, out).head;
+        head = (
+          await this.bundles.seal(id, out =>
+            sealBundle({
+              dump: createReadStream(file), id, company, dumpedAt: dump.at, now: new Date(this.now()), reason: dump.reason, migrations: dump.migrations,
+              secrets: this.opts.secrets(), recipients: [...view.recipients, this.opts.age.recipient], recovery: view.recovery?.recipient ?? null,
+              recoveryLink: view.recovery?.link ?? null, key: this.opts.key, held, out,
+            }),
+          )
+        ).head;
       } catch (err) {
-        rmSync(out, { force: true });
         this.opts.log(`The keeper could not seal a dump of the database: ${reasonOf(err)}`);
         return;
+      } finally {
+        this.sealing = false;
       }
     }
     /* Recorded, the dump goes. An app that does not take the record leaves it for the next round, which seals nothing

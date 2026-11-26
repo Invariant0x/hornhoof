@@ -129,7 +129,6 @@ for (const lang of ['en', 'ru'] as const) {
     const nameField = (page: Page) => page.getByLabel(m.common.name, { exact: true });
     const titleField = (page: Page) => page.getByLabel(m.common.title, { exact: true });
     const save = (page: Page) => page.getByRole('button', { name: m.common.save, exact: true }).click();
-    const confirmRename = (page: Page) => page.getByRole('alertdialog', { name: m.confirm.renamePerson.title }).getByRole('button', { name: m.confirm.renamePerson.yes, exact: true }).click();
     const row = (page: Page, name: string) => page.locator('table.ptable tr', { hasText: name });
 
     try {
@@ -155,7 +154,6 @@ for (const lang of ['en', 'ru'] as const) {
       await nameField(ceo).fill('Maria Ray');
       await titleField(ceo).fill('Head of sales');
       await save(ceo);
-      await confirmRename(ceo);
       await expect(row(ceo, 'Maria Ray')).toContainText('Head of sales');
       await ceo.reload();
       await expect(row(ceo, 'Maria Ray')).toContainText('Head of sales');
@@ -167,7 +165,6 @@ for (const lang of ['en', 'ru'] as const) {
       await edit(deputy, 'Olga');
       await nameField(deputy).fill('Olga Lee');
       await save(deputy);
-      await confirmRename(deputy);
       await expect(row(deputy, 'Olga Lee')).toBeVisible();
       await edit(deputy, 'Ivan');
       await expect(nameField(deputy)).toHaveValue('Ivan');
@@ -180,7 +177,6 @@ for (const lang of ['en', 'ru'] as const) {
       await edit(listed, 'Olga Lee');
       await nameField(listed).fill('Olga Lane');
       await save(listed);
-      await confirmRename(listed);
       await expect(row(listed, 'Olga Lane')).toBeVisible();
       await listed.getByRole('button', { name: m.shell.account, exact: true }).click();
       await expect(listed.locator('.account-menu').getByText('Olga Lane', { exact: true })).toBeVisible();

@@ -76,9 +76,6 @@ for (const language of locales) for (const skin of BUILTIN_SKINS) for (const wid
     }
     if (info.project.name === 'chromium' && width === 375) await capture(page, info, `${language}-${skin.id}`);
     await form.getByRole('button', { name: words.confirm }).click();
-    const confirmDialog = page.getByRole('alertdialog', { name: t.tasks.confirm.hideSecret.title });
-    await expect(confirmDialog).not.toContainText(marker);
-    await confirmDialog.getByRole('button', { name: t.tasks.confirm.hideSecret.yes, exact: true }).click();
     await Promise.all([
       expect(input).toHaveCount(0),
       expect(panel.getByText(marker, { exact: true })).toHaveCount(0),

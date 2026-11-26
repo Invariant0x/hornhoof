@@ -1,10 +1,12 @@
 import type { DiskReport } from '@hornhoof/protocol';
+import { asc, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { isDeepStrictEqual } from 'node:util';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agents, companies, departments } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, subscriptions, tasks } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
-import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { createTask } from '../src/modules/tasks/engine.js';
+import { as, connectNode, listen, nextOf, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 import { invitePerson } from './helpers-company.js';
 
 /* No ping comes in a test, so no node is dropped for a pong that came late on a busy machine. */
@@ -175,5 +177,98 @@ describe('the card of a machine short of disk space', () => {
     await round();
     await round();
     expect(nudges()).toBe(2);
+  });
+
+  it('signals an Operations employee once per low spell when unowned space holds the threshold, falls back to the Program operator, and never asks a person to run commands', async () => {
+    const NODE_KEY = 'k'.repeat(40);
+    const { app, db } = await testApp({ NODE_PING_MS, NODE_KEY });
+    onTestFinished(() => app.close());
+    const url = await listen(app);
+    const ceo = await setUpCompany(app);
+    const [acme] = await db.select().from(companies);
+    const companyId = acme!.id;
+    const [sub] = await db.select().from(subscriptions);
+    const builtin = await connectNode(url, NODE_KEY);
+    builtin.send({ type: 'hello', version: '0.43.0', loggedIn: true, running: [], load: load(ROOMY) });
+    await until(async () => (await db.select().from(subscriptions))[0]!.status === 'ready');
+
+    const [ops] = await db.insert(departments).values({ companyId, templateKey: 'operations', roleCode: 'OPS' }).returning();
+    const [rob] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Rob', roleKey: 'OPS-FIX', departmentId: ops!.id, model: '', subscriptionId: sub!.id }).returning();
+    const [pia] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Pia', roleKey: 'OPS-PROGRAM', departmentId: ops!.id, model: '', subscriptionId: sub!.id }).returning();
+
+    /* Synthetic 126 GB data disk held under 20 GB by 66.1 GB of volumes and foreign space, cleaned list empty. */
+    const gbBytes = (n: number) => Math.round(n * GB);
+    const foreignLow: DiskReport = {
+      total: gbBytes(126),
+      free: gbBytes(18.4),
+      threshold: gbBytes(20),
+      parts: { volumes: gbBytes(66.1), containers: gbBytes(10.9), images: gbBytes(8.1), buildCache: gbBytes(0.8), workingCopies: gbBytes(1) },
+      low: { since: '2026-11-24T10:14:00.000Z' },
+      cleaned: [],
+    };
+
+    const round = () =>
+      minuteRound(app.ctx, new Date('2026-11-24T10:15:00.000Z'), what => err => {
+        throw err instanceof Error ? err : new Error(`${what}: ${String(err)}`);
+      });
+    builtin.send({ ...load(foreignLow), tests: 1 });
+    await until(async () => (await app.inject({ url: '/api/machines', ...as(ceo) })).json().builtin?.load?.tests === 1);
+    await round();
+    await round();
+
+    const robTurns = await db.select().from(jobs).where(eq(jobs.agentId, rob!.id)).orderBy(asc(jobs.createdAt));
+    expect(robTurns).toHaveLength(1);
+    expect(robTurns[0]!.prompt).toMatch(/18\.4 GB/);
+    expect(robTurns[0]!.prompt).toMatch(/20 GB/);
+    expect(robTurns[0]!.prompt).not.toMatch(/ask.*person.*command/i);
+
+    /* When Rob (OPS-FIX) is switched off and a new low spell starts after recovery, Pia (OPS-PROGRAM) receives the signal. */
+    builtin.send({ ...load(ROOMY), tests: 2 });
+    await until(async () => (await app.inject({ url: '/api/machines', ...as(ceo) })).json().builtin?.load?.tests === 2);
+    await round();
+
+    await db.update(agents).set({ switchedOffAt: new Date('2026-11-24T10:20:00.000Z') }).where(eq(agents.id, rob!.id));
+    builtin.send({ ...load({ ...foreignLow, low: { since: '2026-11-24T10:25:00.000Z' } }), tests: 3 });
+    await until(async () => (await app.inject({ url: '/api/machines', ...as(ceo) })).json().builtin?.load?.tests === 3);
+    await round();
+
+    const piaTurns = await db.select().from(jobs).where(eq(jobs.agentId, pia!.id)).orderBy(asc(jobs.createdAt));
+    expect(piaTurns).toHaveLength(1);
+  });
+
+  it('answers tasks.read on a node socket with open, paused, and blocked task numbers, and resolves largest working copies on /api/machines', async () => {
+    const { app, db, ceo, node } = await bobsMachine();
+    const [acme] = await db.select().from(companies);
+    await until(async () => (await db.select().from(subscriptions))[0]?.status === 'ready');
+    const [sub] = await db.select().from(subscriptions);
+    const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const [hana] = await db.insert(agents).values({ companyId: acme!.id, kind: 'head', name: 'Hana', roleKey: 'DEV-HEAD', departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning();
+
+    const tOpen = (await createTask(app.ctx, { agentId: hana!.id }, { title: 'Open task', brief: '', body: 'b', departmentId: dev!.id, assigneeAgentId: hana!.id, executor: true, resultKind: 'code' })).task;
+    const tPaused = (await createTask(app.ctx, { agentId: hana!.id }, { title: 'Paused task', brief: '', body: 'b', departmentId: dev!.id, assigneeAgentId: hana!.id, executor: true, resultKind: 'code' })).task;
+    await db.update(tasks).set({ paused: { at: '2026-11-24T10:00:00.000Z', reason: 'hold', by: { agentId: hana!.id }, root: tPaused.id } }).where(eq(tasks.id, tPaused.id));
+    const tBlocked = (await createTask(app.ctx, { agentId: hana!.id }, { title: 'Blocked task', brief: '', body: 'b', departmentId: dev!.id, assigneeAgentId: hana!.id, executor: true, resultKind: 'code' })).task;
+    await db.update(tasks).set({ status: 'blocked' }).where(eq(tasks.id, tBlocked.id));
+    const tDone = (await createTask(app.ctx, { agentId: hana!.id }, { title: 'Done task', brief: '', body: 'b', departmentId: dev!.id, assigneeAgentId: hana!.id, executor: true, resultKind: 'code' })).task;
+    await db.update(tasks).set({ status: 'done', closedAt: new Date('2026-11-24T10:05:00.000Z') }).where(eq(tasks.id, tDone.id));
+    const tCancelled = (await createTask(app.ctx, { agentId: hana!.id }, { title: 'Cancelled task', brief: '', body: 'b', departmentId: dev!.id, assigneeAgentId: hana!.id, executor: true, resultKind: 'code' })).task;
+    await db.update(tasks).set({ status: 'cancelled', closedAt: new Date('2026-11-24T10:06:00.000Z') }).where(eq(tasks.id, tCancelled.id));
+
+    node.send({ type: 'tasks.read' } as unknown as Parameters<FakeNode['send']>[0]);
+    const reply = await nextOf(node, 'tasks.open' as Parameters<typeof nextOf>[1]) as unknown as { type: 'tasks.open'; tasks: { open: number[]; upTo: number } | null };
+    expect(reply.tasks?.open).toEqual(expect.arrayContaining([tOpen.number, tPaused.number, tBlocked.number]));
+    expect(reply.tasks?.open).not.toContain(tDone.number);
+    expect(reply.tasks?.open).not.toContain(tCancelled.number);
+    expect(reply.tasks?.upTo).toBeGreaterThanOrEqual(tCancelled.number);
+
+    const withCopies = {
+      ...ROOMY,
+      copies: [{ agent: hana!.id, path: `shop-${tOpen.number}`, task: tOpen.number, bytes: 8 * GB }],
+    } as DiskReport;
+    node.send({ ...load(withCopies), tests: 4 });
+    await until(async () => (await app.inject({ url: '/api/machines', ...as(ceo) })).json().machines[0]?.load?.tests === 4);
+    const machine = (await app.inject({ url: '/api/machines', ...as(ceo) })).json().machines[0];
+    expect(machine.load.disk.copies).toEqual([{ agent: hana!.id, path: `shop-${tOpen.number}`, task: tOpen.number, bytes: 8 * GB }]);
+    expect(machine.copyNames).toEqual({ [hana!.id]: 'Hana' });
   });
 });

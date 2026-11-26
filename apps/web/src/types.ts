@@ -551,8 +551,7 @@ export type TaskLine = {
 /* by.for: the person the orchestrator acted for. */
 export type TaskLogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string }; byOrchestrator?: true } | null; at: string };
 export type TaskRequest = { id: string; kind: 'question' | 'choice' | 'approval' | 'stuck'; text: string; commit: string | null; status: string; answer: string | null; byOrchestrator?: boolean; agent: AgentRef | null; at: string };
-/* big: over 50 MB, it lives 30 days on one machine and is lost if that machine goes. */
-export type TaskFile = { id: string; name: string; size: number; by: { id: string; name: string } | null; at: string; big?: true };
+export type TaskFile = { id: string; name: string; size: number; by: { id: string; name: string } | null; at: string };
 
 export type TaskDetail = TaskLine & {
   echelonFindings: EchelonFindingsView;
@@ -744,6 +743,7 @@ export type MachineAwayCard = {
 
 /* A machine whose database copy is still waiting for its schema. */
 export type CopySchemaFailureCard = { id: string; hostname: string; since: string; attempt: number };
+export type CopyGaveUpCard = { id: string; hostname: string; since: string; attempts: number; why: 'failed' | 'slow' | 'late' };
 
 /* A machine short of disk space, whose node takes no new checks or builds since: for its owner and the CEO, gone by itself
    once the node has room again or is off the line. */
@@ -770,6 +770,7 @@ export type Decisions = {
   merges?: MergeDecision[];
   machinesAway?: MachineAwayCard[];
   copySchemaFailures?: CopySchemaFailureCard[];
+  copyGaveUp?: CopyGaveUpCard[];
   /* A server from before nodes said how full their disk is sends none. */
   machinesLow?: MachineLowCard[];
   githubLimits?: GitHubLimitCard[];
@@ -940,6 +941,8 @@ export type MachineView = {
   /* The employees' working folders of each of its nodes, by the plan the node serves (none for the machine's own node), the
      biggest first: none of a node that says nothing of its disk. Older servers omit it. */
   folders?: { plan: string | null; bytes: number }[];
+  /* Known employee names for the largest working copies on the machine's disk report, filtered by viewer sight. */
+  copyNames?: Record<string, string>;
   /* Takes the company's test runs when it is the freest machine. */
   lendsTests: boolean;
   running: Running;
@@ -964,6 +967,8 @@ export type MachineView = {
      omit them. */
   keepsBackups?: boolean | null;
   heldBackups?: number | null;
+  /* The area of its disk the company's files may take; null without a keeper. Older servers omit it. */
+  fileStore?: FileStoreArea | null;
   /* Its part in holding the company's data, for those who see the whole company. Older servers omit it. */
   data?: DataView | null;
 };
@@ -973,13 +978,16 @@ export type Unfit =
   | { why: 'phone' | 'no_core' | 'no_link' }
   | { why: 'scope'; person: string; departments?: number };
 
+export type SavingWait = 'dump' | 'seal' | 'server' | 'send' | 'retry';
+
 /* How a machine's copy of the company's data does. */
 export type CopyLine =
   | { line: 'making' | 'remaking'; progress: number }
-  | { line: 'ready' | 'catching_up' | 'saving' }
+  | { line: 'saving'; waiting?: SavingWait; since?: string | null }
+  | { line: 'ready' | 'catching_up' }
   | { line: 'behind'; minutes: number }
   | { line: 'asleep'; since: string | null }
-  | { line: 'stopped'; why: 'disk_full' | 'setup' | null };
+  | { line: 'stopped'; why: 'disk_full' | 'setup' | 'gave_up' | 'path_slow' | 'path_late' | null; since?: string; attempts?: number };
 
 /* A machine's place in the order of who holds the company's data, why it holds no copy, how its copy does, when it
    stopped holding the data, and, for the machine the server last moved from, until when it ran the server, once its
@@ -1055,7 +1063,12 @@ export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'co
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
 /* webPort: where the company opens on the server's own machine. refusedBy: the machines on the server's network whose
    connections it did not take. Older servers omit both. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; replicas?: MachineReplicas | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
+/* The area a machine gives the company's files: the row it is set on, which for the computer the server runs on is the
+   server's own; its owner's number, 0 for none or null for the default; what that gives; what the files take there; and
+   what the disk they lie on has free, null before its keeper said. */
+export type FileStoreArea = { id: string; limitBytes: number | null; areaBytes: number; usedBytes: number; diskFree: number | null };
+
+export type BuiltinView = { online: boolean; load: NodeLoad | null; copyNames?: Record<string, string>; replicas?: MachineReplicas | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null; fileStore?: FileStoreArea | null };
 
 export type JobView = {
   id: string;

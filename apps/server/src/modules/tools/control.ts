@@ -143,7 +143,8 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'Changes an employee as its card does: name, model (\'\' for Default), effort (a level its model takes, null for its role\'s level fitted to its model), subscription (null for none), team (sub-unit id in its department, or null for the pipeline), skills { id: on/off }, base (its personal assignment, null to clear it), ' +
       'skillText { id: text or null }, on (false switches it off: it ends the turn it runs and takes no task turns until it is on again), ' +
       'and timer { minutes, order, forWork? } (null for none): it wakes every so many minutes, 5 to 1440, outside any task, and does what the order says; ' +
-      'with forWork true it skips a round while every open task waits on purpose, for a person, for other tasks or for what it said it waits for, and nothing failed since the last one.',
+      'with forWork true it skips a round while every open task waits on purpose, for a person, for other tasks or for what it said it waits for, and nothing failed since the last one. ' +
+      'A new model or subscription takes its active checking stages along, or leaves each one it no longer qualifies for waiting, with the reason, for its head to give again.',
     { employee: Id('employee'), ...AgentPatch.shape },
     ({ employee, ...body }) => ({ method: 'PATCH', url: `/api/agents/${employee}`, payload: body }),
   );
