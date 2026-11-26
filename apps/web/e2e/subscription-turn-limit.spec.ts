@@ -44,7 +44,8 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     await expect(input).toHaveAttribute('aria-invalid', 'true');
     const problem = card.getByText(ui.problem, { exact: true });
     await expect(problem).toBeVisible();
-    const settings = card.locator('form').filter({ has: input });
+    const settings = card.locator('form').filter({ has: page.getByRole('spinbutton', { name: ui.field }) });
+    expect(await settings.count()).toBe(1);
     await settings.scrollIntoViewIfNeeded();
     await expect(settings).toBeInViewport({ ratio: 1 });
     await expect(input).toBeFocused();
