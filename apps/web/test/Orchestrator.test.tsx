@@ -322,7 +322,7 @@ describe('AgentWindow', () => {
     expect(within(card).queryByText(en.machines.computerConsent)).not.toBeInTheDocument();
     expect(within(card).getByText(/^Run this in a terminal on work-laptop\./)).toBeInTheDocument();
     expect(within(card).getByText('The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.')).toBeInTheDocument();
-    await user.click(within(card).getByRole('button', { name: en.window.close, exact: true }));
+    await user.click(within(card).getByRole('button', { name: /^Close$/ }));
     expect(card).not.toBeInTheDocument();
     expect(calls).not.toContainEqual({ method: 'POST', path: `/api/nodes/commands/${shown.id}/hide`, body: undefined });
   });

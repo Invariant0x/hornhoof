@@ -265,11 +265,11 @@ for (const state of ['pending', 'refused', 'failed', 'finished']) for (const con
     const agent = await openAgentWindow(page, 'orchestrator', 'en');
     const card = agent.getByRole('region', { name: en.window.commandAdd('Codex', HOST), exact: true });
     await expect(card.locator('code').first()).toContainText('--owner-key');
+    await card.getByRole('button', { name: control === 'done' ? en.common.done : en.window.close, exact: true }).click();
+    expect(await card.count()).toBe(0);
     /* The installer runs outside the web app. Its pending, refused and failed attempts leave the command active.
        A successful join consumes it, so the next command list leaves it out. */
     commands = state === 'finished' ? [other] : [command, other];
-    await card.getByRole('button', { name: control === 'done' ? en.common.done : en.window.close, exact: true }).click();
-    expect(await card.count()).toBe(0);
     await page.clock.fastForward(15_000);
     await expect(agent.getByRole('region', { name: en.window.commandAdd('Claude', HOST), exact: true })).toBeVisible();
     await expect(card).toHaveCount(0);
