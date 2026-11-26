@@ -10,6 +10,7 @@ import { pickBuiltin } from '../nodes/builtin.js';
 import { roomFor } from '../nodes/program-room.js';
 import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
 import { nodesOnHold } from '../program-operator/start-holds.js';
+import { heldMachines, installingMachines, nextToInstall, nextToInstallHolds } from '../network/follow.js';
 export const conversationOf = (agentId: string) => and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'));
 
 export async function liveSubscription(ctx: { db: Pick<Ctx['db'], 'select'> }, agentId: string) {
@@ -100,13 +101,13 @@ export async function goesElsewhere(ctx: Ctx, agentId: string, from: NodeIdentit
   const place = agent ? await placement(ctx, agent, sub, lookRoom(ctx, agent)) : null;
   return place !== null && !sameNode(place.node, from);
 }
-export type AgentTarget = { agent: typeof agents.$inferSelect; sub: NonNullable<Awaited<ReturnType<typeof liveSubscription>>> };
+export type AgentTarget = { agent: typeof agents.$inferSelect; sub: NonNullable<Awaited<ReturnType<typeof liveSubscription>>>; programPlanId: string };
 
 export async function agentOnNode(ctx: Ctx, node: NodeIdentity, agentId: string): Promise<AgentTarget | null> {
   const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
   const sub = agent ? await liveSubscription(ctx, agent.id) : null;
-  const at = sub ? await nodeOfAgent(ctx, agentId) : null;
-  return agent && sub && at && sameNode(at, node) ? { agent, sub } : null;
+  const at = sub ? await programNode(ctx, agentId) : null;
+  return agent && sub && at && sameNode(at.node, node) ? { agent, sub, programPlanId: at.planId } : null;
 }
 export function outdated(version: string | null): boolean {
   const have = (version ?? '0').split('.').map(n => parseInt(n, 10) || 0);
@@ -147,10 +148,22 @@ export async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string;
   const all = await planNodes(ctx.db, [sub.id]);
   /* A node that cannot write its work folder takes no turn until Operations or the node itself lifts its hold. */
   const onHold = await nodesOnHold(ctx, all.map(n => n.id));
-  const open = all.filter(n => !onHold.has(n.id) && (!accepts || accepts(nodeIdentity(n.id), n.machineId)));
+  const candidates = all.filter(n => !onHold.has(n.id) && (!accepts || accepts(nodeIdentity(n.id), n.machineId)));
+  const installing = accepts && candidates.length ? await heldForTurn(ctx, agent, candidates) : null;
+  const open = installing ? candidates.filter(n => !installing.has(n.machineId)) : candidates;
   const able = open.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n) && roomy(nodeIdentity(n.id)));
   const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, open, roomy)));
   return pick ? { node: nodeIdentity(pick.id), machineId: pick.machineId, nodeId: pick.id, builtinMachine: null, moves: pick.id !== agent.nodeId } : null;
+}
+
+/* A next-to-install machine can still take a leader's work under the existing hold rules. */
+async function heldForTurn(ctx: Ctx, agent: PlacedAgent, candidates: NodeRow[]): Promise<Set<string>> {
+  if (!isLeader(agent)) return heldMachines(ctx);
+  const installing = await installingMachines(ctx.db, ctx.config);
+  const next = await nextToInstall(ctx);
+  const node = candidates.find(candidate => candidate.machineId === next?.id);
+  if (node && await nextToInstallHolds(ctx, node.id, true)) installing.add(node.machineId);
+  return installing;
 }
 
 /* Whether the agent has work in progress on a node of its plan and waits for that one: not the orchestrator or a head whom

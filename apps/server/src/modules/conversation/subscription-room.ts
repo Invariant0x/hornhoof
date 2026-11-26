@@ -1,4 +1,4 @@
-import { and, count, eq, isNull, ne } from 'drizzle-orm';
+import { and, count, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { jobs, nodes, subscriptions } from '../../db/schema.js';
@@ -11,10 +11,10 @@ type Plan = Pick<typeof subscriptions.$inferSelect, 'id' | 'kind' | 'label' | 't
 type MachineRoom = (node: NodeIdentity, machineId: string) => boolean;
 export type SubscriptionWait = { label: string; running: number; limit: number };
 
-async function runningByMachine(db: Reader, subscriptionId: string, own: string, replacing?: string) {
+async function runningByMachine(db: Reader, subscriptionId: string, own: string) {
   const rows = await db.select({ personal: nodes.machineId, builtin: jobs.builtinMachine, running: count() })
     .from(jobs).leftJoin(nodes, eq(jobs.nodeId, nodes.id))
-    .where(and(eq(jobs.subscriptionId, subscriptionId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), replacing ? ne(jobs.id, replacing) : undefined))
+    .where(and(eq(jobs.subscriptionId, subscriptionId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running')))
     .groupBy(nodes.machineId, jobs.builtinMachine);
   const personal = new Map<string, number>();
   const builtin = new Map<string, number>();
@@ -36,21 +36,29 @@ export async function turnPlacement(ctx: Ctx, agent: PlacedAgent, plan: Plan): P
   return placement(ctx, agent, plan, node => roomFor(ctx, node, agent.id), belowLimit(running, plan.turnLimit));
 }
 
-export async function subscriptionWait(ctx: Ctx, agent: PlacedAgent, plan: Plan, place: Placement): Promise<SubscriptionWait | null> {
+export async function subscriptionWait(ctx: Ctx, agent: PlacedAgent, plan: Plan): Promise<SubscriptionWait | null> {
+  const roomy = lookRoom(ctx, agent);
+  const place = await placement(ctx, agent, plan, roomy, () => true);
+  if (!place) return null;
   const running = await runningByMachine(ctx.db, plan.id, ownMachine(ctx.config));
   const n = running(place.node, place.machineId);
-  if (n < plan.turnLimit || await placement(ctx, agent, plan, lookRoom(ctx, agent), belowLimit(running, plan.turnLimit))) return null;
+  if (n < plan.turnLimit || await placement(ctx, agent, plan, roomy, belowLimit(running, plan.turnLimit))) return null;
   return { label: plan.label, running: n, limit: plan.turnLimit };
 }
 
-/* The subscription row serializes concurrent claims and changes to the ceiling. A caller holds it until its job is running. */
-export async function holdsTurnForRoom(db: Reader, subscriptionId: string, node: NodeIdentity, own: string, replacing?: string): Promise<boolean> {
+/* The subscription row serializes concurrent claims, terminal turn records and changes to the ceiling. */
+export async function lockTurnLimit(db: Reader, subscriptionId: string): Promise<number | null> {
   const [plan] = await db.select({ limit: subscriptions.turnLimit }).from(subscriptions)
     .where(and(eq(subscriptions.id, subscriptionId), isNull(subscriptions.removedAt))).for('no key update');
-  if (!plan) return true;
+  return plan?.limit ?? null;
+}
+
+export async function holdsTurnForRoom(db: Reader, subscriptionId: string, node: NodeIdentity, own: string): Promise<boolean> {
+  const limit = await lockTurnLimit(db, subscriptionId);
+  if (limit === null) return true;
   const [machine] = node.kind === 'node' ? await db.select({ id: nodes.machineId }).from(nodes).where(eq(nodes.id, node.nodeId)) : [];
   const machineId = node.kind === 'builtin' ? node.machine : machine?.id;
   if (!machineId) return true;
-  const running = await runningByMachine(db, subscriptionId, own, replacing);
-  return running(node, machineId) >= plan.limit;
+  const running = await runningByMachine(db, subscriptionId, own);
+  return running(node, machineId) >= limit;
 }
