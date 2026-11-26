@@ -21,6 +21,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     }, { lang, theme });
     await chooseTerminal(page);
     await serveAgentWindow(page, { awake: false, hasTask: false, messages: [], connections: 0 });
+    await page.route('**/api/build*', route => route.fulfill({ json: { build: 'e2e-build' } }));
     await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: [{ ...SUB, turnLimit }] } }));
     await page.route('**/api/subscriptions/s1', route => {
       turnLimit = route.request().postDataJSON().turnLimit;
@@ -41,9 +42,14 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     await input.press('Enter');
     await expect(input).toBeFocused();
     await expect(input).toHaveAttribute('aria-invalid', 'true');
-    await expect(card.getByText(ui.problem, { exact: true })).toBeVisible();
+    const problem = card.getByText(ui.problem, { exact: true });
+    await expect(problem).toBeVisible();
+    const settings = card.locator('form').filter({ has: input });
+    await settings.scrollIntoViewIfNeeded();
+    await expect(settings).toBeInViewport({ ratio: 1 });
+    await expect(input).toBeFocused();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    if (lang === 'en') await page.screenshot({ path: shot('field-error'), fullPage: true });
+    if (lang === 'en') await page.screenshot({ path: shot('field-error') });
     await input.fill('5');
     await input.press('Enter');
     await expect.poll(() => turnLimit).toBe(5);
