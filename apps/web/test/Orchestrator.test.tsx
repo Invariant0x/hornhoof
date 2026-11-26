@@ -343,7 +343,7 @@ describe('AgentWindow', () => {
         : [409, { error: { code: 'conflict', reason: 'other_machine', message: 'Command for another machine.' } }],
     });
     const title = 'Command to add Codex to work-laptop';
-    await user.click(within(await screen.findByRole('region', { name: title })).getByRole('button', { name: 'Done', exact: true }));
+    await user.click(within(await screen.findByRole('region', { name: title })).getByRole('button', { name: /^Done$/ }));
     expect(screen.queryByRole('region', { name: title })).not.toBeInTheDocument();
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${command.id}/hide`, body: undefined });
 
