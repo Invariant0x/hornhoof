@@ -2,6 +2,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { and, arrayOverlaps, asc, desc, eq, gt, inArray, isNull, lt, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
+import { writeGate } from '../../db/gate.js';
 import { agentEventArchives, agentEvents, companies, turns, type AgentEventKind } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import type { Files } from '../files/files.js';
@@ -237,12 +238,16 @@ async function clearStanding(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Promise
   let cleared = 0;
   for (const archive of waiting) {
     if (!(await ctx.files.copiesStand(ctx.db, archive.sha256))) continue;
-    cleared += await ctx.db.transaction(async tx => {
+    cleared += await writeGate.through(() => ctx.db.transaction(async tx => {
+      /* A secret may have changed the file while its copies were checked. Only the checked hash can clear the events. */
+      const [current] = await tx.update(x).set({ clearedAt: now })
+        .where(and(eq(x.id, archive.id), eq(x.sha256, archive.sha256), isNull(x.clearedAt)))
+        .returning({ id: x.id });
+      if (!current) return 0;
       const gone = rowsOf<{ id: string }>(await tx.execute(sql`DELETE FROM agent_events e USING agent_event_archives x
-        WHERE x.id = ${archive.id} AND x.cleared_at IS NULL AND e.id = ANY(x.event_ids) AND ${archivable('e')} RETURNING e.id`));
-      await tx.update(x).set({ clearedAt: now }).where(and(eq(x.id, archive.id), isNull(x.clearedAt)));
+        WHERE x.id = ${current.id} AND e.id = ANY(x.event_ids) AND ${archivable('e')} RETURNING e.id`));
       return gone.length;
-    });
+    }));
   }
   return cleared;
 }

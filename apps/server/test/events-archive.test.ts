@@ -209,7 +209,7 @@ describe('the old history of agents', () => {
     const stillHere = new Set(await s.raw());
     expect(old.archived.every(event => stillHere.has(event.id))).toBe(true);
 
-    copies.mockImplementation(async sha256 => sha256 === replacement!.sha256);
+    copies.mockImplementation((_db, sha256) => Promise.resolve(sha256 === replacement!.sha256));
     expect(await s.round()).toMatchObject({ cleared: old.archived.length });
   });
 });
