@@ -252,16 +252,20 @@ describe('migration 0046', () => {
   it('recovers a missing migration below the newest recorded timestamp exactly once', async () => {
     const logged = vi.spyOn(console, 'info').mockImplementation(() => {});
     onTestFinished(() => logged.mockRestore());
-    const client = await freshInstall();
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
     const db = drizzle(client);
-    await db.execute(sql`insert into drizzle.__drizzle_migrations (hash, created_at) values ('another branch', 1793700000001)`);
+    /* Leave 0172 pending, as it was when the older history still lacked 0046. */
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0171_file_store_backup') });
+    const missingAt = 1793700000000;
+    await db.execute(sql`insert into drizzle.__drizzle_migrations (hash, created_at) values ('another branch', ${missingAt + 1})`);
     const before = (await db.execute(sql`select * from drizzle.__drizzle_migrations order by id`)).rows;
-    await db.execute(sql`delete from drizzle.__drizzle_migrations where created_at = 1793700000000`);
+    await db.execute(sql`delete from drizzle.__drizzle_migrations where created_at = ${missingAt}`);
     await db.execute(sql`alter table jobs drop column failure, drop column not_before, drop column restarted_at`);
     await db.execute(sql`drop index agent_events_failure_case`);
     await db.execute(sql`drop index agent_events_operations_pending`);
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0172_hot_query_indexes') });
 
     const retryIndex = await db.execute(sql`select split_part(indexdef, ' WHERE ', 1) as definition,
       regexp_replace(split_part(indexdef, ' WHERE ', 2), '[()]', '', 'g') as predicate
@@ -275,8 +279,12 @@ describe('migration 0046', () => {
     const indexes = (await db.execute<{ indexname: string }>(sql`select indexname from pg_indexes where tablename = 'agent_events'`)).rows.map(i => i.indexname);
     expect(indexes).toEqual(expect.arrayContaining(['agent_events_failure_case', 'agent_events_operations_pending']));
     const after = (await db.execute(sql`select * from drizzle.__drizzle_migrations order by id`)).rows;
-    expect(after.filter(row => Number(row.created_at) !== 1793700000000)).toEqual(before.filter(row => Number(row.created_at) !== 1793700000000));
-    expect(after.filter(row => Number(row.created_at) === 1793700000000)).toEqual([expect.objectContaining({ hash: before.find(row => Number(row.created_at) === 1793700000000)!.hash })]);
+    const kept = before.filter(row => Number(row.created_at) !== missingAt);
+    expect(after.slice(0, -2)).toEqual(kept);
+    const [backfill, latest] = after.slice(-2);
+    expect(backfill).toMatchObject({ hash: before.find(row => Number(row.created_at) === missingAt)!.hash });
+    expect(Number(backfill!.created_at)).toBe(missingAt);
+    expect(Number(latest!.created_at)).toBeGreaterThan(Math.max(...before.map(row => Number(row.created_at))));
     expect(logged).toHaveBeenCalledExactlyOnceWith('Applied missing migration 0046_turn_failures');
   });
 
