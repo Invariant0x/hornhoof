@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import type { Sql } from './lease-store.js';
 
 export const SAMPLE_MS = 20_000;
-export const KEEP_SAMPLES = 4320;
-/* An hour of samples at SAMPLE_MS; KEEP_SAMPLES holds a day of them. */
-export const HOUR_SAMPLES = 3_600_000 / SAMPLE_MS;
+const HOUR_MS = 3_600_000;
+const REPORT_HOURS = 24;
+export const KEEP_SAMPLES = REPORT_HOURS * HOUR_MS / SAMPLE_MS;
 const PROBE_FILE = 'fsync-probe';
 const PROBE_BYTES = 4096;
 const FEWEST_SAMPLES = 10;
@@ -27,17 +27,15 @@ export function fsyncP99(samples: readonly number[]): number | null {
   return sorted[Math.min(rank, sorted.length - 1) - 1]!;
 }
 
-/* What the machine reports of its disk: the p99 of each hour of samples, the newest first and the oldest as many as there
-   are, and of those the middle one, the higher of two. A quarter of an hour of slow writes then moves one hour of a
-   day, not the day: a disk is reported slow while it is slow for most of its hours, and quick again once most are quick. */
-export function reportedP99(samples: readonly number[]): number | null {
-  const hours: number[] = [];
-  for (let end = samples.length; end > 0; end -= HOUR_SAMPLES) {
-    const p99 = fsyncP99(samples.slice(Math.max(0, end - HOUR_SAMPLES), end));
-    if (p99 !== null) hours.push(p99);
-  }
-  if (!hours.length) return null;
-  return hours.sort((a, b) => a - b)[Math.floor(hours.length / 2)]!;
+type TimedSample = { at: number; ms: number };
+
+/* The middle p99 of the last day's hours with enough samples, taking the higher of the middle two. Hours follow the clock, so a busy
+   disk or a probe that could not be taken does not move older measurements into newer hours. */
+function reportedP99(samples: readonly TimedSample[], now: number): number | null {
+  const hours = Array.from({ length: REPORT_HOURS }, (): number[] => []);
+  for (const sample of samples) hours[Math.floor((now - sample.at) / HOUR_MS)]?.push(sample.ms);
+  const p99s = hours.map(fsyncP99).filter(p99 => p99 !== null).sort((a, b) => a - b);
+  return p99s[Math.floor(p99s.length / 2)] ?? null;
 }
 
 export function keepLatest(samples: readonly number[], ms: number): number[] {
@@ -92,7 +90,7 @@ export type Internet = { start(): void; stop(): void; snapshot(): { internetRttM
 
 export class Measures {
   /* What the machine reports, and the company ranks its disk by: none taken while the machine is busy with its own writes. */
-  private samples: number[] = [];
+  private samples: TimedSample[] = [];
   /* What the keeper's statements on the lease may take: every sample, as they wait for the same disk then too. */
   private leaseSamples: number[] = [];
   private timer: NodeJS.Timeout | undefined;
@@ -129,12 +127,15 @@ export class Measures {
     const before = this.opts.busy?.() ?? false;
     const ms = await (this.opts.probe ? this.opts.probe.time() : timedSyncedWrite(join(this.opts.dir, PROBE_FILE)));
     this.leaseSamples = keepLatest(this.leaseSamples, ms);
-    if (!before && !(this.opts.busy?.() ?? false)) this.samples = keepLatest(this.samples, ms);
+    if (!before && !(this.opts.busy?.() ?? false)) {
+      this.samples.push({ at: performance.now(), ms });
+      if (this.samples.length > KEEP_SAMPLES) this.samples.shift();
+    }
   }
 
   /* The fsync p99 of the disk as the machine reports it, the middle one of its hours; none before there are enough samples. */
   fsyncP99(): number | null {
-    return reportedP99(this.samples);
+    return reportedP99(this.samples, performance.now());
   }
 
   /* The fsync p99 the lease's statements go by: of every sample, so a disk slow under the machine's own dumps is slow for
