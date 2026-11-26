@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import * as ownerKeys from '../src/owner-key';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import type { SubView } from '../src/types';
 import { ME, MACHINE, mockApi, SUBS, withKey } from './api-mock';
@@ -111,6 +112,38 @@ describe('the steps to connect a personal plan', () => {
       expect(block.getAllByRole('code')[0]).toHaveTextContent(`${COMMAND} --owner-key`);
     }
     expect(first.getAllByRole('code')[0]?.textContent).toBe(second.getAllByRole('code')[0]?.textContent);
+  });
+
+  it('keeps the other card locked when a canceled password submission finishes', async () => {
+    const claude = plan('claude', 'waiting_machine');
+    const codex = plan('codex', 'waiting_machine');
+    const command = { ...shown(claude), subscriptionIds: [claude.id, codex.id], plans: [claude.label, codex.label] };
+    const makeKey = vi.spyOn(ownerKeys, 'makeKey');
+    onTestFinished(() => { makeKey.mockRestore(); });
+    let finish!: (reply: [204]) => void;
+    const pending = new Promise<[204]>(resolve => { finish = resolve; });
+    view([claude, codex], { commands: [command], extra: {
+      'GET /api/me/key': [200, { key: null }],
+      'PUT /api/me/key': () => pending,
+    } });
+
+    const first = within(await screen.findByRole('region', { name: 'Install Claude' }));
+    const second = within(await screen.findByRole('region', { name: 'Install Codex' }));
+    const user = userEvent.setup();
+    await second.findByLabelText('Password');
+    await user.type(await first.findByLabelText('Password'), 'test password');
+    await user.click(first.getByRole('button', { name: 'Next' }));
+    expect(makeKey).toHaveBeenCalledOnce();
+    await user.click(first.getByRole('button', { name: 'Cancel' }));
+    expect(first.getByRole('button', { name: 'Enter password' })).toBeVisible();
+
+    await act(async () => {
+      finish([204]);
+      await makeKey.mock.results[0]!.value;
+    });
+
+    expect(second.getByLabelText('Password')).toBeVisible();
+    expect(second.queryByRole('code')).not.toBeInTheDocument();
   });
 
   it('shows the same steps in the install block shown right after a plan is added', async () => {

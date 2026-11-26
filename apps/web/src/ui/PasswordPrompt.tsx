@@ -75,7 +75,13 @@ export function useOwnerKey(promptPerCard: boolean): { publicKey(signal: AbortSi
         finish(null);
         if (waiters.prompts === 0) for (const waiter of waiters.finish) waiter(null);
       };
-      const question: Question = { cancel, answer: key => { for (const waiter of waiters.finish) waiter(key); } };
+      const question: Question = {
+        cancel,
+        answer: key => {
+          if (!waiters.finish.has(finish)) return;
+          for (const waiter of waiters.finish) waiter(key);
+        },
+      };
       function finish(key: string | null) {
         if (!waiters.finish.delete(finish)) return;
         signal.removeEventListener('abort', cancel);
