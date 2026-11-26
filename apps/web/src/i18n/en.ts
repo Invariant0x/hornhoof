@@ -997,6 +997,8 @@ export const en = {
       current: '(now)',
       failedMark: '(did not work)',
       now: {
+        password: 'Enter your Hornhoof password to get the command.',
+        copy: 'Copy the command below, paste it into Terminal on a Mac or Linux or into PowerShell on Windows, and press Enter.',
         run: 'Copy the command below, paste it into Terminal on a Mac or Linux or into PowerShell on Windows, and press Enter. This page moves on by itself once your computer connects.',
         newCommand: 'Press "Make a new command" below, then run the new command on your computer.',
         connect: 'Hornhoof is starting on your computer. Keep it on and connected to the internet; this page moves on by itself.',

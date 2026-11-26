@@ -35,10 +35,10 @@ export function PasswordPrompt({ purpose, onPassword, onCancel }: { purpose: 'ma
 
   return (
     <div className="owner-key">
-      <p className="muted">{purpose === 'make' ? t.subs.ownerKeyMake : t.subs.ownerKeyUnlock}</p>
       <Field label={t.common.password} problem={problem || undefined}>
         {props => <input {...props} type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} onKeyDown={onKey} />}
       </Field>
+      <p className="muted">{purpose === 'make' ? t.subs.ownerKeyMake : t.subs.ownerKeyUnlock}</p>
       <div className="actions">
         <button className="btn" type="button" disabled={!password || busy} onClick={() => void send()}>{t.common.next}</button>
         <button className="btn ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>

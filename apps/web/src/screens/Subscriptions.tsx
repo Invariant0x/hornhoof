@@ -28,7 +28,6 @@ import { TokenCount, TokenGauges } from '../ui/Tokens';
 import { Edge } from '../ui/Edge';
 import { LoadFailure } from '../ui/LoadFailure';
 import { clock, limitState, planStateOnMachine, shortName, stateOf, subName, TERMINAL_SIGNIN, waitsThere, windowName, windowUsage } from '../ui/subscription';
-import { PlanSteps } from '../ui/PlanSteps';
 import { keepUnits } from '../ui/units';
 import { replaceSubscription } from './subscription-list';
 import { sayIf } from '@hornhoof/protocol';
@@ -478,8 +477,8 @@ function PlanFix(props: PlanProps) {
   return (
     <section className="blk blk-fix">
       {!c.note?.command && <p>{fixWords(t, s)}</p>}
-      {!c.note?.command && !s.connecting && s.owner.id === me.person.id && <PlanSteps sub={s} command={c.command} signing={Boolean(c.signing)} />}
-      <SubscriptionInstall sub={s} ownerId={me.person.id} command={c.command} onNew={() => c.newCommand(s)} />
+      <SubscriptionInstall sub={s} ownerId={me.person.id} command={c.command}
+        showSteps={!c.note?.command && !s.connecting && s.owner.id === me.person.id} signing={Boolean(c.signing)} onNew={() => c.newCommand(s)} />
       <SignInNote note={c.note} />
       <div className="machine-actions">{[signInAction(t, props), keyAction(t, props)].map(a => a && <ActionButton key={a.key} action={a} className="act" />)}<RemoveButtons {...props} /></div>
       <RemoveAsk sub={s} controls={c} />

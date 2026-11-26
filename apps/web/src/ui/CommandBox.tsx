@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import { api } from '../api';
 import { useT, type Messages } from '../i18n';
 import { withOwnerKey } from '../owner-key';
@@ -92,12 +92,30 @@ function CommandLine({ command, label }: { command: string; label?: string }) {
   );
 }
 
+type CommandState = 'loading' | 'locked' | 'visible';
+export type CommandStepContent = { state: CommandState; body: ReactNode };
+
+export function commandStepText(t: Messages, state: CommandState | undefined, copy: string): string | undefined {
+  if (state === 'locked') return t.subs.steps.now.password;
+  if (state === 'visible') return copy;
+  return undefined;
+}
+
+type CommandBoxProps = {
+  command: string;
+  trust?: string;
+  password?: string;
+  showComputerConsent?: boolean;
+  run?: string;
+  renderSteps?: (step: CommandStepContent) => ReactNode;
+};
+
 /* The install command with Copy, the same one for Windows beside it when there is one, and what running it means for
    the person's subscription, or for their machine. A command that joins a machine shows with the viewer's own key on it, so the machine knows its owner: with no key yet
    it is made first, with the password the screen holds or else asked for. Only where the browser can make no key does
    the command shows without one, with a line that says so. Any other command
    shows as it is. */
-export function CommandBox({ command, trust, password, showComputerConsent = true }: { command: string; trust?: string; password?: string; showComputerConsent?: boolean }) {
+export function CommandBox({ command, trust, password, showComputerConsent = true, run, renderSteps }: CommandBoxProps) {
   const t = useT();
   const joins = command.includes(' --join ');
   const { publicKey, prompt } = useOwnerKey();
@@ -126,7 +144,8 @@ export function CommandBox({ command, trust, password, showComputerConsent = tru
   const keyless = joins && key === NO_KEY_HERE;
   const shown = joins && !keyless ? (key ? withOwnerKey(command, key) : null) : command;
   const windows = shown ? windowsCommand(shown) : null;
-  return (
+  const state: CommandState = shown ? 'visible' : left || prompt ? 'locked' : 'loading';
+  const body = (
     <div className="command-box">
       {shown ? (
         <>
@@ -143,11 +162,26 @@ export function CommandBox({ command, trust, password, showComputerConsent = tru
       ) : (
         prompt ?? <p className="muted">{t.subs.ownerKeyMaking}</p>
       )}
+      {run && <p className="muted">{run}</p>}
       {keyless && <p className="muted">{t.subs.ownerKeyNotHere}</p>}
       {showComputerConsent && joins && shown && <p className="muted">{t.machines.computerConsent}</p>}
       {/* The stripe and the lines start where the page does; the words read whole in their own direction. */}
       <p className="trust"><bdi>{trust ?? t.subs.trust}</bdi></p>
     </div>
+  );
+
+  if (renderSteps) return renderSteps({ state, body });
+  if (!run) return body;
+  const words = t.subs.steps;
+  const instruction = commandStepText(t, state, words.now.copy);
+  return (
+    <ol className="plan-steps" role="list">
+      <li className="now" aria-current="step">
+        <span>{words.run}</span>
+        {instruction && <p>{instruction}</p>}
+        {body}
+      </li>
+    </ol>
   );
 }
 
@@ -188,9 +222,8 @@ export function ActiveCommandPanel({
   return (
     <Edge className="panel" cut={12}>
       <h2>{heading}</h2>
-      <p className="muted">{run}</p>
+      <CommandBox command={shown.command} trust={trust} run={run} />
       {note && <p className="muted">{note}</p>}
-      <CommandBox command={shown.command} trust={trust} />
       <CommandLifetime expiresAt={shown.expiresAt} />
       <div className="actions">
         <button className="btn ghost" type="button" onClick={onCancel}>

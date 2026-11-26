@@ -36,7 +36,7 @@ const card = async (name: string) => {
 /* What each step says, the passed ones with their hidden mark, and which one is current. */
 const read = (list: HTMLElement) => {
   const items = within(list).getAllByRole('listitem');
-  return { texts: items.map(li => li.textContent), current: items.findIndex(li => li.getAttribute('aria-current') === 'step') };
+  return { texts: items.map(li => [...li.children].filter(child => child.matches('span, p')).map(child => child.textContent).join('')), current: items.findIndex(li => li.getAttribute('aria-current') === 'step') };
 };
 
 afterEach(() => localStorage.clear());
@@ -59,7 +59,28 @@ describe('the steps to connect a personal plan', () => {
     const waiting = plan('claude', 'waiting_machine');
     view([waiting], { commands: [shown(waiting)], language });
     const list = within(await card('Claude')).getByRole('list', { name: words.label });
+    await within(list).findByText(words.run);
     expect(read(list)).toEqual({ texts: [words.steps[0] + words.run, ...words.steps.slice(1)], current: 0 });
+  });
+
+  it.each(['claude', 'codex', 'antigravity'] as const)('asks for the password in step 1 before showing the %s command', async provider => {
+    const waiting = plan(provider, 'waiting_machine');
+    view([waiting], { commands: [shown(waiting)], extra: { 'GET /api/me/key': [200, { key: null }] } });
+    const block = await screen.findByRole('region', { name: /^Install / });
+    const step = within(block).getAllByRole('listitem')[0]!;
+    const password = await within(block).findByLabelText('Password');
+    expect(within(block).queryByText(EN.run)).not.toBeInTheDocument();
+    expect(within(step).getByText('Enter your Hornhoof password to get the command.')).toBeVisible();
+    expect(step).toContainElement(password);
+    expect(block.querySelector('code')).toBeNull();
+    expect(password.compareDocumentPosition(within(block).getByText(/^Run this in a terminal/))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    const user = userEvent.setup();
+    await user.type(password, 'test password');
+    await user.click(within(block).getByRole('button', { name: 'Next' }));
+    await within(step).findByText(EN.run);
+    expect(within(step).queryByLabelText('Password')).not.toBeInTheDocument();
+    expect(step.querySelector('code')).toHaveTextContent('--owner-key');
   });
 
   it('shows the same steps in the install block shown right after a plan is added', async () => {

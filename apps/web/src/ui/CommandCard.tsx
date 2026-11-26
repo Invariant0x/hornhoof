@@ -13,8 +13,7 @@ export function CommandCard({ shown, onDone }: { shown: ShownCommand; onDone(): 
   return (
     <section className="t-card" aria-label={title}>
       <h4>{title}</h4>
-      <p className="t-card-brief">{run}</p>
-      <CommandBox command={shown.command} trust={shown.kind === 'machine' ? t.machines.trust : undefined} showComputerConsent={false} />
+      <CommandBox command={shown.command} run={run} trust={shown.kind === 'machine' ? t.machines.trust : undefined} showComputerConsent={false} />
       <p className="t-card-brief">{t.window.commandOnly}</p>
       <div className="f">
         <button className="btn" type="button" onClick={onDone}>

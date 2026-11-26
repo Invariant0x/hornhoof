@@ -448,8 +448,7 @@ function ConnectMachine({ command, plan, password, onDone }: { command: string; 
   return (
     <Card>
       <h1>{t.setup.connectMachine}</h1>
-      <p className="muted">{t.setup.runThis(PROVIDER_NAMES[plan])}</p>
-      <CommandBox command={command} password={password} />
+      <CommandBox command={command} password={password} run={t.setup.runThis(PROVIDER_NAMES[plan])} />
       <p className="muted">{t.setup.joinOnce}</p>
       <div className="actions">
         <button className="btn" type="button" onClick={onDone}>{t.setup.goToMap}</button>

@@ -21,9 +21,7 @@ export function SubscriptionCommandBlocks({ subscriptions, commands, now, onDone
     return <section key={sub.id} aria-label={title}>
       <Edge className="panel" cut={12}>
         <h2>{title}</h2>
-        <PlanSteps sub={sub} command={command} />
-        <p className="muted">{t.subs.runThis}</p>
-        <CommandBox command={command.command} />
+        <CommandBox command={command.command} run={t.subs.runThis} renderSteps={install => <PlanSteps sub={sub} command={command} install={install} />} />
         <CommandLifetime expiresAt={command.expiresAt} />
         <div className="actions"><button className="btn" type="button" onClick={() => onDone(command, sub.id)}>{t.common.done}</button></div>
       </Edge>
@@ -32,10 +30,19 @@ export function SubscriptionCommandBlocks({ subscriptions, commands, now, onDone
 }
 
 /* Used by the expanded table row and by its card, including after its top block was closed. */
-export function SubscriptionInstall({ command, sub, ownerId, onNew }: { sub: SubView; ownerId: string; command: ShownCommand | null | undefined; onNew: () => void }) {
+export function SubscriptionInstall({ command, sub, ownerId, showSteps, signing, onNew }: {
+  sub: SubView; ownerId: string; command: ShownCommand | null | undefined; showSteps: boolean; signing: boolean; onNew: () => void;
+}) {
   const t = useT();
-  if (sub.kind !== 'personal' || sub.status !== 'waiting_machine' || sub.owner.id !== ownerId) return null;
-  if (command === undefined) return <p className="muted">{t.common.loading}</p>;
-  if (!command) return <button className="act" type="button" aria-label={t.subs.newCommandLabel(subName(t, sub))} onClick={onNew}>{t.subs.newCommand}</button>;
-  return <div className="plan-command"><CommandBox command={command.command} /><CommandLifetime expiresAt={command.expiresAt} /></div>;
+  const steps = showSteps && <PlanSteps sub={sub} command={command} signing={signing} />;
+  if (sub.kind !== 'personal' || sub.status !== 'waiting_machine' || sub.owner.id !== ownerId) return steps;
+  if (!command) return <>{steps}{command === undefined
+    ? <p className="muted">{t.common.loading}</p>
+    : <button className="act" type="button" aria-label={t.subs.newCommandLabel(subName(t, sub))} onClick={onNew}>{t.subs.newCommand}</button>}
+  </>;
+
+  return <div className="plan-command">
+    <CommandBox command={command.command} renderSteps={showSteps ? install => <PlanSteps sub={sub} command={command} install={install} /> : undefined} />
+    <CommandLifetime expiresAt={command.expiresAt} />
+  </div>;
 }
