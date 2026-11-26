@@ -496,6 +496,25 @@ describe('what the scanner follows', () => {
     expect(reaching(files, 'apps/a/src/glob.ts')).toContain('apps/a/src/pages/two.ts');
   });
 
+  it('follows each typed Vite import glob relative to the importing file', async () => {
+    const from = 'apps/a/src/packs/load.ts';
+    const files: Files = {
+      ...app,
+      [from]: "export const files = import.meta.glob<Record<string, string>>(['../locales/??.ts', './*/locales/??-*.ts', '!../locales/zz.ts'], { eager: true });\n",
+      'apps/a/src/locales/ru.ts': '',
+      'apps/a/src/locales/zz.ts': '',
+      'apps/a/src/locales/guide.ts': '',
+      'apps/a/src/packs/one/locales/pt-BR.ts': '',
+      'apps/a/src/packs/one/locales/ru.ts': '',
+    };
+
+    expect([...reaching(files, from)].sort()).toEqual([
+      'apps/a/src/locales/ru.ts',
+      from,
+      'apps/a/src/packs/one/locales/pt-BR.ts',
+    ]);
+  });
+
   it('a pattern leaves out documents unless it asks for them', async () => {
     const files: Files = { ...app, 'apps/a/docs/one.md': '1', 'apps/a/docs/one.txt': '1', 'apps/a/test/a.test.ts': "const a = 'docs/*';\n", 'apps/a/test/b.test.ts': "const b = 'docs/*.md';\n" };
     expect([...reaching(files, 'apps/a/test/a.test.ts')].sort()).toEqual(['apps/a/docs/one.txt', 'apps/a/test/a.test.ts']);
