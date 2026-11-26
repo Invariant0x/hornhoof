@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useT, type Messages } from '../i18n';
 import { MaterialDocument } from './MaterialDocument';
+import { useServiceView } from './ServiceRoad';
 import { displayFileName, formatFileSize } from './TaskAttachments';
 
 export type ViewerAvailableMaterial = {
@@ -103,8 +104,9 @@ function resolveInitialOpener(opener: HTMLElement | null): HTMLElement | null {
   return document.activeElement instanceof HTMLElement ? document.activeElement : null;
 }
 
-function useInertBackground(portalRef: { current: HTMLDivElement | null }, opener: HTMLElement | null) {
-  useEffect(() => {
+function useInertBackground(portalRef: { current: HTMLDivElement | null }, opener: HTMLElement | null, active: boolean) {
+  useLayoutEffect(() => {
+    if (!active) return;
     const previousFocus = resolveInitialOpener(opener);
     const siblings = collectInertSiblings(portalRef.current);
     for (const el of siblings) el.setAttribute('inert', '');
@@ -112,7 +114,7 @@ function useInertBackground(portalRef: { current: HTMLDivElement | null }, opene
       for (const el of siblings) el.removeAttribute('inert');
       if (previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [portalRef, opener]);
+  }, [portalRef, opener, active]);
 }
 
 function shouldWrapTab(dialog: HTMLElement, boundary: HTMLElement, active: Element | null): boolean {
@@ -424,6 +426,7 @@ function handleViewerKeyEvent(
 }
 
 function useViewerKeyboard(
+  active: boolean,
   activeKind: string | undefined,
   onClose: () => void,
   stepTrack: (d: number) => void,
@@ -431,10 +434,11 @@ function useViewerKeyboard(
   resetZoom: () => void,
 ) {
   useEffect(() => {
+    if (!active) return;
     const listener = (e: KeyboardEvent) => handleViewerKeyEvent(e, activeKind, onClose, stepTrack, stepZoom, resetZoom);
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
-  }, [activeKind, onClose, stepTrack, stepZoom, resetZoom]);
+  }, [active, activeKind, onClose, stepTrack, stepZoom, resetZoom]);
 }
 
 function finishSwipeGesture(
@@ -475,15 +479,17 @@ function ActiveMaterialViewer({
   const swipeStart = useRef<{ x: number; y: number; id: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pdfUnavailable, setPdfUnavailable] = useState(false);
+  const servicePlace = useServiceView()?.place;
+  const covered = servicePlace === 'window' || servicePlace === 'boot';
 
   const track = trackForKind(items, active.kind);
   const index = activeTrackIndex(track, active);
 
-  useInertBackground(portalRef, opener);
+  useInertBackground(portalRef, opener, !covered);
 
   useEffect(() => {
-    focusElement(closeBtnRef.current);
-  }, []);
+    if (!covered && !dialogRef.current?.contains(document.activeElement)) focusElement(closeBtnRef.current);
+  }, [covered]);
 
   useEffect(() => {
     setZoom(1);
@@ -501,10 +507,10 @@ function ActiveMaterialViewer({
   const stepZoom = useCallback((delta: number) => preserveStageCenter(stageRef.current, () => setZoom(z => clampZoom(z + delta))), []);
   const resetZoom = useCallback(() => preserveStageCenter(stageRef.current, () => setZoom(1)), []);
 
-  useViewerKeyboard(active.kind, onClose, stepTrack, stepZoom, resetZoom);
+  useViewerKeyboard(!covered, active.kind, onClose, stepTrack, stepZoom, resetZoom);
 
   return createPortal(
-    <div ref={portalRef} className="mv-back">
+    <div ref={portalRef} className="mv-back" hidden={covered}>
       <div ref={dialogRef} className="mv" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={e => trapDialogTab(dialogRef.current, e)}>
         <ViewerHeader titleId={titleId} item={active} pdfUnavailable={pdfUnavailable} closeBtnRef={closeBtnRef} onClose={onClose} />
         <div

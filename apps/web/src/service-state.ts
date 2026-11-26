@@ -1,5 +1,5 @@
 /* One current service message and its place. The update uses the startup screen.
-   Once dismissed, a connection loss keeps its place in the strip. */
+   Once dismissed, a notice stays in the strip until its state ends. */
 import { SERVICE_LINES, type Away } from '@hornhoof/protocol/service-lines';
 import { connection, joined } from './connection';
 
@@ -20,9 +20,6 @@ export type Inputs = { online: boolean; away: Away | null; updating: boolean; si
 /* One English line for each kind, in every language, as the protocol keeps it: the page, the window and the fallback page of
    the server's front speak the same words (#2049, #2100). */
 export { SERVICE_LINES };
-
-/* The order used by dismissible windows. An update uses the loading screen while it lasts. */
-const IMPORTANCE: Record<ServiceKind, number> = { signedOut: 5, offline: 4, updating: 3, lost: 2, notice: 1 };
 
 const said = (kind: Exclude<ServiceKind, 'notice'>): ServiceMessage => ({ id: kind, kind, line: SERVICE_LINES[kind] });
 
@@ -46,8 +43,7 @@ const sameView = (a: ServiceView, b: ServiceView): boolean =>
 let updating = false;
 let signedOut = false;
 let notices: Notice[] = [];
-/* Remember the importance of the last dismissed window until all service states end. */
-let closedAt = 0;
+const dismissed = new Set<string>();
 /* How many page areas show the loader line now. */
 let loaders = 0;
 let view: ServiceView = null;
@@ -55,18 +51,24 @@ const watchers = new Set<() => void>();
 
 const online = (): boolean => typeof navigator === 'undefined' || navigator.onLine !== false;
 
-function placeOf(kind: ServiceKind): ServicePlace | null {
-  if (kind === 'updating') return 'boot';
-  if (IMPORTANCE[kind] > closedAt) return 'window';
-  return kind === 'lost' || kind === 'offline' ? 'strip' : null;
+function currentMessage(active: ServiceMessage[]): ServiceMessage | undefined {
+  const first = active[0];
+  /* A reminder to sign in gives way to a connection problem that prevents doing so. */
+  if (first?.kind === 'signedOut' && dismissed.has(first.id)) {
+    return active.find(message => message.kind === 'offline' || message.kind === 'lost') ?? first;
+  }
+  return first;
 }
 
 /* Reads every state again; the people watching hear of it only when what is drawn changed. */
 function refresh(): void {
-  const current = messageOf({ online: online(), away: connection.snapshot().away, updating, signedOut, notices });
-  if (!current) closedAt = 0;
-  const place = current && placeOf(current.kind);
-  const next = current && place ? { place, message: current, loader: loaders > 0 } : null;
+  const active = messagesOf({ online: online(), away: connection.snapshot().away, updating, signedOut, notices });
+  for (const id of dismissed) {
+    if (!active.some(message => message.id === id)) dismissed.delete(id);
+  }
+  const current = currentMessage(active);
+  const place = current?.kind === 'updating' ? 'boot' : current && dismissed.has(current.id) ? 'strip' : 'window';
+  const next: ServiceView = current ? { place, message: current, loader: loaders > 0 } : null;
   if (sameView(view, next)) return;
   view = next;
   for (const watch of [...watchers]) watch();
@@ -103,10 +105,10 @@ export const service = {
     notices = notices.filter(n => n.id !== id);
     refresh();
   },
-  /* The person dismissed the window. A connection loss stays in the strip. */
+  /* The person dismissed the window for this occurrence. */
   close(): void {
     if (view?.place !== 'window') return;
-    closedAt = Math.max(closedAt, IMPORTANCE[view.message.kind]);
+    dismissed.add(view.message.id);
     refresh();
   },
   /* A page area with nothing cached shows the loader line in its own place, as long as it holds this. */
@@ -128,7 +130,7 @@ export const service = {
     updating = false;
     signedOut = false;
     notices = [];
-    closedAt = 0;
+    dismissed.clear();
     loaders = 0;
     refresh();
   },

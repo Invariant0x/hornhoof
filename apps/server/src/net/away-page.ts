@@ -26,7 +26,7 @@ body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding
 function loader(kind: Away): string {
   const word = LINE[kind];
   const label = kind === 'updating' ? `${word}…` : word;
-  return `<main class="boot-screen" role="status" aria-busy="true">
+  return `<main class="boot-screen" role="status">
 ${SIGN}
 <p class="boot-line"><span class="boot-label">${label}</span><span class="boot-word" aria-hidden="true" data-word="${word}"></span><span class="boot-dots" aria-hidden="true"><i></i><i></i><i></i></span></p>
 </main>`;

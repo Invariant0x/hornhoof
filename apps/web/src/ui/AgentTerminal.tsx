@@ -10,7 +10,6 @@ import { isBracketedPaste, TerminalInput, type InputRefusal, type TerminalRights
 import { uploadTerminalPictures } from './terminal-pictures';
 import { attachTerminalScroll, readingHistoryLine, restoreHistoryLine, restoreLiveTerminal, writeTerminalData } from './terminal-scroll';
 import { isHidden } from './visibility';
-import { ServiceLoader, useServiceView } from './ServiceRoad';
 import { WindowFoot, type WindowNote } from './WindowNotes';
 import { disposeTerminal } from './xterm-release';
 
@@ -776,11 +775,9 @@ function useNotesFoot(label: string, notes: WindowNote[], onNotes?: (notes: Wind
   return onNotes ? null : <WindowFoot label={label} notes={notes} />;
 }
 
-/* What stands where the terminal is not open yet: the program's own words, or, while a service state stands, that state in
-   place, the logo and the line of the road. */
+/* A terminal opening has its own progress. The service road owns any outage message. */
 function TerminalOpening({ program }: { program: string }) {
   const t = useT();
-  if (useServiceView() !== null) return <div className="t-load"><ServiceLoader /></div>;
   return (
     <div className="t-load" role="status">
       <span className="spinner" aria-hidden="true" />
