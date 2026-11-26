@@ -412,7 +412,7 @@ describe('the card of a plan that does not work', () => {
     expect(commands).toHaveLength(2);
     for (const [index, group] of commands.entries()) {
       const code = within(group).getByRole('code');
-      const copy = within(group).getByRole('button', { name: actions[0], exact: true });
+      const copy = within(group).getByRole('button', { name: actions[0] });
       expect(code.textContent).toBe([withKey(COMMAND), windows][index]);
       expect(code.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
