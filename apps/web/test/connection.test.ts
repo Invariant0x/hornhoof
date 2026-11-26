@@ -97,19 +97,16 @@ describe('looking again until the server answers', () => {
     expect(asked()).toBe(7);
   });
 
-  it('tells when the server was first missed and when the next look comes, and nothing once it answers', async () => {
-    vi.setSystemTime(new Date('2026-11-23T10:00:00Z'));
-    const missed = Date.now();
+  it('tells the page nothing of waits or countdowns, only whether the server is away and why', async () => {
     answering(refusedNow, refusedNow, up);
-    expect(connection.snapshot()).toMatchObject({ since: null, nextAt: null });
+    expect(connection.snapshot()).toEqual({ away: null });
     connection.lost();
     await vi.advanceTimersByTimeAsync(0);
-    expect(connection.snapshot()).toEqual({ away: 'lost', trying: false, since: missed, nextAt: missed + 1000 });
-    /* A look on its way has no next one yet; the second miss keeps the first moment, and the wait doubles. */
+    expect(connection.snapshot()).toEqual({ away: 'lost' });
     await vi.advanceTimersByTimeAsync(1000);
-    expect(connection.snapshot()).toEqual({ away: 'lost', trying: false, since: missed, nextAt: missed + 1000 + 2000 });
+    expect(connection.snapshot()).toEqual({ away: 'lost' });
     await vi.advanceTimersByTimeAsync(2000);
-    expect(connection.snapshot()).toEqual({ away: null, trying: false, since: null, nextAt: null });
+    expect(connection.snapshot()).toEqual({ away: null });
   });
 
   it('says an update when a request was refused for one and the server stays away, through the restart that follows', async () => {
@@ -135,16 +132,6 @@ describe('looking again until the server answers', () => {
     await vi.advanceTimersByTimeAsync(5000);
     connection.lost();
     await vi.advanceTimersByTimeAsync(0);
-    expect(connection.snapshot().away).toBe('lost');
-  });
-
-  it('says an update when one is known to run and the server cannot be reached', async () => {
-    answering(refusedNow);
-    connection.updateRuns(true);
-    connection.lost();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(connection.snapshot().away).toBe('updating');
-    connection.updateRuns(false);
     expect(connection.snapshot().away).toBe('lost');
   });
 
@@ -181,15 +168,5 @@ describe('looking again until the server answers', () => {
     connection.lost();
     await vi.advanceTimersByTimeAsync(0);
     expect(asked()).toBe(2);
-  });
-
-  it('tells the page a look is on its way', async () => {
-    let finish!: (res: Response) => void;
-    fetchStub.mockImplementationOnce(() => new Promise<Response>(resolve => (finish = resolve)));
-    connection.lost();
-    expect(connection.snapshot().trying).toBe(true);
-    finish(hop());
-    await vi.advanceTimersByTimeAsync(0);
-    expect(connection.snapshot()).toMatchObject({ away: 'lost', trying: false });
   });
 });

@@ -355,11 +355,6 @@ it('keeps held skeleton rows stationary when a load turns slow or fails', async 
   expect(container.querySelector('.tr-held .tr-row:first-child .load-busy')).not.toBeNull();
   expect(container.querySelector('.tr-held .tr-held-fail')).toBeNull();
 
-  rerender(<LanguageProvider><HeldList rows={6} load={makeLoad('slow')} /></LanguageProvider>);
-  expect(container.querySelectorAll('.tr-held .tr-rows > .tr-row')).toHaveLength(6);
-  expect(container.querySelector('.tr-held .tr-row:first-child > .tr-row-line > .tr-held-fail > .load-fail.slow')).not.toBeNull();
-  expect(container.querySelector('.tr-held .load-busy')).toBeNull();
-
   rerender(<LanguageProvider><HeldList rows={6} load={makeLoad('failed', new Error('boom'))} /></LanguageProvider>);
   expect(container.querySelectorAll('.tr-held .tr-rows > .tr-row')).toHaveLength(6);
   expect(container.querySelector('.tr-held .tr-row:first-child > .tr-row-line > .tr-held-fail > .load-fail:not(.slow)')).not.toBeNull();
@@ -405,7 +400,7 @@ it('measures and observes stalled notice room on row borders and short lists', (
     return origStyle(el);
   });
   try {
-    const load: Load = { phase: 'slow', ring: false, failure: null, asked: 0, retry: vi.fn() };
+    const load: Load = { phase: 'failed', ring: false, failure: null, asked: 0, retry: vi.fn() };
     const { container, rerender, unmount } = render(<LanguageProvider><HeldList rows={6} load={load} /></LanguageProvider>);
     const fail = container.querySelector<HTMLElement>('.tr-held-fail')!;
     const rows = container.querySelector<HTMLElement>('.tr-held .tr-rows')!;

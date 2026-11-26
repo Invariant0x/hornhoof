@@ -386,9 +386,11 @@ describe('the card of a plan that does not work', () => {
   });
 
   it.each([
-    ['en', 'Ivan has not run the install command yet.', 'Valid for 21 more hours.', ['Copy', 'Remove']],
-    ['ru', 'Владелец (Ivan) еще не выполнил команду установки.', 'Действует еще 21 ч.', ['Копировать', 'Удалить']],
-  ])('puts the install command of a plan waiting for its machine in its block, in %s', async (language, words, lifetime, actions) => {
+    ['en', 'Ivan has not run the install command yet.', 'Valid for 21 more hours.', ['Copy', 'Remove'],
+      'The command works once. The nodes keep running in the background after the terminal is closed.'],
+    ['ru', 'Владелец (Ivan) еще не выполнил команду установки.', 'Действует еще 21 ч.', ['Копировать', 'Удалить'],
+      'Команда сработает один раз. Ноды продолжат работать в фоне и после закрытия терминала.'],
+  ])('puts the install command of a plan waiting for its machine in its block, in %s', async (language, words, lifetime, actions, background) => {
     localStorage.setItem('hh-lang', language);
     mockApi({ ...only(kimi), 'GET /api/nodes/commands': [200, { commands: [installFor(kimi)] }] });
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
@@ -396,15 +398,27 @@ describe('the card of a plan that does not work', () => {
     const card = screen.getByRole('article', { name: 'Kimi, Ivan' });
     expect(blocks(card)).toEqual(['blk blk-fix']);
     expect(workingParts(card)).toEqual([]);
-    /* Why, the steps to its work, the command and the one for Windows, each with Copy, and how long they work, then Remove:
-       one block, nothing beside it. */
-    const [why, steps, install, last, ...rest] = [...card.querySelector<HTMLElement>('.blk-fix')!.children] as HTMLElement[];
+    /* The first step holds both install commands. The lifetime follows the steps, before Remove. */
+    const block = card.querySelector<HTMLElement>('.blk-fix')!;
+    const [why, install, last, ...rest] = [...block.children] as HTMLElement[];
+    const [steps, ...lifetimeLines] = [...install!.children] as HTMLElement[];
     expect(why!.textContent).toBe(words);
     expect(steps).toHaveRole('list');
-    await waitFor(() => expect(install).toHaveTextContent(withKey(COMMAND)));
-    expect(install).toHaveTextContent(lifetime);
-    expect(buttons(install!)).toEqual([actions[0], actions[0]]);
+    expect(within(steps!).getAllByRole('listitem')).toHaveLength(4);
+    const currentStep = within(steps!).getByRole('listitem', { current: 'step' });
+    expect(currentStep).toBe(steps!.firstElementChild);
+    const commands = await waitFor(() => within(currentStep).getAllByRole('group'));
+    const windows = `${withKey('powershell -ExecutionPolicy Bypass -c "& ([scriptblock]::Create((irm https://hq.acme.com/install.ps1))) --join CODE123')}"`;
+    expect(commands).toHaveLength(2);
+    for (const [index, group] of commands.entries()) {
+      const code = within(group).getByRole('code');
+      const copy = within(group).getByRole('button', { name: actions[0] });
+      expect(code.textContent).toBe([withKey(COMMAND), windows][index]);
+      expect(code.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(lifetimeLines.map(line => line.textContent)).toEqual([lifetime, background]);
     expect(buttons(last!)).toEqual([actions[1]]);
+    expect(buttons(card)).toEqual([actions[0], actions[0], actions[1]]);
     expect(rest).toEqual([]);
   });
 

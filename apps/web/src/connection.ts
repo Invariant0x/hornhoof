@@ -4,11 +4,13 @@
    browser's own request, and an update answers 503 "maintenance". Each tells the page the server is away, and the page asks
    it again with a growing wait until the server answers, then asks every screen to fetch what it shows anew, with no reload. */
 
-export type Away = 'lost' | 'updating';
-/* What the layer over the page shows: nothing while the server answers, or why it does not. trying: a look is on its way.
-   since: when the server was first missed, and nextAt: when the next look comes, both in ms of the page's clock, null where
-   there is none. */
-export type Link = { away: Away | null; trying: boolean; since: number | null; nextAt: number | null };
+import type { Away } from '@hornhoof/protocol/service-lines';
+import { askAgainAfter } from './backoff';
+
+export type { Away };
+/* What the page knows of the server: nothing while it answers, or why it does not. The service road (service-state.ts) turns
+   that into the window and the strip; no wait or countdown is told to the person. */
+export type Link = { away: Away | null };
 
 /* Puts fn in the set and gives back the way to take it out. */
 export function joined(set: Set<() => void>, fn: () => void): () => void {
@@ -39,8 +41,6 @@ export function awayOf(status: number, data: unknown): Away | null {
   return status >= 500 && (said.reason === 'starting' || said.reason === 'no_leader') ? 'lost' : null;
 }
 
-/* The wait before the next look at the server, which grows to the cap and starts over once it answers. */
-const WAITS_MS = [1_000, 2_000, 4_000, 8_000, 10_000];
 /* A look that does not answer within this is a look that failed. */
 const LOOK_MS = 8_000;
 /* A failed request is a reason to look, no more often than this: a hop that keeps answering wrong for one path while the
@@ -49,27 +49,20 @@ const SUSPECT_EVERY_MS = 5_000;
 /* What the server answers to anyone, signed in or not; an answer in its own words, 404 included, is the server. */
 const LOOK_AT = '/api/build';
 
-let link: Link = { away: null, trying: false, since: null, nextAt: null };
+let link: Link = { away: null };
 let phase: 'ok' | 'looking' | 'away' = 'ok';
 let kind: Away = 'lost';
-let updateRuns = false;
 let tries = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
-/* When this outage began and when the next look comes; null while none stands. */
-let since: number | null = null;
-let nextAt: number | null = null;
 let lookedAt = Number.NEGATIVE_INFINITY;
 /* The look on its way, if any, by its number: the answer of one that was given up for a newer look counts for nothing. */
 let looks = 0;
-let busy = false;
 const watchers = new Set<() => void>();
 const returns = new Set<() => void>();
 
-const shown = (): Away => (kind === 'updating' || updateRuns ? 'updating' : 'lost');
-
 function publish(): void {
-  const next: Link = { away: phase === 'away' ? shown() : null, trying: phase !== 'ok' && busy, since, nextAt };
-  if (next.away === link.away && next.trying === link.trying && next.since === link.since && next.nextAt === link.nextAt) return;
+  const next: Link = { away: phase === 'away' ? kind : null };
+  if (next.away === link.away) return;
   link = next;
   for (const watch of [...watchers]) watch();
 }
@@ -96,8 +89,6 @@ function back(): void {
   phase = 'ok';
   tries = 0;
   kind = 'lost';
-  since = null;
-  nextAt = null;
   if (timer) clearTimeout(timer);
   timer = null;
   publish();
@@ -108,29 +99,23 @@ function back(): void {
 
 function wait(): void {
   if (timer) clearTimeout(timer);
-  const ms = WAITS_MS[Math.min(tries, WAITS_MS.length - 1)]!;
+  const ms = askAgainAfter(tries);
   tries++;
-  nextAt = Date.now() + ms;
   timer = setTimeout(() => void look(), ms);
 }
 
 async function look(): Promise<void> {
   if (timer) clearTimeout(timer);
   timer = null;
-  nextAt = null;
   const mine = ++looks;
-  busy = true;
-  publish();
   const answer = await looked();
   if (mine !== looks) return;
-  busy = false;
   lookedAt = Date.now();
   const away = answer ? awayOf(answer.status, answer.data) : 'lost';
   if (away === null) return back();
   /* Once an update was heard of, the layer keeps saying so through the restart that follows it. */
   if (away === 'updating') kind = 'updating';
   phase = 'away';
-  since ??= Date.now();
   wait();
   publish();
 }
@@ -152,11 +137,6 @@ function lost(why: Away = 'lost'): void {
 
 export const connection = {
   lost,
-  /* An update is known to run, from what the update panel reads: while the server is away then, it says so. */
-  updateRuns(running: boolean): void {
-    updateRuns = running;
-    publish();
-  },
   /* The person asked to look now. */
   tryNow(): void {
     if (phase === 'ok') return;
@@ -172,12 +152,8 @@ export const connection = {
     if (timer) clearTimeout(timer);
     timer = null;
     looks++;
-    busy = false;
     phase = 'ok';
     kind = 'lost';
-    since = null;
-    nextAt = null;
-    updateRuns = false;
     tries = 0;
     lookedAt = Number.NEGATIVE_INFINITY;
     publish();

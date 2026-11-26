@@ -263,7 +263,7 @@ export function HeldList({ rows, load }: { rows: number | null; load: Load }) {
     if (rows === null) setFill(rowsToFill(list.current));
   }, [rows]);
   const held = rows ?? fill;
-  const stalled = load.phase === 'slow' || load.phase === 'failed';
+  const stalled = load.phase === 'failed';
   const room = useFailRoom(rowsList, fail, stalled, `${load.phase}:${load.asked}:${held}`);
   const first = <LoadLine load={load} words={t.load.tasks} />;
   return (

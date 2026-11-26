@@ -73,6 +73,7 @@ export const en = {
       telegram: 'Set up Telegram so I can talk to you there', assistant: 'Set up my personal assistant',
     },
   },
+  boot: { loading: 'Loading' },
   common: {
     loading: 'Loading…',
     /* Something under way that took longer than its one limit: it may still finish. */
@@ -104,18 +105,13 @@ export const en = {
     task: 'Loading the task…',
     limits: 'Loading limits…',
     failed: {
-      offline: 'Could not load: no connection to the server.',
-      timeout: 'Could not load: the server did not answer in 30\u00a0seconds.',
       server: 'Could not load: something went wrong on the server.',
       provider: 'Could not load the limits: the provider did not answer.',
     },
     hint: {
-      offline: 'Check the internet connection, then press "Retry".',
-      timeout: 'What is already on the screen stays. Press "Retry" to ask again.',
       server: 'What is already on the screen stays. If "Retry" does not help, try again in a few minutes.',
       provider: 'The rest of the card works. Press "Retry" to ask the provider again.',
     },
-    slowHint: 'You can wait or press "Retry".',
   },
   app: {
     notResponding: 'Hornhoof is not responding',
@@ -1023,6 +1019,8 @@ export const en = {
       current: '(now)',
       failedMark: '(did not work)',
       now: {
+        password: 'Enter your Hornhoof password to get the command.',
+        copy: 'Copy the command below, paste it into Terminal on a Mac or Linux or into PowerShell on Windows, and press Enter.',
         run: 'Copy the command below, paste it into Terminal on a Mac or Linux or into PowerShell on Windows, and press Enter. This page moves on by itself once your computer connects.',
         newCommand: 'Press "Make a new command" below, then run the new command on your computer.',
         connect: 'Hornhoof is starting on your computer. Keep it on and connected to the internet; this page moves on by itself.',
@@ -1558,7 +1556,7 @@ export const en = {
       by: (name: string) => `${name} typed in this terminal last.`,
       nobody: 'Hornhoof cannot tell who wrote them.',
     },
-    inputDropped: 'Too much text was typed while the terminal was disconnected. Wait for it to connect, then type again.',
+    inputDropped: 'Too much text was typed before the terminal was ready. Wait until it is ready, then type again.',
     turnRefused: {
       busy: 'What was just typed got no turn of its own: it went into the turn that was running. Check the answer there, and type it again if it is missing.',
       unknown_words: 'The agent is answering words, but Hornhoof could not tell who wrote them, so no turn opened and its tools are closed for this answer. Please type your message again.',

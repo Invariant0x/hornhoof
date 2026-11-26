@@ -84,11 +84,11 @@ function ConnectNow({ sub, connecting: c, now, onRetry, onCancel }: Props) {
   const words = t.subs.connection;
   const name = subName(t, sub);
   if (c.state === 'connecting') return <><NowLine connecting={c} now={now} /><p className="conn-keep">{words.keepOn}</p></>;
-  const load: Load = { phase: c.state === 'too_long' ? 'slow' : 'failed', ring: false, failure: null, asked: 0, retry: onRetry };
+  const load: Load = { phase: 'failed', ring: false, failure: null, asked: 0, retry: onRetry };
   return (
     <>
       {c.state === 'too_long' && <NowLine connecting={c} now={now} />}
-      <LoadFail load={load} onRetry={onRetry} retryLabel={words.retryLabel(name)} words={[signInError(t, c), nextAfter(t, sub, c)]} slowHint={words.slowHint} ring={false}
+      <LoadFail load={load} onRetry={onRetry} retryLabel={words.retryLabel(name)} words={[signInError(t, c), nextAfter(t, sub, c)]} slowHint={c.state === 'too_long' ? words.slowHint : undefined} ring={false}
         stop={{ text: words.cancel, label: words.cancelLabel(name), run: onCancel }} />
     </>
   );

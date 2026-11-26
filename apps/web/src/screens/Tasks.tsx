@@ -10,7 +10,7 @@ import { CEO_DECIDES, DecidedByNote } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
 import { DepartmentMark, PersonMark } from '../ui/TrackerMarks';
-import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
+import { shownLoadFailure, useLoadFailure, useServiceSaysIt } from '../ui/LoadFailure';
 import { Busy, Hold, LoadState, noneYet, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
 import { CopyGaveUps, CopySchemaFailures, MachineAway } from '../ui/MachineAway';
 import { MachineLow } from '../ui/MachineLow';
@@ -75,8 +75,8 @@ type TrackerReads = { places: unknown; tasks: unknown; tasksFailure: unknown; go
 
 /* What the tracker could not load, said on top of the page. What the work and the goals did not bring stands where they
    would instead, while they have not come. */
-function brokenOf(r: TrackerReads, updateSaysIt: boolean): unknown {
-  const shown = (f: unknown) => shownLoadFailure(f, updateSaysIt);
+function brokenOf(r: TrackerReads, serviceSaysIt: boolean): unknown {
+  const shown = (f: unknown) => shownLoadFailure(f, serviceSaysIt);
   return shown(r.places) ?? (r.tasks ? shown(r.tasksFailure) : null) ?? (r.goals ? shown(tracked(r.goalsFailure)) : null) ?? shown(tracked(r.pipelinesFailure));
 }
 
@@ -579,7 +579,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const { org } = useOrg();
   const { taskDepartments: places, failure: placesFailure } = useTaskDepartments();
   const { tasks, failure, load: loadTasks, cancel: cancelTasks } = useTasks({ status: 'all' });
-  const updateSaysIt = useUpdateSaysIt();
+  const serviceSaysIt = useServiceSaysIt();
   const { goals: goalList, failure: goalsFailure, load: loadGoals } = useGoals();
   /* The work and the goals come with the shared indicator where they will stand, and say why when they do not. A server
      without goals yet answers that it has none. */
@@ -716,9 +716,9 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   })();
 
   /* A server without goals and pipelines yet answers that it has none: the tracker shows the tasks without them. */
-  const mainFailure = shownLoadFailure(placesFailure, updateSaysIt) ?? shownLoadFailure(failure, updateSaysIt);
+  const mainFailure = shownLoadFailure(placesFailure, serviceSaysIt) ?? shownLoadFailure(failure, serviceSaysIt);
   if (unavailableFailure(mainFailure)) return <RouteUnavailable onHome={onHome} />;
-  const broken = brokenOf({ places: placesFailure, tasks, tasksFailure: failure, goals: goalList, goalsFailure, pipelinesFailure }, updateSaysIt);
+  const broken = brokenOf({ places: placesFailure, tasks, tasksFailure: failure, goals: goalList, goalsFailure, pipelinesFailure }, serviceSaysIt);
   /* What waits: for people in the company on their page, else for the person. */
   const waiting = section.kind === 'people' ? (
     <WaitingForPeople

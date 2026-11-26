@@ -6,7 +6,8 @@ import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
+import { MIGRATIONS, migrateInOrder } from '../src/db/client.js';
+import { migrationsUpTo } from './migrations-fixture.js';
 import { freshPglite } from './helpers-db.js';
 
 type Entry = { idx: number; version: string; when: number; tag: string; breakpoints: boolean };
@@ -73,6 +74,20 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
 }
 
 describe('migration histories merged in turn 5', () => {
+  it('ends a fresh install and one of the turn before with the index of retries that wait', async () => {
+    const retryIndex = async (client: PGlite) => (await client.query(`select 1 from pg_indexes where indexname = 'jobs_agent_conversation_retry_waiting'`)).rows.length;
+    const fresh = await freshPglite();
+    onTestFinished(() => fresh.close());
+    await migrateInOrder(drizzle(fresh), { migrationsFolder: MIGRATIONS }, migrate);
+    expect(await retryIndex(fresh)).toBe(1);
+    const recent = await freshPglite();
+    onTestFinished(() => recent.close());
+    await migrateInOrder(drizzle(recent), { migrationsFolder: await migrationsUpTo('0171_file_store_backup') }, migrate);
+    expect(await retryIndex(recent)).toBe(0);
+    await migrateInOrder(drizzle(recent), { migrationsFolder: MIGRATIONS }, migrate);
+    expect(await retryIndex(recent)).toBe(1);
+  });
+
   it.each(['main', 'turn-5'] as const)('upgrades an existing %s installation with all retained rows and one record per migration', async branch => {
     const source = await freshPglite();
     onTestFinished(() => source.close());
@@ -117,8 +132,7 @@ describe('migration histories merged in turn 5', () => {
     const copy = new PGlite({ loadDataDir: await source.dumpDataDir('none') });
     onTestFinished(() => copy.close());
     const db = drizzle(copy);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-    await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
+    await migrateInOrder(db, { migrationsFolder: MIGRATIONS }, migrate);
 
     for (const [index, table] of tables.entries()) {
       const omitted = table in newColumns ? newColumns[table as keyof typeof newColumns] : [];
@@ -137,11 +151,11 @@ describe('migration histories merged in turn 5', () => {
     ]));
     const indexes = await copy.query<{ indexname: string }>(`select indexname from pg_indexes where indexname in (
       'agent_events_failure_case', 'agent_events_operations_pending', 'agent_events_program_history', 'agent_events_silent_job',
-      'tasks_turn_id', 'tasks_product_id', 'tasks_external_wait_until', 'node_codes_active_owner')`);
-    expect(indexes.rows).toHaveLength(8);
+      'tasks_turn_id', 'tasks_product_id', 'tasks_external_wait_until', 'node_codes_active_owner', 'jobs_agent_conversation_retry_waiting')`);
+    /* 0172's index on the not_before of 0046 too: the migration a merged branch left below the newest record goes first. */
+    expect(indexes.rows).toHaveLength(9);
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-    await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
+    await migrateInOrder(db, { migrationsFolder: MIGRATIONS }, migrate);
     expect((await db.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows).toEqual(recorded);
     const sourceRecorded = (await oldDb.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows;
     expect(sourceRecorded).toEqual(recordedBefore);
