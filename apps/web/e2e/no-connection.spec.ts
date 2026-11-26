@@ -165,6 +165,8 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
         let finishSetup: (() => void) | undefined;
         try {
           const startup = await context.newPage();
+          // The app restores its last company skin. The standalone response only knows the browser's preference.
+          if (colorScheme === 'light') await startup.addInitScript(() => localStorage.setItem('hh-theme', 'light'));
           await serveApi(startup);
           // Keep setup pending until the screenshot is taken. Release it before closing the context.
           const setup = new Promise<void>(resolve => { finishSetup = resolve; });
@@ -181,6 +183,18 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
           const updating = update.locator('.boot-screen');
           await expect(loading).toHaveText(en.common.loading);
           await expect(updating).toHaveText('Updating…');
+          await expect(startup.locator('html')).toHaveAttribute('data-theme', colorScheme === 'light' ? 'light' : 'cyberpunk');
+          if (colorScheme === 'light') {
+            const paint = (page: Page) => page.evaluate(() => ({
+              background: getComputedStyle(document.body).backgroundColor,
+              dome: getComputedStyle(document.querySelector('.boot-mark .mk-dome')!).stroke,
+              base: getComputedStyle(document.querySelector('.boot-mark .mk-base')!).stroke,
+              dot: getComputedStyle(document.querySelector('.boot-mark .mk-dot')!).fill,
+            }));
+            const light = { background: 'rgb(230, 235, 240)', dome: 'rgb(0, 163, 189)', base: 'rgb(15, 27, 39)', dot: 'rgb(15, 27, 39)' };
+            expect(await paint(startup)).toEqual(light);
+            expect(await paint(update)).toEqual(light);
+          }
           expect(await loading.boundingBox()).toEqual({ x: 0, y: 0, width, height });
           expect(await updating.boundingBox()).toEqual(await loading.boundingBox());
           expect(await updating.locator('.boot-mark').boundingBox()).toEqual(await loading.locator('.boot-mark').boundingBox());
