@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { asc, eq, sql } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEventArchives, agentEvents, agents, companies, departments, jobs, people, subscriptions, turns, type AgentEventKind } from '../src/db/schema.js';
 import { FIRST_CONTACT_ACTION } from '../src/modules/conversation/prompt.js';
 import { archiveRound, HISTORY_DAYS } from '../src/modules/events/archive.js';
@@ -187,5 +187,29 @@ describe('the old history of agents', () => {
     expect(shown.some(text => text.startsWith('The key is') && !text.includes(secret))).toBe(true);
     const [gone] = rowsOf<{ drop_at: Date | null }>(await s.db.execute(sql`SELECT drop_at FROM net.files WHERE sha256 = ${was!.sha256}`));
     expect(gone?.drop_at ?? null).not.toBeNull();
+  });
+
+  it('waits for copies of the replacement when a secret is hidden during the copy check', async () => {
+    const s = await stand();
+    const secret = 'sk-test-copy-check-0123456789abcdef';
+    const old = await s.talk(daysAgo(20), [`A key: ${secret}`]);
+    const copies = vi.spyOn(s.ctx.files, 'copiesStand').mockResolvedValue(false);
+    await s.round();
+    const [before] = await s.archives();
+    expect(before!.clearedAt).toBeNull();
+
+    copies.mockImplementationOnce(async () => {
+      await s.db.transaction(tx => hideSecretIn(tx as unknown as typeof s.db, s.acme.id, s.owner.id, secret, storedTexts(s.ctx, tx)));
+      return true;
+    });
+    expect(await s.round()).toMatchObject({ cleared: 0 });
+    const [replacement] = await s.archives();
+    expect(replacement!.sha256).not.toBe(before!.sha256);
+    expect(replacement!.clearedAt).toBeNull();
+    const stillHere = new Set(await s.raw());
+    expect(old.archived.every(event => stillHere.has(event.id))).toBe(true);
+
+    copies.mockImplementation(async sha256 => sha256 === replacement!.sha256);
+    expect(await s.round()).toMatchObject({ cleared: old.archived.length });
   });
 });
