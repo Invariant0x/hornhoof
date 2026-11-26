@@ -37,15 +37,21 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     await expect(card).toBeVisible();
     const input = card.getByRole('spinbutton', { name: ui.field });
     expect(await input.count()).toBe(1);
-    await expect(input).toHaveValue('4');
-    await input.fill('6');
-    await input.press('Enter');
-    await expect(input).toBeFocused();
-    await expect(input).toHaveAttribute('aria-invalid', 'true');
-    const problem = card.getByText(ui.problem, { exact: true });
-    await expect(problem).toBeVisible();
     const settings = card.locator('form').filter({ has: page.getByRole('spinbutton', { name: ui.field }) });
     expect(await settings.count()).toBe(1);
+    await expect(input).toHaveValue('4');
+    await input.fill('6');
+    await settings.getByRole('button', { name: ui.table.common.save, exact: true }).click();
+    expect(await input.evaluate(field => field === document.activeElement)).toBe(true);
+    await expect(input).toBeFocused();
+    await expect(input).toHaveAttribute('aria-invalid', 'true');
+    const ring = await input.evaluate(field => {
+      const style = getComputedStyle(field);
+      return field.matches(':focus-visible') && style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0;
+    });
+    expect(ring).toBe(true);
+    const problem = card.getByText(ui.problem, { exact: true });
+    await expect(problem).toBeVisible();
     await settings.evaluate(form => form.scrollIntoView({ block: 'center', inline: 'nearest' }));
     const viewport = page.viewportSize()!;
     for (const target of [input, problem]) {
