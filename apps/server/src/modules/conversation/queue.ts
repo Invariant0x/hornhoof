@@ -578,10 +578,8 @@ async function dueTurn(ctx: Ctx, agent: PlanAgent & { name: string; switchedOffA
   await tellOperationsOfHold(ctx, agent, sub);
   const mayGo = turnsThatMayGo(agent, until, spent);
   const now = new Date(Date.now());
-  const [due] = await ctx.db.select({ job: jobs }).from(jobs).leftJoin(tasks, eq(tasks.id, jobs.taskId))
-    .where(and(mayGo, or(isNull(jobs.notBefore), lte(jobs.notBefore, now))))
-    .orderBy(turnPriority, desc(sql`${jobs.notBefore} is not null`), asc(jobs.inboxWake), asc(jobs.createdAt), firstTurnEvent, asc(jobs.id)).limit(1);
-  if (due) return due.job;
+  const [job] = await ctx.db.select().from(jobs).where(and(mayGo, or(isNull(jobs.notBefore), lte(jobs.notBefore, now)))).orderBy(desc(sql`${jobs.notBefore} is not null`), asc(jobs.inboxWake), asc(jobs.createdAt)).limit(1);
+  if (job) return job;
   const [later] = await ctx.db.select({ at: jobs.notBefore }).from(jobs).where(and(mayGo, gt(jobs.notBefore, now))).orderBy(asc(jobs.notBefore)).limit(1);
   /* The earlier wake stands; the one at the reset is set again when the earlier one comes. */
   if (later?.at && (!reset || +later.at < Date.parse(reset))) pumpAt(ctx, agent.id, later.at.toISOString(), 0);
