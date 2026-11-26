@@ -105,6 +105,7 @@ type CommandBoxProps = {
   command: string;
   trust?: string;
   password?: string;
+  promptPerCard?: boolean;
   showComputerConsent?: boolean;
   run?: string;
   renderSteps?: (step: CommandStepContent) => ReactNode;
@@ -115,10 +116,10 @@ type CommandBoxProps = {
    it is made first, with the password the screen holds or else asked for. Only where the browser can make no key does
    the command shows without one, with a line that says so. Any other command
    shows as it is. */
-export function CommandBox({ command, trust, password, showComputerConsent = true, run, renderSteps }: CommandBoxProps) {
+export function CommandBox({ command, trust, password, promptPerCard = false, showComputerConsent = true, run, renderSteps }: CommandBoxProps) {
   const t = useT();
   const joins = command.includes(' --join ');
-  const { publicKey, prompt } = useOwnerKey();
+  const { publicKey, prompt } = useOwnerKey(promptPerCard);
   const [key, setKey] = useState<string | null>(null);
   const [left, setLeft] = useState(false);
   const [tries, setTries] = useState(0);

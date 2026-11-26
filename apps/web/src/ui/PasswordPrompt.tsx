@@ -47,8 +47,8 @@ export function PasswordPrompt({ purpose, onPassword, onCancel }: { purpose: 'ma
   );
 }
 
-/* Each card shows its own field. A successful answer supplies the same public key to all waiting cards. */
-type KeyWaiters = Set<(key: string | null) => void>;
+/* Cards for one shared install can each show a field. One answer supplies the key to all waiting commands. */
+type KeyWaiters = { finish: Set<(key: string | null) => void>; prompts: number };
 type Question = { cancel(): void; answer(key: string): void };
 let open: KeyWaiters | null = null;
 
@@ -56,7 +56,7 @@ let open: KeyWaiters | null = null;
 export const NO_KEY_HERE = '';
 
 /* The public half of the viewer's key, for commands that carry it. A viewer without a key makes one with their password. */
-export function useOwnerKey(): { publicKey(signal: AbortSignal, password?: string): Promise<string | null>; prompt: ReactNode } {
+export function useOwnerKey(promptPerCard: boolean): { publicKey(signal: AbortSignal, password?: string): Promise<string | null>; prompt: ReactNode } {
   const [mine, setMine] = useState<Question | null>(null);
 
   const publicKey = useCallback(async (signal: AbortSignal, password?: string): Promise<string | null> => {
@@ -68,22 +68,32 @@ export function useOwnerKey(): { publicKey(signal: AbortSignal, password?: strin
     if (server) return server.publicKey;
     if (!canMakeKey()) return NO_KEY_HERE;
     if (password !== undefined) return (await makeKey(password)).publicKey;
-    const waiters = open ??= new Set();
+    const promptHere = promptPerCard || open === null;
+    const waiters = open ??= { finish: new Set(), prompts: 0 };
     return new Promise(resolve => {
-      const cancel = () => finish(null);
-      const question: Question = { cancel, answer: key => { for (const waiter of waiters) waiter(key); } };
+      const cancel = () => {
+        finish(null);
+        if (waiters.prompts === 0) for (const waiter of waiters.finish) waiter(null);
+      };
+      const question: Question = { cancel, answer: key => { for (const waiter of waiters.finish) waiter(key); } };
       function finish(key: string | null) {
-        waiters.delete(finish);
-        if (waiters.size === 0 && open === waiters) open = null;
+        if (!waiters.finish.delete(finish)) return;
         signal.removeEventListener('abort', cancel);
-        if (!signal.aborted) setMine(current => current === question ? null : current);
+        if (promptHere) {
+          waiters.prompts--;
+          if (!signal.aborted) setMine(current => current === question ? null : current);
+        }
+        if (waiters.finish.size === 0 && open === waiters) open = null;
         resolve(key);
       }
-      waiters.add(finish);
+      waiters.finish.add(finish);
       signal.addEventListener('abort', cancel, { once: true });
-      setMine(question);
+      if (promptHere) {
+        waiters.prompts++;
+        setMine(question);
+      }
     });
-  }, []);
+  }, [promptPerCard]);
 
   if (!mine) return { publicKey, prompt: null };
   const onPassword = async (password: string): Promise<boolean> => {

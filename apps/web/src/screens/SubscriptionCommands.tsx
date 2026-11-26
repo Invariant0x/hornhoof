@@ -10,6 +10,8 @@ export function commandForPlan(commands: ShownCommand[], sub: SubView, now: numb
   return commands.find(c => c.kind === 'plans' && liveCommand(c, now) && (c.subscriptionIds ? c.subscriptionIds.includes(sub.id) : c.plans.includes(sub.label))) ?? null;
 }
 
+const sharedInstall = (command: ShownCommand): boolean => (command.subscriptionIds?.length ?? command.plans.length) > 1;
+
 export function SubscriptionCommandBlocks({ subscriptions, commands, now, onDone }: {
   subscriptions: SubView[]; commands: ShownCommand[]; now: number; onDone: (command: ShownCommand, subscriptionId: string) => void;
 }) {
@@ -21,7 +23,8 @@ export function SubscriptionCommandBlocks({ subscriptions, commands, now, onDone
     return <section key={sub.id} aria-label={title}>
       <Edge className="panel" cut={12}>
         <h2>{title}</h2>
-        <CommandBox command={command.command} run={t.subs.runThis} renderSteps={install => <PlanSteps sub={sub} command={command} install={install} />} />
+        <CommandBox command={command.command} promptPerCard={sharedInstall(command)} run={t.subs.runThis}
+          renderSteps={install => <PlanSteps sub={sub} command={command} install={install} />} />
         <CommandLifetime expiresAt={command.expiresAt} />
         <div className="actions"><button className="btn" type="button" onClick={() => onDone(command, sub.id)}>{t.common.done}</button></div>
       </Edge>
@@ -42,7 +45,8 @@ export function SubscriptionInstall({ command, sub, ownerId, showSteps, signing,
   </>;
 
   return <div className="plan-command">
-    <CommandBox command={command.command} renderSteps={showSteps ? install => <PlanSteps sub={sub} command={command} install={install} /> : undefined} />
+    <CommandBox command={command.command} promptPerCard={sharedInstall(command)}
+      renderSteps={showSteps ? install => <PlanSteps sub={sub} command={command} install={install} /> : undefined} />
     <CommandLifetime expiresAt={command.expiresAt} />
   </div>;
 }
