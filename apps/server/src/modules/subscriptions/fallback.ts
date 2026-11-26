@@ -11,6 +11,7 @@ import { budgetUntil, modelLimitUntil } from '../conversation/limits.js';
 import { enqueueTurn, insertTurn, pump } from '../conversation/queue.js';
 import { planHeld, planWaitsFor } from '../conversation/state.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
+import { repinMoved } from '../tasks/echelons-repin.js';
 import { orchestratorServing, runsTier, servingSubscriptions } from '../tools/staff.js';
 
 /* Hornhoof's own doing: no person decided it and the orchestrator did not act for one. */
@@ -115,6 +116,8 @@ async function moveAgent(ctx: Ctx, agent: Agent, next: { subscriptionId: string;
   ctx.bus.publish(agent.companyId, { type: 'org' });
   /* Who sees an agent changes with the plan it runs on. */
   ctx.bus.accessChanged(agent.companyId);
+  /* Its checking stages follow it to the plan it runs on now, or go back to the head with the reason. */
+  await repinMoved(ctx, [agent.id]);
   return true;
 }
 

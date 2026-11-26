@@ -35,7 +35,7 @@ input[type='number']::-webkit-outer-spin-button, input[type='number']::-webkit-i
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .muted { color: var(--muted); }
 
-.app-layout { display: grid; block-size: 100%; grid-template-rows: minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); }
+.app-layout { --agent-dock-height: 44px; display: grid; block-size: 100%; grid-template-rows: minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); }
 /* Even fixed panels use the screen's box, so the version keeps a separate row below it. */
 .app-screen { min-inline-size: 0; overflow: auto; contain: paint; }
 .app-screen:has(> .stage) { scrollbar-gutter: stable; }
@@ -372,13 +372,53 @@ select:disabled { opacity: .55; }
   background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 16px 40px var(--shadow);
 }
 .dialog:focus { outline: none; }
-/* The layer over the page while the server is away (#1938, #2049): only the Hornhoof logo and one line, centred on a plain
-   background above every other layer while the page under it stays where it stands. */
-.conn-layer { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: var(--bg); }
-.conn-layer:focus { outline: none; }
-.conn { display: grid; justify-items: center; gap: 16px; max-inline-size: min(100%, 60ch); text-align: center; }
-.conn-mark { display: block; width: 48px; height: 48px; }
-.conn > p { margin: 0; color: var(--muted); font: 400 14px/1.45 var(--f-body); overflow-wrap: anywhere; }
+/* The service window and strip share the same mark and line. */
+.svc-mark { inline-size: var(--svc-mark, 72px); block-size: var(--svc-mark, 72px); flex: none; }
+.svc-mark .mk-dome { fill: none; stroke: var(--cyan-ink); stroke-width: 2.4; }
+.svc-mark .mk-base { stroke: var(--ink); stroke-width: 2.4; fill: none; }
+.svc-mark .mk-dot { fill: var(--ink); }
+.svc-line { font-family: var(--f-display); font-weight: 600; font-size: var(--svc-line, 18px); line-height: 1.3; color: var(--ink); overflow-wrap: break-word; text-wrap: balance; }
+/* The strip sits out of the page flow, 8 px below the menu on desktop. */
+.svc-strip.glass {
+  position: fixed; z-index: 41; inset-block-start: var(--svc-top, 8px); inset-inline: 0; margin-inline: auto; inline-size: fit-content; max-inline-size: calc(100vw - 16px);
+  min-block-size: 36px; max-block-size: calc(4 * 1.3 * 14px + 16px + 2px); overflow-y: auto; box-sizing: border-box; padding-block: 8px; padding-inline: 16px;
+  display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; background-color: var(--surface2); border: 1px solid var(--line2);
+  --svc-mark: 24px; --svc-line: 14px; animation: svc-strip-in 200ms ease-out;
+}
+.svc-strip .svc-line { text-wrap: pretty; text-align: center; }
+/* The window stands on the shared scrim, above every other window. */
+.dialog-back.svc-back { z-index: 50; animation: svc-fade-in 160ms ease-out; }
+.svc-window.dialog {
+  position: relative; inline-size: 100%; max-inline-size: 360px; box-sizing: border-box; padding-block: 36px 32px; padding-inline: 32px; overflow: visible;
+  display: grid; justify-items: center; align-content: start; gap: 16px; text-align: center; --svc-mark: 72px; --svc-line: 18px;
+  animation: svc-window-in 160ms ease-out;
+}
+.svc-window .window-close { position: absolute; inset-block-start: 10px; inset-inline-end: 10px; }
+/* The focus ring the window cannot cut away. */
+.svc-window .window-close:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
+/* A page area can use the boot loader within the room it holds. */
+.boot-screen.svc-loader { position: relative; min-block-size: 280px; }
+@keyframes svc-fade-in { from { opacity: 0; } }
+@keyframes svc-window-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes svc-strip-in { from { opacity: 0; transform: translateY(-4px); } }
+@media (max-width: 760px) {
+  .svc-window.dialog { padding-inline: 28px; }
+  .svc-strip.glass {
+    inset-block-start: auto;
+    inset-block-end: calc(8px + max(var(--svc-department-dock-room, 0px), var(--svc-agent-dock-room, 0px), env(safe-area-inset-bottom, 0px)));
+  }
+  .app-layout:has(.agent-strips:not(:empty)) > .svc-strip.glass {
+    --svc-agent-dock-room: calc(var(--agent-dock-height) + env(safe-area-inset-bottom, 0px));
+  }
+  /* The map's zoom controls take the start of the lower edge. Fit the strip beside them. */
+  .app-layout:has(.app-screen .body:not(.page) .map .map-version) > .svc-strip.glass {
+    inset-inline: auto 16px; margin-inline: 0; max-inline-size: calc(100vw - 224px);
+    padding-inline: 8px; gap: 4px 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dialog-back.svc-back, .svc-window.dialog, .svc-strip.glass { animation: none; }
+}
 .dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .first-contact > *, .first-contact h2 { min-inline-size: 0; overflow-wrap: anywhere; }
 .versions-check { display: flex; align-items: center; gap: 10px; font-size: 13px; }
@@ -1115,6 +1155,11 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .disk-parts .bar { grid-column: 1 / -1; }
 /* Docker's own disk is another disk than the parts above, so its line stands apart from them. */
 .dp-docker { margin-block-start: 12px; }
+.dp-copies-head { margin-block: 12px 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.disk-copies { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.disk-copies li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 4px 12px; min-inline-size: 0; }
+.disk-copies .dc-n { min-inline-size: 0; overflow-wrap: anywhere; }
+.disk-copies .dc-v { font-weight: 500; font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; color: var(--muted); }
 .machine-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 /* Subscriptions & API: every button, field and list is a target of 44px, and a card's actions end at its end edge. */
 .subs .btn { min-height: 44px; }
@@ -1645,7 +1690,7 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn + .hbtn { border-inline-start: 1px solid var(--line); }
 .dv-acts[data-fit="icons"] > .btn { margin-inline-start: auto; padding-block: 8px; }
 /* The map runs to the bottom of the screen and names the version over its own corner (#1590). */
-.app-layout:has(.map-version) > .version-mark { display: none; }
+.app-layout:has(.map-version, > .boot-screen) > .version-mark { display: none; }
 /* The actions take the corner the version sits in on the map. */
 body:has(.dview) .version-mark { display: none; }
 /* A form keeps the footer below it: the footer's row comes from the screen, so a footer that went with a form would move
@@ -2809,6 +2854,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .opt-n { font-family: var(--f-display); font-size: 18px; font-weight: 600; line-height: 1.15; color: var(--cyan-ink); }
 .req-note { margin: 0; }
 .mv-back { position: fixed; inset: 0; z-index: 40; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); background: var(--surface); }
+.mv-back[hidden] { display: none; }
 .mv { box-sizing: border-box; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; inline-size: 100%; block-size: 100%; background: var(--surface); color: var(--ink); font-family: var(--f-body); font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
 .mv:focus { outline: none; }
 .mv-bar { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px; padding: 8px 12px; border-block-start: 2px solid var(--cyan); border-block-end: 1px solid var(--line); }
@@ -3568,14 +3614,14 @@ th.k-prio .sorth { white-space: nowrap; }
   .orch.with-panels .agent-conversation { display: none; }
   .orch .t-st { white-space: normal; flex-wrap: wrap; }
   /* In a row at the bottom here, where the text reads across and everything above makes room. */
-  .agent-strips { top: auto; left: 0; bottom: 0; width: auto; height: 44px; flex-direction: row; overflow: auto hidden; background: var(--surface); border-top: 1px solid var(--line); }
+  .agent-strips { top: auto; left: 0; bottom: 0; width: auto; height: var(--agent-dock-height, 44px); flex-direction: row; overflow: auto hidden; background: var(--surface); border-top: 1px solid var(--line); }
   .shell:has(.orch.fullscreen:not([hidden])) .agent-strips { top: auto; }
   .agent-strip { flex-direction: row; }
   .agent-strip-open { max-width: 240px; max-height: none; min-height: 0; padding: 0 10px; writing-mode: horizontal-tb; }
   .agent-strip-name { min-width: 0; }
   .agent-strip-close { width: 36px; height: auto; border-bottom: 0; border-inline-start: 1px solid var(--line); }
-  .shell:has(.agent-strip) .body { bottom: 44px; }
-  .shell:has(.agent-strip) .orch, .shell:has(.agent-strip) .acard:not(.side-panel .acard) { bottom: 44px; }
+  .shell:has(.agent-strip) .body { bottom: var(--agent-dock-height, 44px); }
+  .shell:has(.agent-strip) .orch, .shell:has(.agent-strip) .acard:not(.side-panel .acard) { bottom: var(--agent-dock-height, 44px); }
 }
 
 @media (min-width: 761px) {

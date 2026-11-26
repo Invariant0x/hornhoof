@@ -93,13 +93,16 @@ describe('front, keeper and migrate', () => {
     expect(Object.keys(keeper!.environment!)).toEqual([
       'DATABASE_URL', 'HORNHOOF_SECRET', 'ACME_DIRECTORY', 'RELAY_URL', 'HORNHOOF_MACHINE_ID', 'HORNHOOF_PORT', 'HORNHOOF_PEER_PORT',
       'HORNHOOF_ROLE', 'HORNHOOF_JOIN_SERVER', 'HORNHOOF_JOIN_TICKET', 'HORNHOOF_ADDRESSES', 'HORNHOOF_HOSTNAME', 'HORNHOOF_OWNER_KEY', 'HORNHOOF_HOST_OS',
-      'HORNHOOF_NODE_KEY', 'HORNHOOF_SURVIVOR_S', 'HORNHOOF_LINK_PROBE',
+      'HORNHOOF_NODE_KEY', 'HORNHOOF_SURVIVOR_S', 'HORNHOOF_LINK_PROBE', 'FILES_DIR',
     ]);
     /* The node's key goes into each backup under a name of the keeper's own: a NODE_KEY that is set but empty, as on a
        machine with no node of the server's, would stop the keeper as it starts. */
     expect(keeper!.environment).toMatchObject({ HORNHOOF_NODE_KEY: '${NODE_KEY:-}', HORNHOOF_SURVIVOR_S: '${HORNHOOF_SURVIVOR_S:-}', HORNHOOF_LINK_PROBE: '${HORNHOOF_LINK_PROBE:-}' });
-    /* Its own volume holds the machine's key, which no other service reads. */
-    expect(keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper', 'computer:/keeper/computer-control']);
+    /* Its own volume holds the machine's key, which no other service reads. The file store's volume it shares with the
+       app, which reads and writes the same store on a machine with the data. */
+    expect(keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper', 'computer:/keeper/computer-control', 'files:/files']);
+    expect([keeper!.environment!.FILES_DIR, app!.environment!.FILES_DIR]).toEqual(['/files', '/files']);
+    expect(app!.volumes).toContain('files:/files');
     expect(Object.keys((parse(composeText) as { volumes: Record<string, unknown> }).volumes)).toContain('keeper');
     for (const [name, service] of Object.entries(compose.services)) if (name !== 'keeper') expect(JSON.stringify(service.volumes ?? []), name).not.toContain('keeper:');
     /* It hears which ports the machine publishes, to report them, and publishes the web port no more than before. */
@@ -233,7 +236,8 @@ describe('computer volume isolation', () => {
     { variant: 'server', services: compose.services },
     { variant: 'worker', services: workerServices },
   ])('isolates the computer volume in the $variant compose', ({ services }) => {
-    expect(services.keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper', 'computer:/keeper/computer-control']);
+    /* The keeper shares the store of the company's files with the app, as it sends them to the other machines. */
+    expect(services.keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper', 'computer:/keeper/computer-control', 'files:/files']);
     expect(services.updater!.volumes).toContain('computer:/computer');
     expect(services.app!.volumes).toEqual([
       'control:/control',

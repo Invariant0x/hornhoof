@@ -1,11 +1,12 @@
 import { DISK_PARTS, NODE_DISK_PARTS, type DiskPart, type DiskReport, type MachineReplicas, type NodeLoad } from '@hornhoof/protocol';
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useId, type ReactNode } from 'react';
 import { useLanguage, useT, type Language, type Messages } from '../i18n';
 import { Bar } from './Bar';
 import { Part } from './Cards';
 import { clock } from './subscription';
 
 const GIB = 1024 ** 3;
+const DISK_GB = 1_000_000_000;
 /* What each node keeps in its own folder, a Docker volume of its own: where the volumes are measured, it is inside them. */
 const OWN_FOLDER = new Set<DiskPart>(NODE_DISK_PARTS);
 /* A stand-in the words hold where a plan's name goes, which then reads in its own direction. */
@@ -15,8 +16,9 @@ const withPlan = (text: string, plan: string): ReactNode => text.split(PLAN).map
 /* One node's working folders: by the name of the plan it serves, none for the machine's own node. */
 export type FolderRow = { plan: string | null; bytes: number };
 
-/* An amount of bytes in gigabytes, to one decimal as its language writes it. */
+/* Memory in binary GiB and disk space in decimal GB, to one decimal as its language writes it. */
 export const gigabytes = (language: Language, bytes: number) => new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(Math.round((bytes / GIB) * 10) / 10);
+export const diskGigabytes = (language: Language, bytes: number) => new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(Math.round((bytes / DISK_GB) * 10) / 10);
 
 /* The parts the node measured with their sizes, the largest first. */
 export const measuredParts = (disk: DiskReport): [DiskPart, number][] =>
@@ -65,13 +67,15 @@ function diskRows(words: Words, disk: DiskReport, replicas: MachineReplicas | nu
 /* What Hornhoof takes of a machine's disk, part by part and the largest first, each with its share of the whole disk; all of
    it together and everything else; Docker's own disk, set apart, where Docker keeps its data on a disk of its own; and, while
    the machine is short of space, that it takes no new checks or builds. A node too old to say any of it shows none of it. */
-export function DiskParts({ disk, replicas, folders = [] }: { disk: DiskReport; replicas: MachineReplicas | null; folders?: FolderRow[] }) {
+export function DiskParts({ disk, replicas, folders = [], copyNames }: { disk: DiskReport; replicas: MachineReplicas | null; folders?: FolderRow[]; copyNames?: Record<string, string> }) {
   const t = useT();
   const { language } = useLanguage();
+  const copiesId = useId();
   const words = t.machines.diskParts;
-  const gb = (bytes: number) => gigabytes(language, bytes);
+  const gb = (bytes: number) => diskGigabytes(language, bytes);
   const ours = hornhoofBytes(disk);
   const rows = diskRows(words, disk, replicas, folders);
+  const copies = disk.copies ?? [];
   return (
     <Part title={words.title}>
       {disk.low && <p className="warn-line" role="status">{lowText(t, language, disk)}</p>}
@@ -89,6 +93,22 @@ export function DiskParts({ disk, replicas, folders = [] }: { disk: DiskReport; 
       <p className="part-note">{words.all(gb(ours), gb(disk.total))}</p>
       <p className="part-note">{words.other(gb(Math.max(0, disk.total - disk.free - ours)))}</p>
       {disk.docker && <p className="part-note dp-docker">{words.docker(gb(disk.docker.free), gb(disk.docker.total))}</p>}
+      {copies.length > 0 && (
+        <>
+          <p id={copiesId} className="dp-copies-head">{words.copiesTitle}</p>
+          <ul className="disk-copies" aria-labelledby={copiesId}>
+            {copies.map((copy, i) => (
+              <li key={`${copy.agent}-${copy.path}-${i}`}>
+                <span className="dc-n">
+                  <bdi>{copyNames?.[copy.agent] ?? copy.agent}</bdi>
+                  {copy.task !== null && `, ${words.copyTask(copy.task)}`} (<bdi>{copy.path}</bdi>)
+                </span>
+                <bdi className="dc-v">{words.size(gb(copy.bytes))}</bdi>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </Part>
   );
 }

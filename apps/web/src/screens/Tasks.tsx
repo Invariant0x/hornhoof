@@ -10,9 +10,9 @@ import { CEO_DECIDES, DecidedByNote } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
 import { programOf, TrackerIcon } from '../ui/icons';
 import { DepartmentMark, PersonMark } from '../ui/TrackerMarks';
-import { shownLoadFailure, useLoadFailure, useUpdateSaysIt } from '../ui/LoadFailure';
+import { shownLoadFailure, useLoadFailure, useServiceSaysIt } from '../ui/LoadFailure';
 import { Busy, Hold, LoadState, noneYet, useHeldRows, useLoad, type Load, type LoadPart } from '../ui/Loading';
-import { CopySchemaFailures, MachineAway } from '../ui/MachineAway';
+import { CopyGaveUps, CopySchemaFailures, MachineAway } from '../ui/MachineAway';
 import { MachineLow } from '../ui/MachineLow';
 import { MergeCard } from '../ui/MergeCard';
 import { namedReadOnly, Requests, wordsAnswer } from '../ui/Requests';
@@ -75,8 +75,8 @@ type TrackerReads = { places: unknown; tasks: unknown; tasksFailure: unknown; go
 
 /* What the tracker could not load, said on top of the page. What the work and the goals did not bring stands where they
    would instead, while they have not come. */
-function brokenOf(r: TrackerReads, updateSaysIt: boolean): unknown {
-  const shown = (f: unknown) => shownLoadFailure(f, updateSaysIt);
+function brokenOf(r: TrackerReads, serviceSaysIt: boolean): unknown {
+  const shown = (f: unknown) => shownLoadFailure(f, serviceSaysIt);
   return shown(r.places) ?? (r.tasks ? shown(r.tasksFailure) : null) ?? (r.goals ? shown(tracked(r.goalsFailure)) : null) ?? shown(tracked(r.pipelinesFailure));
 }
 
@@ -567,6 +567,7 @@ function MakeHere({ org, places, department, pipeline, loose, making, setMaking,
 /* The machines short of disk space among what waits for people; a server from before sends none. */
 const lowMachines = (decisions: Decisions | null | undefined) => decisions?.machinesLow ?? [];
 const schemaFailures = (decisions: Decisions | null | undefined) => decisions?.copySchemaFailures ?? [];
+const gaveUpCopies = (decisions: Decisions | null | undefined) => decisions?.copyGaveUp ?? [];
 
 /* The tracker keeps the same task and goal cards across its views. */
 export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, onDecisionsChanged, selected, onOpenTask, onOpenGoal, onOpenAgent, onOpenOrchestrator, onHome }: Props) {
@@ -578,7 +579,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const { org } = useOrg();
   const { taskDepartments: places, failure: placesFailure } = useTaskDepartments();
   const { tasks, failure, load: loadTasks, cancel: cancelTasks } = useTasks({ status: 'all' });
-  const updateSaysIt = useUpdateSaysIt();
+  const serviceSaysIt = useServiceSaysIt();
   const { goals: goalList, failure: goalsFailure, load: loadGoals } = useGoals();
   /* The work and the goals come with the shared indicator where they will stand, and say why when they do not. A server
      without goals yet answers that it has none. */
@@ -647,6 +648,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const failures = all.filter(task => boardStatus(task) === 'failure');
   const machinesAway = decisions?.machinesAway ?? [];
   const copySchemaFailures = schemaFailures(decisions);
+  const copyGaveUp = gaveUpCopies(decisions);
   const machinesLow = lowMachines(decisions);
   const githubLimits = failureCards(decisions);
   const pipeline = place.pipeline ? pipelines.find(p => p.id === place.pipeline) ?? null : null;
@@ -714,9 +716,9 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   })();
 
   /* A server without goals and pipelines yet answers that it has none: the tracker shows the tasks without them. */
-  const mainFailure = shownLoadFailure(placesFailure, updateSaysIt) ?? shownLoadFailure(failure, updateSaysIt);
+  const mainFailure = shownLoadFailure(placesFailure, serviceSaysIt) ?? shownLoadFailure(failure, serviceSaysIt);
   if (unavailableFailure(mainFailure)) return <RouteUnavailable onHome={onHome} />;
-  const broken = brokenOf({ places: placesFailure, tasks, tasksFailure: failure, goals: goalList, goalsFailure, pipelinesFailure }, updateSaysIt);
+  const broken = brokenOf({ places: placesFailure, tasks, tasksFailure: failure, goals: goalList, goalsFailure, pipelinesFailure }, serviceSaysIt);
   /* What waits: for people in the company on their page, else for the person. */
   const waiting = section.kind === 'people' ? (
     <WaitingForPeople
@@ -790,7 +792,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
         counts={{
           waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf)), waitsOnWho, keptShown(kept, decisionsOf)),
           people: peopleCount(decisions, waitsOnPeople, company),
-          failures: failures.length + machinesAway.filter(machine => !machine.back).length + copySchemaFailures.length + machinesLow.length + githubLimits.length,
+          failures: failures.length + machinesAway.filter(machine => !machine.back).length + copySchemaFailures.length + copyGaveUp.length + machinesLow.length + githubLimits.length,
           mine: own.tasks.length,
           working: working.length,
         }}
@@ -861,6 +863,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
                 <>
                   <MachineAway machines={machinesAway} />
                   <CopySchemaFailures cards={copySchemaFailures} />
+                  <CopyGaveUps cards={copyGaveUp} />
                   <MachineLow machines={machinesLow} />
                   <GitHubLimitCards limits={githubLimits} />
                 </>

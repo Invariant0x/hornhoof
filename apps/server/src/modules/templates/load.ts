@@ -63,7 +63,8 @@ export type TeamTemplate = { id: string; department: TemplateKey; title: Lang; d
    at a stage must carry. */
 /* oneShot: its owner runs the stage as one-shot calls, so many at once and a judge. */
 export type StageRoute = { department: TemplateKey; stages: { stage: EchelonStage; ability: string | null; oneShot?: EchelonOneShot }[] };
-export type CatalogStage = { name: string; ownerRole: string; brief?: string; echelon?: EchelonStage; oneShot?: EchelonOneShot; handoffTo?: TemplateKey[] };
+/* parent: the earlier stage this one hands over from, by name; none puts it under the stage before it, so a pipeline is a chain unless a stage names a parent and forks. */
+export type CatalogStage = { name: string; ownerRole: string; parent?: string; brief?: string; echelon?: EchelonStage; oneShot?: EchelonOneShot; handoffTo?: TemplateKey[] };
 export type CatalogPipeline = { key: string; name: string; why: string; stages: CatalogStage[] };
 export type PipelineCatalog = { department: TemplateKey; default: string; pipelines: CatalogPipeline[] };
 
@@ -350,6 +351,7 @@ const CatalogHead = z.strictObject({
     stages: z.array(z.strictObject({
       name: z.string().trim().min(1),
       ownerRole: z.string(),
+      parent: z.string().trim().min(1).optional(),
       brief: z.string().trim().min(1).optional(),
       echelon: z.enum(ECHELON_STAGES).optional(),
       handoffTo: z.array(z.enum(TEMPLATE_KEYS)).optional(),
@@ -358,21 +360,26 @@ const CatalogHead = z.strictObject({
   })).min(1),
 });
 
+/* One stage of a ready pipeline: owned by a role of the department, a one-shot stage with the echelon it runs in, each echelon
+   once in a pipeline, and a parent that is a stage before it. */
+function checkCatalogStage(file: string, department: TemplateKey, pipeline: CatalogPipeline, step: CatalogStage, roles: ReadonlyMap<string, Role>, seen: { names: Set<string>; echelons: Set<EchelonStage> }): void {
+  if (step.parent !== undefined && !seen.names.has(step.parent)) throw new Error(`${file}: ${step.name} names ${step.parent} as its parent, which is no stage before it.`);
+  seen.names.add(step.name);
+  if (roles.get(step.ownerRole)?.department !== department) throw new Error(`${file}: ${step.ownerRole} is not a role of ${department}.`);
+  if (step.oneShot && !step.echelon) throw new Error(`${file}: ${step.name} needs an echelon for its one-shot calls.`);
+  if (!step.echelon) return;
+  if (seen.echelons.has(step.echelon)) throw new Error(`${file}: ${pipeline.key} maps ${step.echelon} twice.`);
+  seen.echelons.add(step.echelon);
+}
+
 function parseCatalogFile(file: string, roles: ReadonlyMap<string, Role>): PipelineCatalog {
   const catalog = parsed(CatalogHead, file, readParts(file).head);
   const keys = new Set(catalog.pipelines.map(p => p.key));
   if (keys.size !== catalog.pipelines.length || !keys.has(catalog.default)) throw new Error(`${file}: pipeline keys must be unique and include the default.`);
   for (const pipeline of catalog.pipelines) {
-    const names = new Set(pipeline.stages.map(stage => stage.name));
-    if (names.size !== pipeline.stages.length) throw new Error(`${file}: ${pipeline.key} repeats a stage name.`);
-    const mapped = new Set<EchelonStage>();
-    for (const step of pipeline.stages) {
-      if (roles.get(step.ownerRole)?.department !== catalog.department) throw new Error(`${file}: ${step.ownerRole} is not a role of ${catalog.department}.`);
-      if (step.oneShot && !step.echelon) throw new Error(`${file}: ${step.name} needs an echelon for its one-shot calls.`);
-      if (!step.echelon) continue;
-      if (mapped.has(step.echelon)) throw new Error(`${file}: ${pipeline.key} maps ${step.echelon} twice.`);
-      mapped.add(step.echelon);
-    }
+    if (new Set(pipeline.stages.map(stage => stage.name)).size !== pipeline.stages.length) throw new Error(`${file}: ${pipeline.key} repeats a stage name.`);
+    const seen = { names: new Set<string>(), echelons: new Set<EchelonStage>() };
+    for (const step of pipeline.stages) checkCatalogStage(file, catalog.department, pipeline, step, roles, seen);
   }
   return catalog;
 }

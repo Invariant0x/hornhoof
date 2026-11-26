@@ -8,7 +8,7 @@ import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
 import { SET_ASIDE } from './sweep.js';
 
-/* A file of a row from before the store, which the mover has not moved yet: its bytes in the old column of the
+/* A file of a row from before the store, which the leading app has not moved yet: its bytes in the old column of the
    row, read a piece at a time, or, for one over 50 MB, on the disk of the machine that took it, in FILES_DIR under the
    row's id. Once every row is moved the column goes, and nothing here is read any more. */
 const PIECE_BYTES = 1024 * 1024;

@@ -56,7 +56,7 @@ export type Carry = {
   invites: string[];
   /* role, dataLeftAt, uploadState: whether the machine holds the company's data now, and what one that stopped still
      owes. An updater of the build before says none of the three, and the restored row keeps its own. */
-  machines: { id: string; revoked: boolean; lendsTests: boolean; keepsBackups: boolean; computerClosed?: boolean | null; role?: 'data' | 'worker' | null; dataLeftAt?: string | null; uploadState?: 'waiting' | 'received' | 'kept' | null }[];
+  machines: { id: string; revoked: boolean; lendsTests: boolean; keepsBackups: boolean; computerClosed?: boolean | null; role?: 'data' | 'worker' | null; dataLeftAt?: string | null; uploadState?: 'waiting' | 'received' | 'kept' | null; fileStoreLimitBytes?: number | null }[];
   /* Older updaters carried names alone. Keep the list readable by older servers. */
   serials: string[];
   /* Live revocations from both the certificate rows and earlier restores. */
@@ -72,7 +72,10 @@ export type Carry = {
   assistantKeys?: { personId: string; keyHash: string; keyCreatedAt: string; wakeSecretEnc: string }[];
   /* The nodes' keys that open something now. An empty list means none may be restored. */
   nodeKeys?: { id: string; keyHash: string }[];
-  /* The key the company's files are sealed with, sealed as it is stored; none from a database before the store, or before
-     its first file. */
+  /* The key the company's files are sealed with, sealed as it is stored, and how many machines keep each file as the CEO
+     set it; none from a database before the store, or before its first file, or before the CEO set it. */
   fileKeyEnc?: string | null;
+  fileCopies?: { copies: number; setBy: string } | null;
+  /* The store's backup (#2056): the days it keeps a file no row names, who set them, and the machine it is on. */
+  fileBackup?: { keepDays: number; setBy: string | null; machineId: string | null } | null;
 };

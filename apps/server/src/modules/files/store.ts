@@ -224,8 +224,8 @@ export class FileStore {
     return { sealedSha256: count.digest(), sealedSize: count.bytes, salt: saltOf(head) };
   }
 
-  /* Seals a file here again under the salt its record names, so its sealed bytes are those its record names, and lays
-     them in its place at once. The file must open to its name first. Says the sealed facts it has now. */
+  /* Seals a file here again under the salt its record names, so its sealed bytes are those the other machines keep of
+     it, and lays them in its place at once. The file must open to its name first. Says the sealed facts it has now. */
   async reseal(sha256: string, key: Buffer, salt: string): Promise<{ sealedSha256: string; sealedSize: number; salt: string }> {
     await mkdir(this.tmp(), { recursive: true, mode: 0o700 });
     const part = join(this.tmp(), `${randomUUID()}.part`);

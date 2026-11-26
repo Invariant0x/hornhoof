@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestProject } from 'vitest/node';
@@ -44,7 +44,21 @@ async function writeMigratedCopy(file: string, metadata: string, options: Global
     throw error;
   }
 }
+/* The machine's template (HH_PGLITE_TEMPLATE, .hornhoof/warm-services.json) keeps the dump of these migrations and its
+   description, made once for every run of the machine: the run reads both in place. */
+function inPlace(template: string, options: GlobalSetupOptions): { file: string; metadata: string } | null {
+  const metadata = join(template, 'metadata.json');
+  return existsSync(metadata) && readPgliteTemplate(template, options) ? { file: join(template, 'migrated.tar'), metadata } : null;
+}
+
 export default async function setup(project: Pick<TestProject, 'provide'>, options: GlobalSetupOptions = {}): Promise<() => void> {
+  const template = options.templatePath ?? process.env.HH_PGLITE_TEMPLATE;
+  const kept = template ? inPlace(template, options) : null;
+  if (kept) {
+    project.provide('migratedDataDir', kept.file);
+    project.provide('databaseMetadataFile', kept.metadata);
+    return () => {};
+  }
   const dir = mkdtempSync(join(tmpdir(), 'hh-test-db-'));
   const file = join(dir, 'migrated.tar');
   const metadata = join(dir, 'metadata.json');
