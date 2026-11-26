@@ -1,6 +1,6 @@
 import { inLane } from '@hornhoof/protocol';
 import type { Ctx } from '../../app.js';
-/* One thing at a time per agent, so two pumps never send two turns. */
+/* One dispatch pass at a time for each subscription's queue. */
 const subscriptionChains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
 
 export function onSubscription<T>(ctx: Ctx, subscriptionId: string, fn: () => Promise<T>): Promise<T> {
@@ -9,6 +9,7 @@ export function onSubscription<T>(ctx: Ctx, subscriptionId: string, fn: () => Pr
   return inLane(lanes, subscriptionId, fn);
 }
 
+/* One thing at a time per agent, so two pumps never send two turns. */
 export const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
 
 export function onAgent<T>(ctx: Ctx, agentId: string, fn: () => Promise<T>): Promise<T> {

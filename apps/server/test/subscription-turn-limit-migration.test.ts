@@ -25,7 +25,7 @@ it('keeps the subscription setting and applies each migration once when a patche
   const db = drizzle(client);
   const before = await migrationsCut('hh-before-turn-limit-', entries => entries.slice(0, entries.findIndex(entry => entry.tag === lastBeforePatch) + 1));
   await migrate(db, { migrationsFolder: before });
-  await db.execute(sql`
+  await client.exec(`
     insert into companies (id, name) values ('00000000-0000-4000-8000-000000000101', 'Retained company');
     insert into people (id, company_id, name, email, status, scope_kind)
       values ('00000000-0000-4000-8000-000000000102', '00000000-0000-4000-8000-000000000101', 'Plan owner', 'owner@example.com', 'active', 'company');

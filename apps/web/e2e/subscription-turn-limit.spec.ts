@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
+import { chooseTerminal } from './api';
 import { serveAgentWindow, SUB } from './agent-window-api';
 
 const words = {
@@ -18,6 +19,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       localStorage.setItem('hh-lang', lang);
       localStorage.setItem('hh-theme', theme === 'light' ? 'light' : 'cyberpunk');
     }, { lang, theme });
+    await chooseTerminal(page);
     await serveAgentWindow(page, { awake: false, hasTask: false, messages: [], connections: 0 });
     await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: [{ ...SUB, turnLimit }] } }));
     await page.route('**/api/subscriptions/s1', route => {
@@ -47,9 +49,9 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     await expect.poll(() => turnLimit).toBe(5);
     await expect(input).toHaveValue('5');
 
-    await page.reload();
+    await page.goto('/');
     await page.getByRole('button', { name: /^Development/ }).click();
-    await page.getByRole('button', { name: /Bruno/ }).first().click();
+    await page.getByRole('region', { name: ui.table.dept.members }).getByRole('button', { name: /Bruno/ }).click();
     const window = page.getByRole('complementary', { name: /^Bruno,/ });
     await expect(window).toBeVisible();
     await expect(window.getByText(ui.wait, { exact: true })).toBeVisible();

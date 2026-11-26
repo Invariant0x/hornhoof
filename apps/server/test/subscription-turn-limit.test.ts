@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { agents, jobs, machines, nodes, subscriptions, tasks } from '../src/db/schema.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
+import { createRoute, departmentStages } from '../src/modules/tasks/echelons-store.js';
 import { routeOf } from '../src/modules/tasks/route-records.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -53,6 +54,8 @@ it('gives a freed place to urgent work first and then to the earliest normal tur
     companyId: c.companyId, departmentId: c.dev.id, assigneeAgentId: team[5]!.id, executorAgentId: team[5]!.id,
     number: 1, title: 'Urgent work', urgent: true,
   }).returning();
+  const stages = await departmentStages(c.ctx, c.dev.id);
+  await c.db.transaction(tx => createRoute(tx, task!, {}, stages));
   const route = await routeOf(c.db, task!);
   const urgent = await enqueueTurn(c.ctx, {
     companyId: c.companyId, agentId: team[5]!.id, taskId: task!.id, prompt: 'Urgent work.', createdBy: null,

@@ -18,7 +18,7 @@ import type { Ctx } from '../../app.js';
 import { forgetPrivateTurn } from '../tools/private-turns.js';
 import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { agents, jobs, tasks } from '../../db/schema.js';
+import { agentEvents, agents, jobs, tasks } from '../../db/schema.js';
 import type { TurnRefusal } from '../terminals/relay.js';
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, typedWentIn, withInputLock } from './decision-context.js';
 import { builtinOf, nodeIdentity, ownBuiltin, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
@@ -580,7 +580,7 @@ async function dueTurn(ctx: Ctx, agent: PlanAgent & { name: string; switchedOffA
   const now = new Date(Date.now());
   const [due] = await ctx.db.select({ job: jobs }).from(jobs).leftJoin(tasks, eq(tasks.id, jobs.taskId))
     .where(and(mayGo, or(isNull(jobs.notBefore), lte(jobs.notBefore, now))))
-    .orderBy(turnPriority, desc(sql`${jobs.notBefore} is not null`), asc(jobs.inboxWake), asc(jobs.createdAt), asc(jobs.id)).limit(1);
+    .orderBy(turnPriority, desc(sql`${jobs.notBefore} is not null`), asc(jobs.inboxWake), asc(jobs.createdAt), firstTurnEvent, asc(jobs.id)).limit(1);
   if (due) return due.job;
   const [later] = await ctx.db.select({ at: jobs.notBefore }).from(jobs).where(and(mayGo, gt(jobs.notBefore, now))).orderBy(asc(jobs.notBefore)).limit(1);
   /* The earlier wake stands; the one at the reset is set again when the earlier one comes. */
@@ -588,6 +588,9 @@ async function dueTurn(ctx: Ctx, agent: PlanAgent & { name: string; switchedOffA
   return null;
 }
 
+/* A node's returned words can enter the queue in the same clock tick as a turn already there. Their stored event
+   sequence keeps that arrival order when the job timestamps match. */
+const firstTurnEvent = sql`(select min(${agentEvents.seq}) from ${agentEvents} where ${agentEvents.jobId} = ${jobs.id})`;
 const queuedConversation = and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued'));
 const turnPriority = sql<number>`case
   when ${tasks.urgent} or ${tasks.priority} = 'urgent' then 0
@@ -615,7 +618,7 @@ function pumpPlan(ctx: Ctx, subscriptionId: string, requestedAgent?: string): Pr
       .innerJoin(agents, eq(agents.id, jobs.agentId))
       .leftJoin(tasks, eq(tasks.id, jobs.taskId))
       .where(and(queuedConversation, eq(agents.subscriptionId, subscriptionId), isNull(agents.removedAt)))
-      .orderBy(turnPriority, asc(jobs.createdAt), asc(jobs.id));
+      .orderBy(turnPriority, asc(jobs.createdAt), firstTurnEvent, asc(jobs.id));
     const ids = new Set(waiting.map(row => row.agentId));
     if (requestedAgent) ids.add(requestedAgent);
     const run = { ctx, active: true };
