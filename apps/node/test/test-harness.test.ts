@@ -463,6 +463,143 @@ describe('the registry over HTTP', () => {
     ]);
   });
 
+  const bundleBytesOnDisk = async (dir: string): Promise<number> => {
+    const name = (await readdir(dir).catch(() => [] as string[])).find(entry => entry.startsWith('.bundle-'));
+    return name ? (await stat(join(dir, name)).catch(() => ({ size: 0 }))).size : 0;
+  };
+
+  it('prints transfer progress every minute while a slow prepared postgres bundle arrives, with no wait once done', async () => {
+    const elsewhere = await machine(), bundlePath = join(elsewhere.cacheRoot, 'bundle'), packed = await packBundle(await built(elsewhere), bundlePath, elsewhere);
+    const bytes = await readFile(bundlePath), half = Math.floor(bytes.length / 2);
+    let stream: ServerResponse<IncomingMessage> | undefined;
+    const { heard, remote } = await server((asked, response) => {
+      if (asked.url === '/api/harness/claim') {
+        send(response, 200, JSON.stringify({ state: 'ready', ...LEASE, digest: packed.digest, size: packed.size, partBytes: packed.size + 1024 }));
+        return;
+      }
+      response.writeHead(206, { 'content-type': 'application/octet-stream', 'content-length': String(bytes.length) });
+      response.write(bytes.subarray(0, half));
+      stream = response;
+    }, 1, 1, INSTANT, 120_000);
+    const stop = new AbortController();
+    const here = await machine(), said: string[] = [], postgresUnit = { ...UNIT, unit: 'postgres' };
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    onTestFinished(() => { stop.abort(); stream?.destroy(); vi.useRealTimers(); });
+    const preparing = prepareCache(here.dir, KEY, INPUT, { ...here, signal: stop.signal, log: line => said.push(line) }, failing('it must not build locally'), harnessShare(remote, postgresUnit));
+    void preparing.catch(() => {});
+    await eventually(async () => stream !== undefined && heard.length === 2 && await bundleBytesOnDisk(here.dir) === half);
+    await new Promise<void>(resolve => { setImmediate(resolve); });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(said).toEqual([
+      `Taking the prepared postgres ${KEY.slice(0, 12)} (${bytes.length} bytes) that another machine built, from Hornhoof.`,
+      `Transferred ${half} bytes of ${bytes.length} bytes (${Math.floor((half / bytes.length) * 100)}%) of the prepared postgres ${KEY.slice(0, 12)} from Hornhoof.`,
+    ]);
+    stream!.end(bytes.subarray(half));
+    const entry = await preparing;
+    expect(entry).toMatchObject({ hit: true, fetched: true });
+    expect(await readFile(join(entry.path, 'payload', 'node_modules', 'dep'), 'utf8')).toBe('locked');
+  });
+
+  it('bounds a trickling relay transfer that keeps moving below the quiet window, logs the reason, and falls back to building locally', async () => {
+    const total = 10_000;
+    let stream: ServerResponse<IncomingMessage> | undefined;
+    const { heard, remote } = await server((asked, response) => {
+      if (asked.url === '/api/harness/claim') {
+        send(response, 200, JSON.stringify({ state: 'ready', ...LEASE, digest: 'b'.repeat(64), size: total, partBytes: total }));
+        return;
+      }
+      response.writeHead(206, { 'content-type': 'application/octet-stream', 'content-length': String(total) });
+      response.write(Buffer.alloc(2_500, 0x61));
+      stream = response;
+    }, 1, 1, INSTANT, 60_000);
+    const stop = new AbortController();
+    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), said: string[] = [], postgresUnit = { ...UNIT, unit: 'postgres' };
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    onTestFinished(() => { stop.abort(); stream?.destroy(); vi.useRealTimers(); });
+    let settled = false;
+    const preparing = prepareCache(here.dir, KEY, INPUT, { ...here, signal: stop.signal, log: line => said.push(line) }, async () => source, harnessShare(remote, postgresUnit)).finally(() => { settled = true; });
+    void preparing.catch(() => {});
+    await eventually(async () => stream !== undefined && heard.length === 2 && await bundleBytesOnDisk(here.dir) === 2_500);
+    await new Promise<void>(resolve => { setImmediate(resolve); });
+    /* Trickle 1 byte every 30 s so the 60 s per-chunk quiet timer never trips, reproducing a slow relay trickle. */
+    for (let step = 0; step < 9; step++) {
+      await vi.advanceTimersByTimeAsync(30_000);
+      stream!.write(Buffer.from('a'));
+      await eventually(async () => await bundleBytesOnDisk(here.dir) === 2_500 + step + 1);
+      await new Promise<void>(resolve => { setImmediate(resolve); });
+    }
+    await vi.advanceTimersByTimeAsync(30_000);
+    for (let turn = 0; turn < 50 && !said.some(line => line.includes('could not be taken from Hornhoof')); turn++) {
+      await new Promise<void>(resolve => { setImmediate(resolve); });
+    }
+    expect(heard).toHaveLength(2);
+    expect(said.some(line => line.startsWith('Transferred ') && line.includes('25%'))).toBe(true);
+    expect(said.at(-1)).toMatch(/^The prepared a{12} could not be taken from Hornhoof, so it is built here: .*within 5 min.*25%/);
+    const entry = await preparing;
+    expect(settled).toBe(true);
+    expect(entry).toMatchObject({ hit: false, fetched: false });
+    expect(await readFile(join(entry.path, 'payload', 'node_modules', 'dep'), 'utf8')).toBe('locked');
+  });
+
+  it('logs upload progress every minute and bounds a stalled upload so the part keeps its local build without hanging', async () => {
+    const failedCalls: (string | null)[] = [];
+    let pendingPut: ServerResponse<IncomingMessage> | undefined;
+    const { heard, remote } = await server((asked, response) => {
+      if (asked.url === '/api/harness/claim') {
+        send(response, 200, JSON.stringify({ state: 'build', ...LEASE, partBytes: 64 }));
+        return;
+      }
+      if (asked.url.endsWith('/parts/0')) {
+        send(response, 204);
+        return;
+      }
+      if (asked.url.includes('/parts/')) {
+        pendingPut = response;
+        return;
+      }
+      if (asked.url.endsWith('/failed')) {
+        failedCalls.push((JSON.parse(asked.body.toString()) as { error: string | null }).error);
+        send(response, 204);
+      }
+    }, 1, 1, INSTANT, 120_000);
+    const stop = new AbortController();
+    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), said: string[] = [];
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    onTestFinished(() => { stop.abort(); pendingPut?.destroy(); vi.useRealTimers(); });
+    const preparing = prepareCache(here.dir, KEY, INPUT, { ...here, signal: stop.signal, log: line => said.push(line) }, async () => source, harnessShare(remote, UNIT));
+    await eventually(() => pendingPut !== undefined && heard.length >= 3);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(said.some(line => line.startsWith('Sent 64 bytes of ') && line.includes('of the prepared dependencies'))).toBe(true);
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    for (let turn = 0; turn < 50 && !said.some(line => line.includes('stays on this machine only')); turn++) {
+      await new Promise<void>(resolve => { setImmediate(resolve); });
+    }
+    expect(said.at(-1)).toMatch(/^The prepared a{12} stays on this machine only: .*within 5 min/);
+    const entry = await preparing;
+    expect(entry).toMatchObject({ hit: false, fetched: false });
+    expect(failedCalls).toEqual([null]);
+  });
+
+  it('resumes a dropped range download from the bytes already written instead of restarting from zero', async () => {
+    const bytes = 'abcdefgh';
+    let dropped = false;
+    const { heard, remote } = await server(({ range }, response) => {
+      const [, from, to] = /bytes=(\d+)-(\d+)/.exec(range!)!;
+      const slice = bytes.slice(Number(from), Number(to) + 1);
+      response.writeHead(206, { 'content-type': 'application/octet-stream', 'content-length': String(slice.length) });
+      if (!dropped) {
+        dropped = true;
+        response.write(slice.slice(0, 4), () => { response.destroy(); });
+        return;
+      }
+      response.end(slice);
+    });
+    const { root } = await file('');
+    await remote.download(KEY, join(root, 'resumed'), { state: 'ready', ...LEASE, digest: sha(bytes), size: 8, partBytes: 8 }, SIGNAL);
+    expect(await readFile(join(root, 'resumed'), 'utf8')).toBe(bytes);
+    expect(heard.map(asked => asked.range)).toEqual(['bytes=0-7', 'bytes=4-7']);
+  });
+
   it('fails a download it cannot store, so the machine stays up and builds it itself', async () => {
     const { remote } = await server((_asked, response) => { response.writeHead(206); response.end('abc'); });
     const { root } = await file('');

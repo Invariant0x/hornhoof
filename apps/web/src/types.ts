@@ -941,6 +941,8 @@ export type MachineView = {
   /* The employees' working folders of each of its nodes, by the plan the node serves (none for the machine's own node), the
      biggest first: none of a node that says nothing of its disk. Older servers omit it. */
   folders?: { plan: string | null; bytes: number }[];
+  /* Known employee names for the largest working copies on the machine's disk report, filtered by viewer sight. */
+  copyNames?: Record<string, string>;
   /* Takes the company's test runs when it is the freest machine. */
   lendsTests: boolean;
   running: Running;
@@ -1066,7 +1068,7 @@ export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'co
    what the disk they lie on has free, null before its keeper said. */
 export type FileStoreArea = { id: string; limitBytes: number | null; areaBytes: number; usedBytes: number; diskFree: number | null };
 
-export type BuiltinView = { online: boolean; load: NodeLoad | null; replicas?: MachineReplicas | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null; fileStore?: FileStoreArea | null };
+export type BuiltinView = { online: boolean; load: NodeLoad | null; copyNames?: Record<string, string>; replicas?: MachineReplicas | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null; fileStore?: FileStoreArea | null };
 
 export type JobView = {
   id: string;

@@ -12,9 +12,10 @@ export type DiskPart = z.infer<typeof DiskPart>;
 export const NODE_DISK_PARTS = ['workingCopies', 'recordings', 'checkTemp'] as const satisfies readonly DiskPart[];
 
 const Bytes = z.number().int().min(0);
-/* How many of its latest removals a node names, and how many of the copies it keeps. */
+/* How many of its latest removals a node names, how many of the copies it keeps, and how many largest copies it lists. */
 export const DISK_CLEANED_MAX = 50;
 export const DISK_KEPT_MAX = 50;
+export const DISK_COPIES_MAX = 10;
 /* How many of the paths git ignores and no remote has a copy that stays for them names. */
 export const DISK_IGNORED_MAX = 20;
 
@@ -39,6 +40,10 @@ export const DiskReport = z.object({
   kept: z
     .array(z.object({ part: DiskPart, agent: z.string().max(64), path: z.string().max(300), task: z.number().int().positive().nullable(), bytes: Bytes, why: z.enum(['uncommitted', 'unpushed', 'ignored']), ignored: z.array(z.string().max(300)).max(DISK_IGNORED_MAX).optional() }))
     .max(DISK_KEPT_MAX)
+    .optional(),
+  copies: z
+    .array(z.object({ agent: z.string().max(64), path: z.string().max(300), task: z.number().int().positive().nullable(), bytes: Bytes }))
+    .max(DISK_COPIES_MAX)
     .optional(),
 });
 export type DiskReport = z.infer<typeof DiskReport>;

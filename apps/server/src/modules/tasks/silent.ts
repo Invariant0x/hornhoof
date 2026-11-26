@@ -209,7 +209,7 @@ export async function alreadyAlerted(ctx: Ctx, jobId: string): Promise<boolean> 
   const [row] = await ctx.db
     .select(idOnly(agentEvents))
     .from(agentEvents)
-    .where(and(eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'silentJob' = ${jobId}`))
+    .where(and(eq(agentEvents.kind, 'message'), sql`${agentEvents.data} ? 'silentJob'`, sql`${agentEvents.data}->>'silentJob' = ${jobId}`))
     .limit(1);
   if (row) seen.add(jobId);
   return Boolean(row);

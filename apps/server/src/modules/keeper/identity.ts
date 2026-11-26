@@ -72,9 +72,10 @@ export class MachineIdentity {
     this.measures = opts.measures ?? new Measures({ dir: opts.dir, sampleMs: opts.sampleMs, internet: opts.internet });
   }
 
-  /* The fsync p99 of this machine's disk as measured so far, the same one the report carries. */
-  fsyncP99(): number | null {
-    return this.measures.fsyncP99();
+  /* The fsync p99 of this machine's disk the lease goes by: of every sample, those taken while the machine dumped its
+     database among them, which the report leaves out. */
+  leaseFsyncP99(): number | null {
+    return this.measures.leaseFsyncP99();
   }
 
   start(): void {

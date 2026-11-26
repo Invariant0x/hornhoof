@@ -435,7 +435,7 @@ export class Keeper {
       sync: this.sync ?? undefined,
       onEnd: () => this.leaseEnded(),
       hold: () => this.hander?.holds() ?? false,
-      fsyncP99: () => this.identity?.fsyncP99() ?? null,
+      fsyncP99: () => this.identity?.leaseFsyncP99() ?? null,
       sole: () => this.sole(),
       proofs: this.leaseProofs && this.reentry
         ? {
@@ -639,15 +639,17 @@ export class Keeper {
       this.giveWord();
     };
     const leaseTimers = (): void => {
+      const look = oneAtATime(() => this.holder.look().then(() => this.readNeeded()));
       this.timer = setInterval(() => void tick(), everyMs);
-      this.fencesTimer = setInterval(() => void this.holder.look().then(() => this.readNeeded()), linkEveryMs);
+      this.fencesTimer = setInterval(() => void look(), linkEveryMs);
       if (this.opts.proofs) {
         this.proofsTimer = setInterval(() => this.prove(), this.opts.proofs.everyMs ?? PROVE_EVERY_MS);
         this.proofsTimer.unref();
       }
     };
     const afterLead = (): void => {
-      this.guardTimer = setInterval(() => void this.holder.guard(), this.opts.guardEveryMs ?? GUARD_EVERY_MS);
+      const guard = oneAtATime(() => this.holder.guard());
+      this.guardTimer = setInterval(() => void guard(), this.opts.guardEveryMs ?? GUARD_EVERY_MS);
       this.guardTimer.unref();
       if (this.opts.sync?.slots) {
         this.slotsTimer = setInterval(() => void this.keepSlots(), this.opts.sync.slots.everyMs ?? SLOTS_EVERY_MS);
@@ -701,6 +703,12 @@ export class Keeper {
       this.takingTimer = setInterval(() => void takeOver(), this.opts.takingEveryMs ?? TAKING_EVERY_MS);
     }
     return { front, linkHttp, linkTls };
+  }
+
+  /* Whether a backup of this machine's database keeps its disk busy now, when what the disk is timed at is left out of
+     the machine's report. */
+  backupsBusy(): boolean {
+    return this.backups?.dumping() ?? false;
   }
 
   async stop(): Promise<void> {
@@ -933,6 +941,7 @@ export class Keeper {
     /* Where a lease takes proofs, the link's client stops with the lease and stays stopped until the way back in. */
     this.entryTunnel = false;
     if (!this.sole() && (this.sync?.listed() ?? 0) > 0) this.linkPausedUntil = performance.now() + (this.opts.sync?.linkPauseMs ?? LINK_PAUSE_MS);
+    this.giveWord();
   }
 
   /* The link's settings for its frpc: none while the frpc is to stay stopped, so the tunnel keeper ends it, and the
