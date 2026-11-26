@@ -282,6 +282,7 @@ type PlanProps = { sub: SubView; me: Me; controls: PlanControls };
 
 function PlanTurnLimit({ value, save }: { value: number; save(limit: number): Promise<boolean> }) {
   const t = useT();
+  const field = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [invalid, setInvalid] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -291,6 +292,7 @@ function PlanTurnLimit({ value, save }: { value: number; save(limit: number): Pr
     const limit = Number(draft ?? value);
     if (!Number.isInteger(limit) || limit < 1 || limit > 5) {
       setInvalid(true);
+      field.current?.focus();
       return;
     }
     setSaving(true);
@@ -302,7 +304,7 @@ function PlanTurnLimit({ value, save }: { value: number; save(limit: number): Pr
   }
   return <form noValidate onSubmit={event => void submit(event)} aria-busy={saving}>
     <Field label={t.subs.turnLimit} problem={invalid ? t.subs.turnLimitProblem : undefined}>
-      {input => <input {...input} type="number" min={1} max={5} step={1} value={draft ?? String(value)} disabled={saving}
+      {input => <input {...input} ref={field} type="number" min={1} max={5} step={1} value={draft ?? String(value)} disabled={saving}
         onChange={event => { setDraft(event.target.value); setInvalid(false); }} />}
     </Field>
     <button type="submit" className="btn ghost" disabled={saving || draft === null}>{saving ? t.common.saving : t.common.save}</button>

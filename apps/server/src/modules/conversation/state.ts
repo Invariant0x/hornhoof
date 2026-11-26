@@ -131,7 +131,7 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
     ready: reason === null,
     machineDrain: place || reason !== null ? null : await drainInTheWay(ctx, agent, sub, shown),
     memoryWait: !running && !place && reason === null && Boolean(sub && agent && (await placement(ctx, agent, sub, () => true))),
-    subscriptionWait: !running && Number(waiting?.n ?? 0) > 0 && sub && agent && place ? await subscriptionWait(ctx, agent, sub, place) : null,
+    subscriptionWait: !running && Number(waiting?.n ?? 0) > 0 && sub && agent && place ? await subscriptionWait(ctx, agent, sub) : null,
     ...await planState(ctx, agent, sub),
     reason,
     browserError,
