@@ -28,6 +28,7 @@ import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
 import { UNDER_MENU, useShellTop } from '../ui/shellBars';
 import { SpeedPanel } from './SpeedPanel';
+import { useServiceStripFooter } from '../ui/ServiceRoad';
 import { arrowD, CH, FW, HH, HW, PH, PW, leadsStage, schemaLayout, stepPaths, type Frame, type Line, type Schema, type Sizes } from './schema';
 import { takeEscape } from '../ui/escape';
 import { guardedResizeObserver, useRenderGuard } from '../guard';
@@ -238,7 +239,7 @@ type Drawer = 'about' | 'speed' | 'hire';
 /* Whether the department still waits for its company (Design on #1654): it then stands with what it knows without waiting,
    back, the plate of its name, its tools and the room of Hire, and only the schema's body waits. */
 const waitsFor = (load?: Load): load is Load => load !== undefined && load.phase !== 'done';
-const busyOf = (load?: Load) => (load?.phase === 'loading' || load?.phase === 'slow') || undefined;
+const busyOf = (load?: Load) => load?.phase === 'loading' || undefined;
 
 /* The schema's body while the company comes: the shared indicator, then why it did not come with Retry. */
 function DepartmentBodyWait({ load }: { load?: Load }) {
@@ -458,6 +459,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
   const { tree: workTree, load: treeLoad } = useTreeLoad(d.id, tree || drawer === 'speed');
   const openAgent = useOpenAgent();
   const chrome = useDepartmentSpace(language, panel, hire === 'none' ? '' : 'hire', onPlate);
+  const serviceStrip = useServiceStripFooter(chrome.dock);
   const [zoomSlot, setZoomSlot] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!drawer) return;
@@ -742,7 +744,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
           ))}
 
         </div>
-        {!d.employees.some(e => e.kind !== 'head') && <p className="dv-empty glass" dir="auto">{t.dept.noMembers}</p>}
+        {!d.employees.some(e => e.kind !== 'head') && <p className="dv-empty glass" dir="auto" ref={serviceStrip.empty}>{t.dept.noMembers}</p>}
       </div>
 
       )}
@@ -750,7 +752,7 @@ export function DepartmentView({ me, department: d, deputies, selected, panel, s
       <DepartmentCrumbs department={d} waiting={waiting} navRef={chrome.crumbs} onBack={onBack} />
 
       {/* The zoom, the line of what happened and the actions: along the bottom of a wide screen, one over the other on a phone. */}
-      <div className="dv-dock" ref={chrome.dock}>
+      <div className="dv-dock" ref={serviceStrip.dock}>
         {/* The schema's zoom, or the tree's, which the tree puts here. */}
         <div className="dv-zoom" ref={setZoomSlot} inert={waiting}>{!tree && <ZoomBar k={view.k} onZoom={zoomAt} onFit={() => place(true)} />}</div>
         {/* An open panel takes the room the ticker needs. */}

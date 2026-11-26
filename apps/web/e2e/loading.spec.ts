@@ -11,22 +11,24 @@ import { stretch } from './pseudo-text';
 const DEPARTMENT_ID = 'd2';
 
 /* 19.11: on screens whose data comes in parts, one part showed first and the rest came in with a jump, and nobody could
-   tell whether everything had come. The style book's loading (1.5, section 4, #1611): what is known is drawn at once and
-   never moves; the room of what is coming is held at its final size, with one ring and its words, which show 400 ms after
-   the ask and stay at least 500 ms; at 10 s the load says it takes longer than usual, with the ring still turning, and at
-   30 s it gives the ask up and says why; an error answer says why at once; each with Retry, which shows the ring at once,
-   keeps the focus in the room and asks again. The server's answers are held back by the test, and the page runs on the
-   test's clock, paused, so it moves only as far as a test moves it. */
+   tell whether everything had come. The style book's loading (1.5, section 4, #1611, #2099): what is known is drawn at once
+   and never moves; the room of what is coming is held at its final size, with one ring and its words, which show 400 ms
+   after the ask and stay at least 500 ms; a wait of any length says nothing of itself, and the ask goes again by itself at
+   30 s; an error answer says why at once, with Retry, which shows the ring at once, keeps the focus in the room and asks
+   again. The server being away is no failure of a load: the service road says it, and the load keeps coming. The server's
+   answers are held back by the test, and the page runs on the test's clock, paused, so it moves only as far as a test
+   moves it. */
 test.describe.configure({ timeout: 0 });
 const SHOTS = 'e2e/results/loading-shots';
 mkdirSync(SHOTS, { recursive: true });
 
 const pathOf = (url: URL | string) => new URL(url.toString()).pathname;
-/* The style book's times of a load: the ring after 400 ms, at least 500 ms; longer than usual at 10 s; given up at 30 s. */
+/* The style book's times of a load: the ring after 400 ms, at least 500 ms; a long wait at 10 s says nothing; at 30 s the ask
+   goes again by itself. */
 const RING_DELAY_MS = 400;
 const RING_MIN_MS = 500;
 const SLOW_MS = 10_000;
-const FAIL_MS = 30_000;
+const STUCK_MS = 30_000;
 const T0 = Date.parse('2026-11-19T23:00:00Z');
 
 const PLAN = {
@@ -373,40 +375,20 @@ for (const screen of SCREENS) {
       await expect(screen.place(page).locator('.load-busy:not(.unseen), .load-boot:not(.unseen)')).toHaveCount(0);
     });
 
-    test('says at 10 s that it takes longer than usual with the ring still turning, gives the ask up at 30 s and says why, and Retry asks again with the ring at once, the focus in the room', async ({ page }) => {
+    test('says nothing of a long wait: the ring keeps turning with its words, with no card and no Retry, and at 30 s the ask goes again by itself', async ({ page }) => {
       const t = words('en');
       const hold = await openHeld(page, screen, EN);
       await page.clock.runFor(SLOW_MS);
-      const slow = screen.place(page).locator('.load-fail.slow');
-      await expect(slow).toHaveAttribute('role', 'status');
-      await expect(slow.locator('.lf-t')).toHaveText(t.common.tooLong);
-      await expect(slow.locator('.lf-t .spinner')).toBeVisible();
-      await expect(slow.locator('.lf-h')).toHaveText(t.load.slowHint);
-      await expect(roomOf(screen, page)).toHaveAttribute('aria-busy', 'true');
-      await page.clock.runFor(FAIL_MS - SLOW_MS);
-      const failed = screen.place(page).locator('.load-fail:not(.slow)');
-      await expect(failed).toHaveAttribute('role', 'alert');
-      /* In the body's font everywhere, in a window set in monospace too (style book 1.5, section 4, rule 6). */
-      expect(await fontOf(failed)).toBe(await fontOf(page.locator('body')));
-      await expect(failed.locator('.lf-t')).toHaveText(t.load.failed.timeout);
-      await expect(failed.locator('.lf-h')).toHaveText(t.load.hint.timeout);
-      await expect(failed.locator('.spinner')).toHaveCount(0);
-      await expect(roomOf(screen, page)).toHaveAttribute('aria-busy', 'false');
-      if (screen.cancels) await expect.poll(hold.aborted).toBeGreaterThan(0);
-      const retry = failed.getByRole('button', { name: t.common.retry, exact: true });
-      await retry.focus();
-      await page.keyboard.press('Shift+Tab');
-      await page.keyboard.press('Tab');
-      await expect(retry).toBeFocused();
-      expect(await retry.evaluate(el => { const s = getComputedStyle(el); return [el.matches(':focus-visible'), s.outlineStyle, s.outlineWidth]; })).toEqual([true, 'solid', '2px']);
-      const asked = hold.asked();
-      const before = await boxesOf(screen.shown(page, 'en'));
-      await retry.press('Enter');
-      await expect.poll(hold.asked).toBeGreaterThan(asked);
       await expect(busyOf(screen, page)).not.toHaveClass(/unseen/);
-      await expect(roomOf(screen, page)).toBeFocused();
-      /* The focus goes to the room without scrolling it into view: nothing shown moves. */
-      expectSameBoxes(await boxesOf(screen.shown(page, 'en')), before);
+      await expect(busyOf(screen, page)).toHaveText(busyWords(screen, t));
+      await expect(screen.place(page).locator('.load-fail')).toHaveCount(0);
+      await expect(screen.place(page).getByRole('button', { name: t.common.retry, exact: true })).toHaveCount(0);
+      await expect(roomOf(screen, page)).toHaveAttribute('aria-busy', 'true');
+      const asked = hold.asked();
+      await page.clock.runFor(STUCK_MS - SLOW_MS);
+      await expect.poll(hold.asked).toBeGreaterThan(asked);
+      await expect(screen.place(page).locator('.load-fail')).toHaveCount(0);
+      await expect(roomOf(screen, page)).toHaveAttribute('aria-busy', 'true');
       const answered = hold.answered();
       hold.release();
       await answered;
@@ -415,7 +397,7 @@ for (const screen of SCREENS) {
       await expect(screen.place(page).locator('.load-fail')).toHaveCount(0);
     });
 
-    test('says why at once when the server answers with an error, and Retry asks again', async ({ page }) => {
+    test('says why at once when the server answers with an error, and Retry asks again with the ring at once, the focus in the room', async ({ page }) => {
       const t = words('en');
       const hold = await openHeld(page, screen, EN);
       hold.failing(true);
@@ -425,11 +407,26 @@ for (const screen of SCREENS) {
       const failed = screen.place(page).getByRole('alert');
       await expect(failed.locator('.lf-t')).toHaveText(t.load.failed.server);
       await expect(failed.locator('.lf-h')).toHaveText(t.load.hint.server);
+      /* In the body's font everywhere, in a window set in monospace too (style book 1.5, section 4, rule 6). */
+      expect(await fontOf(failed)).toBe(await fontOf(page.locator('body')));
+      await expect(failed.locator('.spinner')).toHaveCount(0);
+      await expect(roomOf(screen, page)).toHaveAttribute('aria-busy', 'false');
       await expect(screen.place(page).locator('.load-busy:not(.unseen), .load-boot:not(.unseen)')).toHaveCount(0);
+      const retry = failed.getByRole('button', { name: t.common.retry, exact: true });
+      await retry.focus();
+      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('Tab');
+      await expect(retry).toBeFocused();
+      expect(await retry.evaluate(el => { const s = getComputedStyle(el); return [el.matches(':focus-visible'), s.outlineStyle, s.outlineWidth]; })).toEqual([true, 'solid', '2px']);
       const asked = hold.asked();
+      const before = await boxesOf(screen.shown(page, 'en'));
       hold.failing(false);
-      await failed.getByRole('button', { name: t.common.retry, exact: true }).click();
+      await retry.press('Enter');
       await expect.poll(hold.asked).toBeGreaterThan(asked);
+      await expect(busyOf(screen, page)).not.toHaveClass(/unseen/);
+      await expect(roomOf(screen, page)).toBeFocused();
+      /* The focus goes to the room without scrolling it into view: nothing shown moves. */
+      expectSameBoxes(await boxesOf(screen.shown(page, 'en')), before);
       const again = hold.answered();
       hold.release();
       await again;
@@ -454,18 +451,19 @@ for (const screen of SCREENS) {
   });
 }
 
-/* Design #1656: past 10 s and once given up, what the room holds stays: the block that says so stands where the ring and its
-   words stood, in the room's first row. */
+/* Design #1656: past 10 s and past 30 s, what the room holds stays, and the ring and its words stay where they stood, in the
+   room's first row, with no card of a long wait. */
 async function expectKeptRoom(page: Page, first: Locator, kept: Locator[]) {
-  for (const [ms, block] of [[SLOW_MS, '.load-fail.slow'], [FAIL_MS - SLOW_MS, '.load-fail:not(.slow)']] as const) {
+  for (const ms of [SLOW_MS, STUCK_MS - SLOW_MS]) {
     await page.clock.runFor(ms);
-    await expect(first.locator(block)).toBeVisible();
+    await expect(first.locator('.load-busy')).toBeVisible();
+    await expect(first.locator('.load-fail')).toHaveCount(0);
     for (const part of kept) await expect(part).toBeVisible();
   }
 }
 
 test.describe('the tracker list while its tasks come', () => {
-  test('keeps its column names, its group head and its held rows past 10 s and once given up', async ({ page }) => {
+  test('keeps its column names, its group head and its held rows past 10 s and past 30 s', async ({ page }) => {
     await openHeld(page, SCREENS[0]!, EN);
     const rows = page.locator('.tr-held .tr-rows > .tr-row');
     await expectKeptRoom(page, rows.first(), [page.locator('.tr-held .tr-head'), page.locator('.tr-held .tr-group-head'), rows.nth(1)]);
@@ -513,10 +511,10 @@ test.describe('the tracker list while its tasks come', () => {
     { lang: 'ru', theme: 'cyberpunk', width: 375 },
   ];
 
-  /* #1844: "Taking longer than usual" and load error must never push already-rendered skeleton rows down (deltaY === 0). */
+  /* #1844: a long wait and a load error must never push already-rendered skeleton rows down (deltaY === 0). */
   for (const look of SHIFT_LOOKS) {
     const label = `${look.lang}-${look.dir ?? 'ltr'}-${look.theme}-${look.width}`;
-    test(`keeps every held row at deltaY === 0 across loading, slow, error, Retry and arrival, ${label}`, async ({ page }) => {
+    test(`keeps every held row at deltaY === 0 across loading, a long wait, error, Retry and arrival, ${label}`, async ({ page }) => {
       const t = words(look.lang);
       const hold = await openHeld(page, SCREENS[0]!, look);
       await page.clock.runFor(RING_DELAY_MS);
@@ -528,30 +526,21 @@ test.describe('the tracker list while its tasks come', () => {
       const beforeRows = await boxesOf(await rows.all());
       const beforeHeads = await boxesOf(heads);
 
-      await page.clock.runFor(SLOW_MS - RING_DELAY_MS);
-      const slow = rows.first().locator('.load-fail.slow');
-      await expect(slow).toBeVisible();
-      expect(await clippedIn(slow)).toEqual([]);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      expectSameBoxes(await boxesOf(await rows.all()), beforeRows);
-      expectSameBoxes(await boxesOf(heads), beforeHeads);
+      /* A long wait, even past 30 s, says nothing and moves nothing. */
+      for (const ms of [SLOW_MS - RING_DELAY_MS, STUCK_MS - SLOW_MS]) {
+        await page.clock.runFor(ms);
+        await expect(rows.first().locator('.load-fail')).toHaveCount(0);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        expectSameBoxes(await boxesOf(await rows.all()), beforeRows);
+        expectSameBoxes(await boxesOf(heads), beforeHeads);
+      }
 
-      await page.clock.runFor(FAIL_MS - SLOW_MS);
-      const timedOut = rows.first().locator('.load-fail:not(.slow)');
-      await expect(timedOut).toBeVisible();
-      expect(await clippedIn(timedOut)).toEqual([]);
-      expectSameBoxes(await boxesOf(await rows.all()), beforeRows);
-      expectSameBoxes(await boxesOf(heads), beforeHeads);
-
-      /* Retry followed by an immediate 500 server error keeps every held row in place too. */
-      const askedForErr = hold.asked();
+      /* A 500 server error keeps every held row in place too. */
       hold.failing(true);
       const failed = hold.answered();
-      await timedOut.getByRole('button', { name: t.common.retry, exact: true }).click();
-      await expect.poll(hold.asked).toBeGreaterThan(askedForErr);
       hold.release();
       await failed;
-      const serverErr = rows.first().locator('.load-fail:not(.slow)');
+      const serverErr = rows.first().locator('.load-fail');
       await expect(serverErr.locator('.lf-t')).toHaveText(t.load.failed.server);
       expect(await clippedIn(serverErr)).toEqual([]);
       expectSameBoxes(await boxesOf(await rows.all()), beforeRows);
@@ -593,14 +582,18 @@ test.describe('the tracker list while its tasks come', () => {
     await page.clock.runFor(RING_DELAY_MS);
     await page.evaluate(() => document.fonts.ready);
     const beforeRows = await boxesOf(await rows.all());
-    for (const [ms, sel] of [[SLOW_MS - RING_DELAY_MS, '.load-fail.slow'], [FAIL_MS - SLOW_MS, '.load-fail:not(.slow)']] as const) {
-      await page.clock.runFor(ms);
-      const notice = rows.first().locator(sel);
-      await expect(notice).toBeVisible();
-      expectSameBoxes(await boxesOf(await rows.all()), beforeRows);
-      const [listBox, noticeBox] = await boxesOf([page.locator('.tr-held .tr-rows'), notice]);
-      expect(listBox.y + listBox.height).toBeGreaterThanOrEqual(noticeBox.y + noticeBox.height - 0.5);
-    }
+    await page.clock.runFor(STUCK_MS);
+    await expect(rows.first().locator('.load-fail')).toHaveCount(0);
+    expectSameBoxes(await boxesOf(await rows.all()), beforeRows);
+    hold.failing(true);
+    const failed = hold.answered();
+    hold.release();
+    await failed;
+    const notice = rows.first().locator('.load-fail');
+    await expect(notice).toBeVisible();
+    expectSameBoxes(await boxesOf(await rows.all()), beforeRows);
+    const [listBox, noticeBox] = await boxesOf([page.locator('.tr-held .tr-rows'), notice]);
+    expect(listBox.y + listBox.height).toBeGreaterThanOrEqual(noticeBox.y + noticeBox.height - 0.5);
   });
 
   /* Pictures and Y-coordinate proof for Design (#1844), only when HH_TRACKER_SHIFT_SHOTS=1. */
@@ -625,17 +618,18 @@ test.describe('the tracker list while its tasks come', () => {
           await inside();
           await page.screenshot({ path: `${SHIFT_SHOT_DIR}/tracker-shift-${name}-loading.png`, animations: 'disabled' });
 
-          await page.clock.runFor(SLOW_MS - RING_DELAY_MS);
-          const slow = rows.first().locator('.load-fail.slow');
-          await expect(slow).toBeVisible();
-          expect(await clippedIn(slow)).toEqual([]);
+          await page.clock.runFor(STUCK_MS - RING_DELAY_MS);
+          await expect(rows.first().locator('.load-fail')).toHaveCount(0);
           await inside();
-          const ySlow = await ys();
-          expect(maxShift(ySlow)).toBeLessThanOrEqual(0.5);
-          await page.screenshot({ path: `${SHIFT_SHOT_DIR}/tracker-shift-${name}-slow.png`, animations: 'disabled' });
+          const yWait = await ys();
+          expect(maxShift(yWait)).toBeLessThanOrEqual(0.5);
+          await page.screenshot({ path: `${SHIFT_SHOT_DIR}/tracker-shift-${name}-wait.png`, animations: 'disabled' });
 
-          await page.clock.runFor(FAIL_MS - SLOW_MS);
-          const failed = rows.first().locator('.load-fail:not(.slow)');
+          hold.failing(true);
+          const answered = hold.answered();
+          hold.release();
+          await answered;
+          const failed = rows.first().locator('.load-fail');
           await expect(failed).toBeVisible();
           expect(await clippedIn(failed)).toEqual([]);
           await inside();
@@ -656,7 +650,7 @@ test.describe('the tracker list while its tasks come', () => {
           const yArrive0 = Number((await realFirst.boundingBox())!.y.toFixed(2));
           const deltaArrive0 = Math.abs(yArrive0 - yLoad[0]!);
           expect(deltaArrive0).toBeLessThanOrEqual(0.5);
-          console.log(`TRACKER_SHIFT ${name} rows=${yLoad.length} yLoad=[${yLoad.slice(0, 6).join(',')}] maxDeltaSlow=${maxShift(ySlow).toFixed(2)} maxDeltaFail=${maxShift(yFail).toFixed(2)} deltaArrive0=${deltaArrive0.toFixed(2)}`);
+          console.log(`TRACKER_SHIFT ${name} rows=${yLoad.length} yLoad=[${yLoad.slice(0, 6).join(',')}] maxDeltaWait=${maxShift(yWait).toFixed(2)} maxDeltaFail=${maxShift(yFail).toFixed(2)} deltaArrive0=${deltaArrive0.toFixed(2)}`);
         });
       }
     }
@@ -664,7 +658,7 @@ test.describe('the tracker list while its tasks come', () => {
 });
 
 test.describe('the plans while they come', () => {
-  test('draw their search field, their count line and their table head at once, hold plan rows, and keep them past 10 s and once given up', async ({ page }) => {
+  test('draw their search field, their count line and their table head at once, hold plan rows, and keep them past 10 s and past 30 s', async ({ page }) => {
     const t = words('en');
     await openHeld(page, SCREENS[2]!, EN);
     const room = page.locator('section.subs .load-hold');
@@ -680,7 +674,7 @@ test.describe('the plans while they come', () => {
 test.describe('the people and the machines while they come', () => {
   const screenOf = (name: string) => SCREENS.find(screen => screen.name === name)!;
 
-  test('people: draw their table head at once, hold person rows, and keep them past 10 s and once given up', async ({ page }) => {
+  test('people: draw their table head at once, hold person rows, and keep them past 10 s and past 30 s', async ({ page }) => {
     await openHeld(page, screenOf('people'), EN);
     const room = page.locator('section.people .load-hold');
     await expect(room.locator('table.ptable thead th').first()).toBeVisible();
@@ -689,7 +683,7 @@ test.describe('the people and the machines while they come', () => {
     await expectKeptRoom(page, rows.first(), [room.locator('table.ptable thead'), rows.nth(1)]);
   });
 
-  test('machines: draw the pool, the search field, the count line and the table head at once, hold machine rows, and keep them past 10 s and once given up', async ({ page }) => {
+  test('machines: draw the pool, the search field, the count line and the table head at once, hold machine rows, and keep them past 10 s and past 30 s', async ({ page }) => {
     const t = words('en');
     await openHeld(page, screenOf('machines'), EN);
     const room = page.locator('section.machines .load-hold');
@@ -744,22 +738,26 @@ for (const screen of SCREENS) for (const look of LOOKS) {
     await expect(busyOf(screen, page)).not.toHaveClass(/unseen/);
     await inside();
     await shot('loading');
-    await page.clock.runFor(SLOW_MS - RING_DELAY_MS);
-    await expect(screen.place(page).locator('.load-fail.slow .lf-t')).toHaveText(t.common.tooLong);
+    await page.clock.runFor(STUCK_MS - RING_DELAY_MS);
+    await expect(screen.place(page).locator('.load-fail')).toHaveCount(0);
+    await inside();
+    await shot('wait');
+    hold.failing(true);
+    const answered = hold.answered();
+    hold.release();
+    await answered;
+    const failed = screen.place(page).locator('.load-fail');
+    await expect(failed.locator('.lf-t')).toHaveText(t.load.failed.server);
     await screen.place(page).getByRole('button', { name: t.common.retry, exact: true }).focus();
     await page.keyboard.press('Shift+Tab');
     await page.keyboard.press('Tab');
-    await inside();
-    await shot('slow');
-    await page.clock.runFor(FAIL_MS - SLOW_MS);
-    const failed = screen.place(page).locator('.load-fail:not(.slow)');
-    await expect(failed.locator('.lf-t')).toHaveText(t.load.failed.timeout);
     /* The button's quoted name stays on one line (Design #1654), and each sentence reads in its own language's direction,
        its period at its end, on a page laid out right to left too (#1621). */
     expect(await failed.locator('.lf-h .lf-name').evaluate(el => el.getClientRects().length)).toBe(1);
     expect(await failed.locator('p').evaluateAll(words => words.every(p => p.matches(':dir(ltr)')))).toBe(true);
     await inside();
     await shot('failed');
+    hold.failing(false);
     await screen.place(page).getByRole('button', { name: t.common.retry, exact: true }).click();
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(busyOf(screen, page)).not.toHaveClass(/unseen/);
@@ -910,11 +908,14 @@ for (const screen of SCREENS) for (const width of [375, 1440]) {
     await page.clock.runFor(RING_DELAY_MS);
     await expect(busyOf(screen, page)).not.toHaveClass(/unseen/);
     await check('loading');
-    await page.clock.runFor(SLOW_MS - RING_DELAY_MS);
-    await expect(screen.place(page).locator('.load-fail.slow')).toBeVisible();
-    await check('slow');
-    await page.clock.runFor(FAIL_MS - SLOW_MS);
-    await expect(screen.place(page).locator('.load-fail:not(.slow)')).toBeVisible();
+    await page.clock.runFor(STUCK_MS - RING_DELAY_MS);
+    await expect(screen.place(page).locator('.load-fail')).toHaveCount(0);
+    await check('wait');
+    hold.failing(true);
+    const answered = hold.answered();
+    hold.release();
+    await answered;
+    await expect(screen.place(page).locator('.load-fail')).toBeVisible();
     await check('failed');
     hold.release();
   });

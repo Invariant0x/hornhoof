@@ -113,10 +113,7 @@ async function anyMigrationToApply(pool: pg.Pool, db: MigratingDb, config: Migra
 
 async function applyMigrations(pool: pg.Pool, db: MigratingDb, config: MigrationConfig): Promise<void> {
   await pool.query(BEFORE_MIGRATIONS);
-  await withJournalBackAfter(pool, async () => {
-    await migrate(db, config);
-    await applyMissingMigrations(db, config);
-  });
+  await withJournalBackAfter(pool, () => migrateInOrder(db, config, migrate));
 }
 
 const JOURNAL_FUNCTION_IS_THERE = `SELECT to_regprocedure('net.attach_journal()') IS NOT NULL AS needed`;
@@ -152,10 +149,33 @@ async function unappliedMigrations<T extends PgQueryResultHKT, S extends Record<
   return readMigrationFiles(config).filter(migration => !applied.has(migration.folderMillis));
 }
 
-/* Merged branches can put an unrecorded migration below Drizzle's newest timestamp. */
-export async function applyMissingMigrations<T extends PgQueryResultHKT, S extends Record<string, unknown>>(db: PgDatabase<T, S>, config: MigrationConfig): Promise<void> {
+/* The app's way through its migrations: first those a merged branch left unrecorded below drizzle's newest record, in the
+   order of the journal, as the ones above may build on them (0172 indexes the not_before 0046 adds, which a turn-5
+   history lacks); then drizzle's own run, which applies those above its newest record; then any still left below it.
+   run is the drizzle migrator of the database's driver. */
+export async function migrateInOrder<T extends PgQueryResultHKT, S extends Record<string, unknown>, D extends PgDatabase<T, S>>(
+  db: D, config: MigrationConfig, run: (db: D, config: MigrationConfig) => Promise<void>,
+): Promise<void> {
+  await applyMissingMigrations(db, config, { belowNewest: true });
+  await run(db, config);
+  await applyMissingMigrations(db, config);
+}
+
+const rowsOf = <R>(answer: unknown): R[] => (answer as { rows: R[] }).rows;
+
+/* Merged branches can put an unrecorded migration below Drizzle's newest timestamp. belowNewest: only those, and none on
+   a database with no record of a migration yet, which drizzle's run makes. */
+export async function applyMissingMigrations<T extends PgQueryResultHKT, S extends Record<string, unknown>>(db: PgDatabase<T, S>, config: MigrationConfig, opts: { belowNewest?: boolean } = {}): Promise<void> {
   const journal = JSON.parse(readFileSync(`${config.migrationsFolder}/meta/_journal.json`, 'utf8')) as { entries: { tag: string; when: number }[] };
-  for (const migration of await unappliedMigrations(db, config)) {
+  let newest = Number.POSITIVE_INFINITY;
+  if (opts.belowNewest) {
+    const [there] = rowsOf<{ there: boolean }>(await db.execute(sql`SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL AS there`));
+    if (!there?.there) return;
+    const [record] = rowsOf<{ newest: string | number | null }>(await db.execute(sql`SELECT max(created_at) AS newest FROM drizzle.__drizzle_migrations`));
+    if (record?.newest === null || record?.newest === undefined) return;
+    newest = Number(record.newest);
+  }
+  for (const migration of (await unappliedMigrations(db, config)).filter(m => m.folderMillis < newest)) {
     await db.transaction(async tx => {
       for (const statement of migration.sql) await tx.execute(sql.raw(statement));
       await tx.execute(sql`insert into drizzle.__drizzle_migrations (hash, created_at) values (${migration.hash}, ${migration.folderMillis})`);

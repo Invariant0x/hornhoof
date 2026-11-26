@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import * as testTerminal from '../src/ui/AgentTerminal';
+import { ServiceStrip, ServiceWindow } from '../src/ui/ServiceRoad';
 import type { EventView, OrchestratorState } from '../src/types';
 import { ME, mockApi, ORG } from './api-mock';
 import { decl } from './css';
@@ -384,6 +385,21 @@ describe("an agent's live terminal in its window", () => {
     expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
     ws.program(true);
     await waitFor(() => expect(terminal.queryByRole('status')).not.toBeInTheDocument());
+  });
+
+  it('leaves the service strip visible while a terminal is still opening', async () => {
+    const road = render(<LanguageProvider><ServiceWindow /><ServiceStrip /></LanguageProvider>);
+    const { container } = open();
+    await socket();
+    const terminal = within(container.querySelector<HTMLElement>('.t-term')!);
+    expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
+    vi.stubGlobal('navigator', { ...navigator, onLine: false });
+    act(() => { window.dispatchEvent(new Event('offline')); });
+    expect(screen.getByRole('dialog', { name: 'No internet' })).toBeVisible();
+    fireEvent.click(within(road.container).getByRole('button', { name: 'Close' }));
+    expect(road.container.querySelector('.svc-strip')).toHaveTextContent('No internet');
+    expect(container.querySelector('.t-load .svc-loader')).toBeNull();
+    expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
   });
 
   it('shows what a program that sleeps printed, and says it sleeps until the next task, with no loader over it', async () => {
@@ -808,7 +824,7 @@ describe("an agent's live terminal in its window", () => {
     terms[0]!.type('old\r');
     clock.mockReturnValue(now + 60_000);
     for (let i = 0; i < 300; i++) terms[0]!.type('k');
-    await note('Too much text was typed while the terminal was disconnected. Wait for it to connect, then type again.', 'alert');
+    await note('Too much text was typed before the terminal was ready. Wait until it is ready, then type again.', 'alert');
     ws.opened();
     clock.mockRestore();
     expect(ws.sent).toHaveLength(255);

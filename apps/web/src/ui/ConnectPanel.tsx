@@ -43,9 +43,8 @@ export function ConnectPanel({ onDone, onCommand, onSkip, skipLabel }: Props) {
       <Edge className="panel form-card" cut={12}>
         <div className="form-head">
           <h2 className="form-title">{t.subs.connectHeading}</h2>
-          <p className="muted">{t.subs.runThis}</p>
         </div>
-        <CommandBox command={command} />
+        <CommandBox command={command} run={t.subs.runThis} />
         <p className="muted">{t.subs.joinOnce}</p>
         <div className="form-foot">
           <button className="btn" type="button" onClick={onDone}>{t.common.done}</button>

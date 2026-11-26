@@ -15,7 +15,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A checking stage follows its owner when the owner's plan or model changes, by hand, through a fallback plan and back, or because a plan leaves the company: the owner keeps the stage when every rule that chose it still holds, and otherwise the stage waits with its reason and the department head is told, instead of every later result being refused with "The checking assignment changed".
 - A short one-shot Antigravity call no longer hangs on a long prompt: agy reads its prompt on stdin, and a one-shot call ends at its time limit.
 - A check started from inside a check that already holds the machine's check slot runs in that slot instead of waiting behind its own parent in the queue.
-- A node saying hello, and the server's check each minute of sign-ins that have not healed, no longer read every job that node ever ran to find the last turn of each employee on it, or every turn that ever failed for want of a sign-in with all its columns: on 120 000 jobs that took 140 to 410 ms of the database each time, and 2 s for the hellos of 12 nodes coming back together after a restart, long enough for the nodes' own updates and the leadership lease to time out. The server now looks each up in an index, one look per employee or node (under 1 ms), and nothing the node is told or the owner reads changes. Migration 0174 adds the indexes `jobs_node_agent_conversation` and `jobs_not_logged_in` (a few seconds on a large database).
+- A node saying hello, and the server's check each minute of sign-ins that have not healed, no longer read every job that node ever ran to find the last turn of each employee on it, or every turn that ever failed for want of a sign-in with all its columns: on 120 000 jobs that took 140 to 410 ms of the database each time, and 2 s for the hellos of 12 nodes coming back together after a restart, long enough for the nodes' own updates and the leadership lease to time out. The server now looks each up in an index, one look per employee or node (under 1 ms), and nothing the node is told or the owner reads changes. Migration 0173 adds the indexes `jobs_node_agent_conversation` and `jobs_not_logged_in` (a few seconds on a large database).
 - A merge refuses a database that holds more than the one company it merges, or any row of another company, before it writes anything, and a city that PUT /api/world/layout would refuse is never written by a merge or a pick: the leader keeps its own and the orchestrator sees why.
 
 ### Added
@@ -44,6 +44,13 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A restore of a database backup also keeps the copies the CEO set, from the database it replaces, and the area each machine gives the company's files, none included, so a restore neither fills a machine whose owner set less nor drops a limit.
 - A company with one machine keeps one copy of each file. An upload is answered after at most 10 seconds even when the machines picked for the file do not keep it yet, and at once when they are away.
 - Files on a task of no turn go 30 days after the task closed, and a test or work run's logs and files 30 days after the run ended, also on a task still open; a file an agent or a person put on a task under a name like a run's, such as `test-3-plan.md`, is no run's and stays. Migration `run_files` names its run on each run's file, and finds the files of earlier runs by their task, name, the turn that started the run and their time. On a server updated from 0.43 these two rules wait for the CEO's yes to the move, as the old column is still there until then.
+
+## [0.44.4] - 2026-11-26
+
+### Fixed
+
+- Connect windows ask for your Hornhoof password while the command is locked. After you enter it, the command takes the place of the password field and the window tells you how to copy it.
+- Done and Close dismiss a connect command from the orchestrator immediately, even if the connection is still pending or failed. Refreshing the window keeps the command dismissed.
 
 ## [0.44.3] - 2026-11-25
 
