@@ -339,8 +339,9 @@ describe('department owner answering head on a large company', () => {
       </LanguageProvider>,
     );
 
-    expect(await screen.findByRole('dialog', { name: 'Hornhoof is not responding' }, { timeout: 1000 })).toBeInTheDocument();
-    /* No page of its own and nothing to press but the window's close. */
+    expect(await screen.findByText('Hornhoof is not responding', {}, { timeout: 1000 })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Hornhoof is not responding');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Hornhoof is not responding' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
     expect(container.childElementCount).toBeGreaterThan(0);

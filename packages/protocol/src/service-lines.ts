@@ -15,9 +15,7 @@ export const SERVICE_LINES = {
 /* What the window's one button is called to a screen reader. */
 export const SERVICE_CLOSE = 'Close';
 
-/* The front has no app bundle while the server updates. Both entry points use these words and the same loader CSS. */
-export const BOOT_WORDS = { loading: 'Loading' } as const;
-
+/* The front has no app bundle while the server updates. Both entry points use the same loader CSS. */
 export const BOOT_STYLE = `
 .boot-screen { position: absolute; inset: 0; max-inline-size: none; display: grid; justify-items: center; align-content: center; gap: 16px; padding: 16px; text-align: center; }
 .boot-mark { display: block; inline-size: 48px; block-size: 48px; }
