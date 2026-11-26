@@ -11,7 +11,7 @@ import { Login } from './screens/Login';
 import { Setup } from './screens/Setup';
 import { Shell } from './screens/Shell';
 import type { Me } from './types';
-import { ServiceLoader, ServiceStrip, ServiceWindow, useServiceNotice, useServiceView } from './ui/ServiceRoad';
+import { BootScreen, ServiceLoader, ServiceStrip, ServiceWindow, useServiceNotice, useServiceView } from './ui/ServiceRoad';
 import { VersionMark } from './ui/VersionMark';
 import { parseRoute } from './routes';
 
@@ -132,9 +132,10 @@ function Screens() {
 
   switch (screen.kind) {
     case 'loading':
+      return <BootScreen />;
     case 'away':
     case 'error':
-      return <ServiceLoader />;
+      return <ServiceLoader boot />;
     case 'invite':
       return <AcceptInvite token={screen.token} onDone={home} />;
     case 'setup':

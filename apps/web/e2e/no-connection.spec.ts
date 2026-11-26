@@ -2,6 +2,7 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { awayPage } from '../../server/src/net/away-page';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { serveApi } from './api';
@@ -120,9 +121,9 @@ for (const mode of MODES) {
        drawn: one status on the screen. */
     await page.keyboard.press('Escape');
     await expect(windowOf(page, title)).toHaveCount(0);
-    const loader = page.locator('.svc-loader');
+    const loader = page.locator(mode === 'updating' ? '.boot-screen' : '.svc-loader');
     await expect(loader).toBeVisible();
-    await expect(loader).toHaveText(title);
+    await expect(loader).toHaveText(mode === 'updating' ? 'Updating…' : title);
     await expect(loader).toHaveAttribute('aria-busy', 'true');
     await expect(strip(page)).toHaveCount(0);
     await expect(page.getByRole('status')).toHaveCount(1);
@@ -131,6 +132,49 @@ for (const mode of MODES) {
     await until(page, async () => (await loader.count()) === 0);
     await expect(page.getByRole('navigation')).toBeVisible();
     expect(loaded.n).toBe(1);
+  });
+}
+
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`startup and standalone updating use the same loader with motion set to ${reducedMotion}`, async ({ browser }) => {
+    for (const colorScheme of ['light', 'dark'] as const) {
+      for (const [width, height] of [[1440, 900], [375, 700]] as const) {
+        const context = await browser.newContext({ viewport: { width, height }, colorScheme, reducedMotion });
+        try {
+          const startup = await context.newPage();
+          await startup.route('**/api/setup', () => {});
+          await startup.goto('/');
+          const update = await context.newPage();
+          await update.route('**/updating-test', route => route.fulfill({ status: 503, contentType: 'text/html', body: awayPage('updating') }));
+          await update.goto('/updating-test');
+
+          const loading = startup.locator('.boot-screen');
+          const updating = update.locator('.boot-screen');
+          await expect(loading).toHaveText(en.common.loading);
+          await expect(updating).toHaveText('Updating…');
+          expect(await loading.boundingBox()).toEqual({ x: 0, y: 0, width, height });
+          expect(await updating.boundingBox()).toEqual(await loading.boundingBox());
+          expect(await updating.locator('.boot-mark').boundingBox()).toEqual(await loading.locator('.boot-mark').boundingBox());
+          const animation = async (loader: typeof loading) => loader.locator('.boot-dots > i').evaluateAll(dots => dots.map(dot => {
+            const css = getComputedStyle(dot);
+            return [css.animationName, css.animationDuration, css.animationDelay];
+          }));
+          const animations = await animation(loading);
+          expect(animations).toHaveLength(3);
+          expect(await animation(updating)).toEqual(animations);
+          if (reducedMotion === 'reduce') {
+            expect(animations.every(([name]) => name === 'none')).toBe(true);
+            await shot(startup, `startup-loading-${colorScheme}-${width}`);
+            await shot(update, `startup-updating-${colorScheme}-${width}`);
+          } else {
+            expect(animations.every(([name]) => name !== 'none')).toBe(true);
+            expect(new Set(animations.map(([, , delay]) => delay)).size).toBe(3);
+          }
+        } finally {
+          await context.close();
+        }
+      }
+    }
   });
 }
 

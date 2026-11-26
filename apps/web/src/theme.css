@@ -1681,7 +1681,7 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .dv-acts[data-fit="icons"] .dv-tools > .hbtn + .hbtn { border-inline-start: 1px solid var(--line); }
 .dv-acts[data-fit="icons"] > .btn { margin-inline-start: auto; padding-block: 8px; }
 /* The map runs to the bottom of the screen and names the version over its own corner (#1590). */
-.app-layout:has(.map-version) > .version-mark { display: none; }
+.app-layout:has(:is(.map-version, .boot-screen)) > .version-mark { display: none; }
 /* The actions take the corner the version sits in on the map. */
 body:has(.dview) .version-mark { display: none; }
 /* A form keeps the footer below it: the footer's row comes from the screen, so a footer that went with a form would move

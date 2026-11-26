@@ -108,6 +108,7 @@ export const ru: Messages = {
       telegram: 'Настроить общение с вами в Telegram', assistant: 'Настроить моего личного помощника',
     },
   },
+  boot: { loading: 'Загрузка', updating: 'Обновление' },
   common: {
     loading: 'Загрузка…',
     tooLong: 'Дольше обычного',

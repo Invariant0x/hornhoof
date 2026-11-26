@@ -53,15 +53,21 @@ async function frontWithNoKeeper(): Promise<Target> {
 const fake = (headers: http.IncomingHttpHeaders, url: string, method = 'GET') => ({ headers, url, method }) as http.IncomingMessage;
 
 /* A page that reaches nothing outside itself and carries only the logo and one English line. */
-function expectLogoAndOneLine(body: string, line: 'No connection' | 'Updating', refreshS: number): void {
+function expectLogoAndOneLine(body: string, line: 'No connection' | 'Updating…', refreshS: number): void {
   expect(body).toContain('<html lang="en">');
   expect(body).toContain(`<meta http-equiv="refresh" content="${refreshS}">`);
   expect(body).toContain('<meta name="viewport"');
-  expect(body).toContain('class="sign"');
+  expect(body).toContain('class="boot-mark"');
   expect(body).toContain('class="mk-dome"');
   expect(body).toContain('class="mk-base"');
   expect(body).toContain('class="mk-dot"');
-  expect(body).toContain(`<p>${line}</p>`);
+  if (line === 'Updating…') {
+    expect(body).toContain('<main class="boot-screen" role="status" aria-busy="true">');
+    expect(body).toContain('<span class="boot-label">Updating…</span>');
+    expect(body).toContain('<span class="boot-dots" aria-hidden="true"><i></i><i></i><i></i></span>');
+  } else {
+    expect(body).toContain(`<p>${line}</p>`);
+  }
   /* Nothing else: no card, heading, hint, counter, button, script or second language. */
   expect(body).not.toMatch(/<h[1-6]\b|<button\b|onclick=|Checking every|Reload|opens by itself|takes a few minutes|installing an update/i);
   expect(body).not.toMatch(/[А-Яа-яЁё]/);
@@ -86,14 +92,14 @@ describe('the page of a hop with no server behind it', () => {
     }
   });
 
-  it('shows only the logo and "Updating" in English while an update installs, with the same stylesheet', () => {
+  it('shows the startup loader and "Updating…" in English while an update installs', () => {
     for (const headers of [PAGE, RU, { accept: '*/*' }, {}]) {
       const answer = maintenanceAnswer(fake(headers, '/tasks'));
       expect(answer.status).toBe(503);
       expect(answer.headers['Content-Type']).toBe('text/html; charset=utf-8');
       expect(answer.headers['Retry-After']).toBe('10');
       expect(answer.headers.Vary).toBeUndefined();
-      expectLogoAndOneLine(answer.body, 'Updating', 10);
+      expectLogoAndOneLine(answer.body, 'Updating…', 10);
       expect(answer.body).not.toContain('No connection');
       expect(answer.body.match(/<style>[^]*?<\/style>/)![0]).toBe(awayPage('lost').match(/<style>[^]*?<\/style>/)![0]);
     }
