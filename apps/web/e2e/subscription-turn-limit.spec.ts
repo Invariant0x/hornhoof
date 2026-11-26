@@ -46,8 +46,16 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     await expect(problem).toBeVisible();
     const settings = card.locator('form').filter({ has: page.getByRole('spinbutton', { name: ui.field }) });
     expect(await settings.count()).toBe(1);
-    await settings.scrollIntoViewIfNeeded();
-    await expect(settings).toBeInViewport({ ratio: 1 });
+    await settings.evaluate(form => form.scrollIntoView({ block: 'center', inline: 'nearest' }));
+    const viewport = page.viewportSize()!;
+    for (const target of [input, problem]) {
+      const bounds = await target.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.y).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+    }
     await expect(input).toBeFocused();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     if (lang === 'en') await page.screenshot({ path: shot('field-error') });
