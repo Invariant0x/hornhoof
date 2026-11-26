@@ -4,13 +4,14 @@ import { deferred } from '../../../test-support/deferred.mjs';
 import { heardAgain } from '../src/live';
 import { Settings } from '../src/screens/Settings';
 import { Shell } from '../src/screens/Shell';
+import { Subscriptions } from '../src/screens/Subscriptions';
 import type { GoalView, UpdatesView } from '../src/types';
 import { DeptBranches } from '../src/ui/DeptBranches';
 import { service } from '../src/service-state';
 import { page } from '../src/updates';
 import { en } from '../src/i18n/en';
 import { MACHINES, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS, TASK_DETAIL, TASKS } from './api-mock';
-import { userEvent, waitFor } from './subscriptions-helpers';
+import { lists, openAll, userEvent, waitFor } from './subscriptions-helpers';
 
 /* While the update panel shows an update in progress, a load the server refused for maintenance draws no bar of its own:
    the panel already says Hornhoof takes no changes. Once the updates poll gets an answer again, every such load asks
@@ -59,6 +60,25 @@ const takenIn = () => act(async () => { for (let i = 0; i < 20; i++) await new P
 const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name });
 /* These tests exercise the shell under the loading screen. App-level visibility is checked separately. */
 const updateScreen = () => expect(service.snapshot()).toMatchObject({ place: 'boot', message: { kind: 'updating' } });
+
+it.each(['retry', 'cancel'] as const)('leaves a plan %s refused during an outage to the service road', async action => {
+  const plan = { ...SUBS[1]!, id: 's-antigravity', provider: 'antigravity' as const, label: 'Antigravity',
+    connecting: { nodeId: 'm1', hostname: 'dev-laptop', state: 'too_long', step: 'models',
+      since: '2026-10-30T02:00:00Z', until: '2099-10-30T02:05:00Z', error: null, code: null, line: null } };
+  const path = `/api/subscriptions/${plan.id}/connecting/${action}`;
+  const calls = lists({
+    'GET /api/subscriptions': [200, { subscriptions: [plan] }],
+    'GET /api/build': [...REFUSED],
+    [`POST ${path}`]: [...REFUSED],
+  });
+  render(<Subscriptions me={ME} onHome={() => {}} />);
+  await openAll();
+  const label = action === 'retry' ? en.subs.connection.retryLabel : en.subs.connection.cancelLabel;
+  await userEvent.click(await waitFor(() => screen.getByRole('button', { name: label('Antigravity') })));
+  await takenIn();
+  expect(calls.some(c => c.method === 'POST' && c.path === path)).toBe(true);
+  expect(bars()).toEqual([]);
+});
 
 /* The Shell under a held server, with the panel saying maintenance after the next poll on the test's clock. */
 async function held(routes: Record<string, Answer>, available?: Record<string, Answer>) {

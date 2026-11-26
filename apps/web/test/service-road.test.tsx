@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connection } from '../src/connection';
 import { LanguageProvider, loadMessages } from '../src/i18n';
 import { ru } from '../src/i18n/ru';
 import { SERVICE_LINES, service } from '../src/service-state';
+import { MaterialViewer } from '../src/ui/MaterialViewer';
 import { ServiceLayout, ServiceLoader, ServiceStrip, ServiceWindow, useServiceNotice } from '../src/ui/ServiceRoad';
 
 /* The service road, drawn (#2098, #2099, Design #2100): window, then strip, then gone; the loader in a page area's own place.
@@ -33,6 +34,29 @@ beforeEach(() => {
   vi.useFakeTimers();
   service.reset();
   connection.reset();
+});
+
+it('lets the service window take focus over a preview and hides the preview during an update', async () => {
+  const { container } = render(<LanguageProvider><ServiceLayout>
+    <MaterialViewer items={[{ id: 'a', name: 'Attachment.txt', kind: 'file', state: 'available' }]}
+      activeId="a" opener={null} onSelect={() => {}} onClose={() => {}} />
+  </ServiceLayout></LanguageProvider>);
+  const preview = document.querySelector('.mv-back')!;
+  expect(container).toHaveAttribute('inert');
+  expect(preview).toBeVisible();
+
+  await lose();
+  const dialog = screen.getByRole('dialog', { name: SERVICE_LINES.lost });
+  const close = within(dialog).getByRole('button', { name: 'Close' });
+  expect(close.closest('[inert]')).toBeNull();
+  expect(close).toHaveFocus();
+  expect(preview).not.toBeVisible();
+  fireEvent.click(close);
+  expect(preview).toBeVisible();
+
+  act(() => service.setUpdate(true));
+  expect(preview).not.toBeVisible();
+  expect(screen.getByRole('status')).toHaveTextContent('Updating…');
 });
 
 afterEach(() => {
@@ -151,6 +175,7 @@ describe('the window and the strip', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Loading…');
     await lose();
     expect(screen.getByRole('status')).toHaveTextContent(SERVICE_LINES.lost);
+    expect(screen.getByRole('status')).not.toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
@@ -165,12 +190,14 @@ describe('the window and the strip', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent(SERVICE_LINES.offline);
   });
 
-  it('dismisses a notice without giving it the connection strip', () => {
+  it('keeps a dismissed notice in the strip until it ends', () => {
     road();
     act(() => service.notify('page', 'A notice'));
     expect(screen.getByRole('dialog')).toHaveTextContent('A notice');
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('A notice');
+    act(() => service.clear('page'));
     expect(screen.queryByRole('status')).toBeNull();
   });
 
@@ -210,8 +237,9 @@ describe('the loader of a page area with nothing cached', () => {
   it('shows the logo, the dots and the same line in place, with no window of its own and nothing to press', async () => {
     const { container } = render(<LanguageProvider><ServiceLoader /></LanguageProvider>);
     await lose();
+    act(() => service.close());
     const loader = screen.getByRole('status');
-    expect(loader).toHaveAttribute('aria-busy', 'true');
+    expect(loader).not.toHaveAttribute('aria-busy', 'true');
     expect(loader).toHaveAttribute('aria-live', 'polite');
     expect(loader).toHaveTextContent(SERVICE_LINES.lost);
     expect(loader.querySelector('svg .mk-dome')).not.toBeNull();
@@ -219,6 +247,16 @@ describe('the loader of a page area with nothing cached', () => {
     expect(container.querySelectorAll('button, [role="dialog"]')).toHaveLength(0);
     await serverBack();
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('draws no second outage line behind the service window on an uncached page', async () => {
+    const { container } = render(<LanguageProvider><ServiceLayout><ServiceLoader /></ServiceLayout></LanguageProvider>);
+    await lose();
+    expect(screen.getByRole('dialog', { name: SERVICE_LINES.lost })).toBeVisible();
+    expect(container.querySelector('.svc-loader')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.getByRole('status')).toHaveTextContent(SERVICE_LINES.lost);
+    expect(container.querySelector('.svc-loader')).not.toBeNull();
   });
 
   it('keeps the strip off its screen, since the line is said there, and brings it back with the loader gone', async () => {
@@ -237,6 +275,7 @@ describe('the loader of a page area with nothing cached', () => {
   it('takes no role of its own where a second area of the screen shows it too', async () => {
     render(<LanguageProvider><ServiceLoader /><ServiceLoader live={false} /></LanguageProvider>);
     await lose();
+    act(() => service.close());
     expect(screen.getAllByRole('status')).toHaveLength(1);
     expect(document.querySelectorAll('.svc-loader')).toHaveLength(2);
   });

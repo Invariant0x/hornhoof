@@ -118,7 +118,7 @@ for (const mode of MODES) {
     await expect(loader).toHaveText(title);
     await expect(page.getByRole('dialog')).toHaveCount(0);
     expect(await loader.boundingBox()).toMatchObject({ x: 0, y: 0, ...page.viewportSize() });
-    await expect(loader).toHaveAttribute('aria-busy', 'true');
+    await expect(loader).not.toHaveAttribute('aria-busy', 'true');
     await expect(strip(page)).toHaveCount(0);
     await expect(page.getByRole('status')).toHaveCount(1);
 
@@ -446,4 +446,56 @@ test('the phone strip leaves the loaded map the same size', async ({ page }) => 
   });
   expect(blocked).toEqual([]);
   await shot(page, 'map-strip-light-375');
+});
+
+test('the phone strip clears the standard department dock', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 700 });
+  await page.addInitScript(() => localStorage.setItem('hh-theme', 'light'));
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.clock.install();
+  const server = await serveServer(page);
+  await page.goto('/departments/d2');
+  const dock = page.locator('.dview .dv-dock');
+  await expect(dock).toBeVisible();
+  const hint = page.getByText(en.dept.noMembers);
+  await expect(hint).toBeVisible();
+  const before = await page.locator('.dview').boundingBox();
+
+  server.mode = 'refused';
+  await page.clock.runFor(NOTICE_MS);
+  await expect(windowOf(page, LINE.lost)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(strip(page)).toBeVisible();
+  const bar = (await strip(page).boundingBox())!;
+  const controls = (await dock.boundingBox())!;
+  expect(bar.y + bar.height).toBeLessThan(controls.y);
+  expect(bar.y + bar.height).toBeLessThan((await hint.boundingBox())!.y);
+  expect(await page.locator('.dview').boundingBox()).toEqual(before);
+  await shot(page, 'department-strip-light-375');
+});
+
+test('the phone strip leaves a minimized agent dock usable from the tracker', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 700 });
+  await page.addInitScript(() => localStorage.setItem('hh-theme', 'light'));
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.clock.install();
+  const server = await serveServer(page);
+  await page.goto('/');
+  await page.getByRole('button', { name: en.map.openOrchestrator, exact: true }).click();
+  await page.getByRole('button', { name: 'Minimize', exact: true }).click();
+  await tab(page, en.shell.tabs.tasks).click();
+  const dock = page.locator('.agent-strips');
+  await expect(dock).toBeVisible();
+  const before = await placeOf(page);
+
+  server.mode = 'refused';
+  await page.clock.runFor(NOTICE_MS);
+  await expect(windowOf(page, LINE.lost)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(strip(page)).toBeVisible();
+  const bar = (await strip(page).boundingBox())!;
+  expect(bar.y + bar.height).toBeLessThan((await dock.boundingBox())!.y);
+  expect(await placeOf(page)).toEqual(before);
+  await expect(dock.getByRole('button', { name: /Restore/ })).toBeVisible();
+  await shot(page, 'tracker-dock-strip-light-375');
 });

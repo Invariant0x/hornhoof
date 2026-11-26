@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { heardAgain } from '../src/live';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import type { EventView } from '../src/types';
 import { STUCK_MS } from '../src/ui/Loading';
@@ -56,6 +57,22 @@ function open(routes: Record<string, unknown> = {}, org = ORG) {
 }
 
 describe("an agent's window opens as a chat", () => {
+  it('keeps the loaded conversation without a local outage alert when its history refresh fails', async () => {
+    let fail = false;
+    const { container, calls } = open({
+      'GET /api/build': [502, { error: { code: 'unavailable', reason: 'starting' } }],
+      [`GET ${EVENTS}?last=300`]: () => fail
+        ? [502, { error: { code: 'unavailable', reason: 'starting' } }]
+        : [200, { events: [], state: READY }],
+    });
+    await screen.findByRole('log', { name: 'Conversation' });
+    fail = true;
+    await act(async () => { heardAgain(); });
+    expect(calls.filter(c => c.path.startsWith(EVENTS))).toHaveLength(2);
+    expect(screen.getByRole('log', { name: 'Conversation' })).toBeInTheDocument();
+    expect(container.querySelector('.alert')).toBeNull();
+  });
+
   it('opens as a chat even when its node shows the terminal, which is one click away and back', async () => {
     const user = userEvent.setup();
     open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: WITH_TERMINAL }] });
