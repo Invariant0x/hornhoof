@@ -226,18 +226,29 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
   });
 }
 
-test('a hop that answers 404 for one screen reads as no connection there, never as a missing page', async ({ page }) => {
+test('a hop 404 on the Machines route retries without showing a missing page when the server answers', async ({ page }) => {
   await page.clock.install();
   await serveServer(page);
-  const hop = { on: false };
+  const hop = { on: true };
   await page.route('**/api/machines', route => (hop.on ? route.fulfill({ status: 404, contentType: 'text/html', body: RELAY_PAGE }) : route.fallback()));
   await page.goto('/');
   await expect(tab(page, en.shell.tabs.machines)).toBeVisible();
-  hop.on = true;
+  const responseOf = (path: string, status: number) => page.waitForResponse(r => new URL(r.url()).pathname === path && r.status() === status);
+  const refused = responseOf('/api/machines', 404);
+  const healthy = responseOf('/api/build', 200);
   await tab(page, en.shell.tabs.machines).click();
-  await expect(windowOf(page, LINE.lost).or(strip(page).filter({ hasText: LINE.lost }))).toBeVisible();
+  await Promise.all([refused, healthy]);
+  await expect(page.getByRole('heading', { name: en.machines.heading })).toBeVisible();
   await expect(page.getByRole('heading', { name: en.routes.accessDenied })).toHaveCount(0);
   await expect(page.getByText(en.routes.explanation)).toHaveCount(0);
+  await expect(windowOf(page, LINE.lost)).toHaveCount(0);
+  await expect(strip(page)).toHaveCount(0);
+
+  const recovered = responseOf('/api/machines', 200);
+  hop.on = false;
+  await page.clock.runFor(NOTICE_MS);
+  await recovered;
+  await expect(page.getByRole('heading', { name: en.machines.heading })).toBeVisible();
 });
 
 test('a stream that breaks while the server answers draws no window and no strip', async ({ page }) => {
