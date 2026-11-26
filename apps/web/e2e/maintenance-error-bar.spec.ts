@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { LANGUAGES, type ShippedLanguage } from '../src/i18n/index';
 import { ru } from '../src/i18n/ru';
@@ -6,13 +6,8 @@ import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
 import type { UpdatesView } from '../src/types';
 import { serveApi } from './api';
 
-/* The bars of the shell during an update, as Ivan saw them on 0.34.0: the map's bar of a refused load ran under the logo
-   and the tabs and said again what the update says. The update goes the one road of service messages (#2098, #2099): its
-   window first, once that is closed the thin strip over the page, which moves nothing. While the road says it, a
-   maintenance refusal draws no bar, and the map comes back by itself when the update ends; any bar that does show stands in
-   its own row under the header, and the strip changes nothing of where it stands. Each look is a width, a skin, and the
-   shipped language with the longest or the shortest words of this view, or the longest turned right to left: no shipped
-   language is written that way yet. */
+/* A maintenance refusal uses the full loading screen. Genuine errors still have
+   a row of their own once the app is usable. Cover the shipped languages and skins. */
 test.describe.configure({ timeout: 0 });
 
 const DICTS: Record<ShippedLanguage, Messages> = { en, ru };
@@ -21,12 +16,10 @@ const TARGET = { version: '0.34.0', commit: '00e5ff3e' + 'f'.repeat(32) };
 /* How often the updates screen asks while an update runs; the page's clock moves only as the test moves it. */
 const BUSY_POLL_MS = 2_000;
 /* The one line of the update, English in every language, and where the road stands. */
-const UPDATING = 'Updating';
-const windowOf = (page: Page) => page.getByRole('dialog', { name: UPDATING, exact: true });
-const stripOf = (page: Page) => page.locator('.svc-strip');
+const loaderOf = (page: Page) => page.locator('.boot-screen');
 
 /* What this view says, the same way in every language: the tabs and the bars it may show. The road's own lines are English. */
-const viewWords = (t: Messages) => [...TABS.map(tab => t.shell.tabs[tab]), t.errors.maintenance, t.errors.codes.internal, t.people.heading, t.machines.heading, t.subs.heading];
+const viewWords = (t: Messages) => [...TABS.map(tab => t.shell.tabs[tab]), t.boot.updating, t.errors.maintenance, t.errors.codes.internal, t.people.heading, t.machines.heading, t.subs.heading];
 const ranked = LANGUAGES.map(l => ({ id: l.id, length: viewWords(DICTS[l.id]).join('').length })).sort((a, b) => a.length - b.length);
 const SHORTEST = ranked[0]!.id;
 const LONGEST = ranked.at(-1)!.id;
@@ -45,7 +38,7 @@ function updates(step: 'install' | 'health'): UpdatesView {
   return {
     current: { version: '0.33.2', commit: 'c'.repeat(40), migrations: 60 }, available: false, checkedAt: '2026-11-18T13:00:00.000Z',
     latest: null, versions: [], error: null,
-    updater: { present: true, status: { id: 'u1', ...TARGET, state: 'running', step, log: '', at: '2026-11-18T13:30:00.000Z' }, waiting: null, calledOff: null },
+    updater: { present: true, status: { id: 'u1', ...TARGET, state: step === 'health' ? 'rolled_back' : 'running', step, log: '', at: '2026-11-18T13:30:00.000Z' }, waiting: null, calledOff: null },
   };
 }
 
@@ -81,15 +74,6 @@ async function turned(page: Page, rtl: boolean) {
 type Box = { x: number; y: number; width: number; height: number };
 type Bar = Box & { what: string; onTop: boolean };
 
-/* Where one part of the page stands, read once the state it belongs to has come: a part that is not on the page then, or
-   is on it more than once, fails the test at once and names itself. A wait for it would wait as long as the run lets it,
-   as a box of the map did once the map's workspace was gone. */
-async function boxOf(locator: Locator, what: string): Promise<Box> {
-  expect(await locator.count(), `${what} is on the page once`).toBe(1);
-  const box = await locator.boundingBox();
-  expect(box, `${what} takes room on the page`).not.toBeNull();
-  return box!;
-}
 const meet = (a: Box, b: Box) => a.x < b.x + b.width - 0.5 && b.x < a.x + a.width - 0.5 && a.y < b.y + b.height - 0.5 && b.y < a.y + a.height - 0.5;
 
 /* What stands where: the parts of the header on screen (the mark gives its place to the tabs on a phone), every bar of
@@ -161,96 +145,59 @@ for (const { look: lookName, lang, rtl } of LANGS) for (const width of WIDTHS) f
     const server = await heldServer(page);
     const orgRefused = page.waitForResponse(response => new URL(response.url()).pathname === '/api/org' && response.status() === 503);
     await page.goto('/');
-    const road = windowOf(page);
-    await expect(road).toBeVisible();
+    const loader = loaderOf(page);
+    await expect(loader).toHaveText(`${t.boot.updating}…`);
     await orgRefused;
-    /* The next poll gets the refusal too: the road goes on saying the update, at the step it reported, and nothing else says it. */
     await page.clock.runFor(BUSY_POLL_MS);
-    await expect(road.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '60');
+    await expect(loader).toHaveText(`${t.boot.updating}…`);
     await turned(page, rtl);
-    expect(await page.getByText(t.errors.maintenance).count(), 'no bar says maintenance').toBe(0);
-    expect(await page.getByRole('alert').count(), 'no bar of a refused load').toBe(0);
-    expect(rowsHold(await places(page, t), width)).toEqual([]);
+    await expect(page.getByText(t.errors.maintenance)).toHaveCount(0);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('progressbar')).toHaveCount(0);
+    await expect(page.locator('.svc-strip')).toHaveCount(0);
+    await expect(page.getByRole('navigation')).toBeHidden();
     if (pictured) await shot(page, info.outputPath(`maintenance-map-${name.replaceAll(' ', '-')}.png`));
 
-    /* The window is closed: the map has nothing cached, so its area says the same line in its place, and no strip is drawn. */
-    await page.keyboard.press('Escape');
-    await expect(road).toHaveCount(0);
-    await expect(page.locator('.svc-loader')).toBeVisible();
-    await expect(stripOf(page)).toHaveCount(0);
-
-    /* The update ends: the next poll answers, and the map loads the company again with no reload of the page. */
     const loaded = page.waitForResponse(response => new URL(response.url()).pathname === '/api/org' && response.status() === 200);
     server.end();
     await page.clock.runFor(BUSY_POLL_MS);
     await loaded;
-    /* The map is back with the company: the plain map shows the department's card, a world map draws its city on a canvas
-       and shows the company's ticker over it. */
     await expect(world ? page.locator(`.map[data-world-canvas="${world}"] > .ticker[role="button"]`) : page.getByRole('button', { name: /^Development/ })).toBeVisible();
-    await expect(page.locator('.svc-loader')).toHaveCount(0);
-    expect(await page.getByRole('alert').count()).toBe(0);
-    /* The update still runs its last step, so the strip stands over the map with the bar, at 80 %, and the open map runs
-       under the header and the strip to the top of the window: the strip covers no card, chip, hub or control of the map. */
-    const strip = stripOf(page);
-    await expect(strip).toBeVisible();
-    await expect(strip.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '80');
-    expect(rowsHold(await places(page, t), width)).toEqual([]);
-    const mapBox = await boxOf(page.locator('.map'), 'the map');
-    const stripBox = await boxOf(strip, 'the strip');
-    expect(mapBox.y, 'the map starts at the top of the window').toBeLessThanOrEqual(0.5);
-    const covered: string[] = [];
-    for (const part of await page.locator('.map .world :is(.dept, .hub, .chip), .map > :is(.zoom, .ticker, .map-arrange)').all()) {
-      const b = await part.boundingBox();
-      if (b && b.width > 0 && b.height > 0 && meet(b, stripBox)) covered.push((await part.textContent())?.slice(0, 40) ?? '');
-    }
-    expect(covered, 'the strip covers nothing the map shows').toEqual([]);
+    await expect(loader).toHaveCount(0);
+    await expect(page.getByRole('alert')).toHaveCount(0);
     expect(problems).toEqual([]);
   });
 
-  test(`a bar of any other failure stands in its own row under the header, and the strip of an update moves nothing, ${name}`, async ({ page }, info) => {
+  test(`a genuine failure keeps its row after the update ends, ${name}`, async ({ page }, info) => {
     const t = DICTS[lang];
     const problems = watchProblems(page);
     await look(page, lang, skin, width);
     await serveApi(page);
+    await page.clock.install();
     const running = { on: true };
-    await page.route('**/api/updates', route => route.fulfill({ json: running.on ? updates('install') : { ...updates('install'), updater: { present: true, status: null, waiting: null, calledOff: null } } }));
+    await page.route('**/api/updates', route => route.fulfill({ json: updates(running.on ? 'install' : 'health') }));
     await page.route('**/api/org', route => route.fulfill(BROKEN));
     await page.route('**/api/people', route => route.fulfill(BROKEN));
     await page.route('**/api/machines', route => route.fulfill(BROKEN));
     await page.route('**/api/subscriptions', route => route.fulfill(BROKEN));
 
-    /* Each screen twice: while an update runs, with its window closed to the strip, and with no update. What stands on it,
-       the header and every bar, is where it was, and none of it meets another. */
     const screens = [['/', null], ['/departments/d2', null], ['/people', t.people.heading], ['/machines', t.machines.heading], ['/subscriptions', t.subs.heading]] as const;
     for (const [path, title] of screens) {
       running.on = true;
       await page.goto(path);
-      await expect(windowOf(page)).toBeVisible();
-      await page.keyboard.press('Escape');
-      await expect(windowOf(page)).toHaveCount(0);
-      await expect(page.getByRole('alert')).toHaveCount(1);
-      await expect(stripOf(page)).toBeVisible();
+      const loader = loaderOf(page);
+      await expect(loader).toHaveText(`${t.boot.updating}…`);
+      await expect(page.getByRole('alert')).toHaveCount(0);
       await turned(page, rtl);
-      const heading = title === null ? null : page.getByRole('heading', { name: title, exact: true });
-      if (heading) await expect(heading).toBeVisible();
-      const during = await places(page, t);
-      const headingDuring = heading ? await boxOf(heading, `the heading of ${path}`) : null;
-      expect(rowsHold(during, width)).toEqual([]);
-      if (pictured && path === '/') await shot(page, info.outputPath(`failure-map-${name.replaceAll(' ', '-')}.png`));
 
       running.on = false;
-      await page.goto(path);
+      await page.clock.runFor(BUSY_POLL_MS * 2);
+      await expect(loader).toHaveCount(0);
       await expect(page.getByRole('alert')).toHaveCount(1);
-      await expect(stripOf(page)).toHaveCount(0);
-      await expect(windowOf(page)).toHaveCount(0);
-      await turned(page, rtl);
-      if (heading) await expect(heading).toBeVisible();
-      const after = await places(page, t);
-      const headingAfter = heading ? await boxOf(heading, `the heading of ${path}`) : null;
-      expect(rowsHold(after, width)).toEqual([]);
-      const round = (boxes: Bar[]) => boxes.map(({ x, y, width: w, height }) => [x, y, w, height].map(Math.round));
-      expect({ header: round(during.header), bars: round(during.bars), heading: headingDuring }, `the strip moved something on ${path}`)
-        .toEqual({ header: round(after.header), bars: round(after.bars), heading: headingAfter });
+      if (title) await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
+      expect(rowsHold(await places(page, t), width)).toEqual([]);
+      if (pictured && path === '/') await shot(page, info.outputPath(`failure-map-${name.replaceAll(' ', '-')}.png`));
       if (pictured && path === '/people') await shot(page, info.outputPath(`failure-people-${name.replaceAll(' ', '-')}.png`));
     }
     expect(problems).toEqual([]);

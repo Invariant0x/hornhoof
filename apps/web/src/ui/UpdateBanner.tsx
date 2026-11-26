@@ -4,7 +4,7 @@ import type { UpdateCalledOff, UpdatesView, UpdateWaiting } from '../types';
 import type { Updates } from '../updates';
 import { useBarFold } from './shellBars';
 import { buildText, versionText } from './VersionMark';
-import { updateRunOf, versionedStatus } from './UpdateVersion';
+import { updateIsRunning, versionedStatus } from './UpdateVersion';
 
 const LATER = 'hh-later';
 const SEEN = 'hh-update-seen';
@@ -64,7 +64,7 @@ export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetai
   const [failure, setFailure] = useState<unknown>(null);
   const fold = useBarFold();
   const { view } = updates;
-  if (!view || updateRunOf(updates)) return null;
+  if (!view || updateIsRunning(updates)) return null;
   const { status } = view.updater;
   const note = waitNoteOf(view.updater);
 

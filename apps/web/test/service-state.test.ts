@@ -1,14 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connection } from '../src/connection';
-import { messageOf, SERVICE_LINES, service, type Inputs, type UpdateRun } from '../src/service-state';
+import { messageOf, SERVICE_LINES, service, type Inputs } from '../src/service-state';
 
 /* The one road of service messages (#2098, #2099, Design #2100): which state is the current one, and where it stands on its
    way from the window to the strip to gone. The page's other parts only draw what it says. */
 
 const MAINTENANCE = { error: { code: 'unavailable', message: 'Hornhoof is installing an update.', reason: 'maintenance' } };
-const RUN: UpdateRun = { progress: 0.4 };
 
-const none: Inputs = { online: true, away: null, update: null, signedOut: false, notices: [] };
+const none: Inputs = { online: true, away: null, updating: false, signedOut: false, notices: [] };
 const with_ = (over: Partial<Inputs>): Inputs => ({ ...none, ...over });
 
 describe('which state is the current one', () => {
@@ -17,26 +16,26 @@ describe('which state is the current one', () => {
   });
 
   it('puts the states in one order of importance, one message at a time', () => {
-    const all = with_({ online: false, away: 'updating', update: RUN, signedOut: true, notices: [{ id: 'n', line: 'A notice' }] });
-    expect(messageOf(all)?.kind).toBe('signedOut');
-    expect(messageOf({ ...all, signedOut: false })?.kind).toBe('offline');
-    expect(messageOf({ ...all, signedOut: false, online: true })?.kind).toBe('updating');
-    expect(messageOf({ ...all, signedOut: false, online: true, away: 'lost', update: null })?.kind).toBe('lost');
-    expect(messageOf({ ...all, signedOut: false, online: true, away: null, update: null })).toMatchObject({ kind: 'notice', line: 'A notice' });
+    const all = with_({ online: false, away: 'updating', updating: true, signedOut: true, notices: [{ id: 'n', line: 'A notice' }] });
+    expect(messageOf(all)?.kind).toBe('updating');
+    const afterUpdate = { ...all, away: 'lost' as const, updating: false };
+    expect(messageOf(afterUpdate)?.kind).toBe('signedOut');
+    expect(messageOf({ ...afterUpdate, signedOut: false })?.kind).toBe('offline');
+    expect(messageOf({ ...afterUpdate, signedOut: false, online: true })?.kind).toBe('lost');
+    expect(messageOf({ ...afterUpdate, signedOut: false, online: true, away: null })?.kind).toBe('notice');
   });
 
-  it('gives each kind its one English line, and the update its progress', () => {
+  it('gives each kind its one English line', () => {
     expect(SERVICE_LINES).toEqual({ offline: 'No internet', lost: 'No connection', updating: 'Updating', signedOut: 'Signed out' });
-    expect(messageOf(with_({ online: false }))).toMatchObject({ kind: 'offline', line: 'No internet', update: null });
+    expect(messageOf(with_({ online: false }))).toMatchObject({ kind: 'offline', line: 'No internet' });
     expect(messageOf(with_({ away: 'lost' }))).toMatchObject({ kind: 'lost', line: 'No connection' });
     expect(messageOf(with_({ signedOut: true }))).toMatchObject({ kind: 'signedOut', line: 'Signed out' });
-    expect(messageOf(with_({ update: RUN }))).toMatchObject({ kind: 'updating', line: 'Updating', update: RUN });
+    expect(messageOf(with_({ updating: true }))).toMatchObject({ kind: 'updating', line: 'Updating' });
   });
 
-  it('reads a lost server as an update while one runs, and keeps the progress it knows', () => {
-    expect(messageOf(with_({ away: 'lost', update: RUN }))).toMatchObject({ kind: 'updating', update: RUN });
-    /* Heard of from the server's own refusal before this page knew of the update: the line, and no bar. */
-    expect(messageOf(with_({ away: 'updating' }))).toMatchObject({ kind: 'updating', update: null });
+  it('reads a lost server as an update while one runs or when the server says it is updating', () => {
+    expect(messageOf(with_({ away: 'lost', updating: true }))?.kind).toBe('updating');
+    expect(messageOf(with_({ away: 'updating' }))?.kind).toBe('updating');
   });
 
   it('shows the first notice of several, in the order they came', () => {
@@ -125,26 +124,24 @@ describe('the way of a state: window, strip, gone', () => {
     expect(watcher).toHaveBeenCalledTimes(1);
   });
 
-  it('walks an update with its progress through the window and the strip, and ends when the update does', () => {
-    service.setUpdate({ progress: 0 });
-    expect(service.snapshot()).toMatchObject({ place: 'window', message: { kind: 'updating', update: { progress: 0 } } });
+  it('shows only the boot screen through an update; dismissing does nothing', () => {
+    service.setUpdate(true);
+    expect(service.snapshot()).toMatchObject({ place: 'boot', message: { kind: 'updating' } });
 
     service.close();
-    service.setUpdate({ progress: 0.6 });
-    expect(service.snapshot()).toMatchObject({ place: 'strip', message: { kind: 'updating', update: { progress: 0.6 } } });
+    expect(service.snapshot()?.place).toBe('boot');
 
-    service.setUpdate(null);
+    service.setUpdate(false);
     expect(service.snapshot()).toBeNull();
   });
 
-  it('keeps an update as the strip through the restart that follows it, with the server away meanwhile', async () => {
-    service.setUpdate(RUN);
-    service.close();
+  it('keeps the update on the boot screen until the server and the updater are back', async () => {
+    service.setUpdate(true);
     await lose('updating');
-    expect(service.snapshot()).toMatchObject({ place: 'strip', message: { kind: 'updating', update: RUN } });
+    expect(service.snapshot()).toMatchObject({ place: 'boot', message: { kind: 'updating' } });
     await serverBack();
-    expect(service.snapshot()).toMatchObject({ place: 'strip', message: { kind: 'updating' } });
-    service.setUpdate(null);
+    expect(service.snapshot()?.place).toBe('boot');
+    service.setUpdate(false);
     expect(service.snapshot()).toBeNull();
   });
 
