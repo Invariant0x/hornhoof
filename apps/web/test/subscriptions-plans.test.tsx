@@ -404,13 +404,21 @@ describe('the card of a plan that does not work', () => {
     const [steps, ...lifetimeLines] = [...install!.children] as HTMLElement[];
     expect(why!.textContent).toBe(words);
     expect(steps).toHaveRole('list');
+    expect(within(steps!).getAllByRole('listitem')).toHaveLength(4);
     const currentStep = within(steps!).getByRole('listitem', { current: 'step' });
     expect(currentStep).toBe(steps!.firstElementChild);
-    await waitFor(() => expect(currentStep).toHaveTextContent(withKey(COMMAND)));
+    const commands = await waitFor(() => within(currentStep).getAllByRole('group'));
+    const windows = `${withKey('powershell -ExecutionPolicy Bypass -c "& ([scriptblock]::Create((irm https://hq.acme.com/install.ps1))) --join CODE123')}"`;
+    expect(commands).toHaveLength(2);
+    for (const [index, group] of commands.entries()) {
+      const code = within(group).getByRole('code');
+      const copy = within(group).getByRole('button', { name: actions[0], exact: true });
+      expect(code.textContent).toBe([withKey(COMMAND), windows][index]);
+      expect(code.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
     expect(lifetimeLines.map(line => line.textContent)).toEqual([lifetime, background]);
-    expect(buttons(currentStep)).toEqual([actions[0], actions[0]]);
     expect(buttons(last!)).toEqual([actions[1]]);
-    expect(buttons(block)).toEqual([actions[0], actions[0], actions[1]]);
+    expect(buttons(card)).toEqual([actions[0], actions[0], actions[1]]);
     expect(rest).toEqual([]);
   });
 
