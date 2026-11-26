@@ -111,12 +111,13 @@ export const SUBS: SubView[] = [
 ];
 
 const GIB = 1024 ** 3;
+const GB = 1_000_000_000;
 
 /* Primary laptop whose Docker gets 8 of its 10 cores and 12 of its 32 GB, and Maria's offline build box with no plan. */
 export const MACHINES: MachineView[] = [
   { id: 'm1', hostname: 'dev-laptop', os: 'darwin', arch: 'arm64', owner: { id: 'p1', name: 'Ivan' }, online: true, lastSeenAt: null,
     plans: [{ id: 's-claude', provider: 'claude', status: 'ready', online: true }, { id: 's-codex', provider: 'codex', status: 'needs_login', online: true }],
-    load: { cpus: 8, load: 2, memFree: 6 * GIB, memTotal: 12 * GIB, tests: 1, jobs: 2, cpuModel: 'Apple M2 Pro', diskFree: 120 * GIB, diskTotal: 460 * GIB, hostCpus: 10, hostMemory: 32 * GIB },
+    load: { cpus: 8, load: 2, memFree: 6 * GIB, memTotal: 12 * GIB, tests: 1, jobs: 2, cpuModel: 'Apple M2 Pro', diskFree: 120 * GB, diskTotal: 460 * GB, hostCpus: 10, hostMemory: 32 * GIB },
     lendsTests: true,
     running: {
       agents: RUNNING_AGENTS,

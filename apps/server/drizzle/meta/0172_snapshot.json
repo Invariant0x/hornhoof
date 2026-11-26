@@ -1,5 +1,5 @@
 {
-  "id": "d4e280a7-95f7-4fa9-a208-1fadc811da9b",
+  "id": "7dd1d327-ad14-4c14-92e2-3f0acee25b5c",
   "prevId": "668e35c5-58fd-43fa-ae53-fb725d8c8ec2",
   "version": "7",
   "dialect": "postgresql",
@@ -429,6 +429,56 @@
           ],
           "isUnique": false,
           "where": "data->>'operatorEvidenceId' is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_operator_delivery": {
+          "name": "agent_events_operator_delivery",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "job_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "(data->'operatorDelivery'->>'id')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "data->'operatorDelivery'->>'id' is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_operator_evidence_delivery": {
+          "name": "agent_events_operator_evidence_delivery",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "(data->'operatorEvidence'->>'deliveryId')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "data->'operatorEvidence'->>'deliveryId' is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2289,6 +2339,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "ci_state": {
+          "name": "ci_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ci_checks": {
+          "name": "ci_checks",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "reviewer_agent_id": {
           "name": "reviewer_agent_id",
           "type": "uuid",
@@ -2319,18 +2381,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "ci_state": {
-          "name": "ci_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ci_checks": {
-          "name": "ci_checks",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -2773,6 +2823,215 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": true
+    },
+    "public.ci_dispatches": {
+      "name": "ci_dispatches",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "turn_id": {
+          "name": "turn_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "commit": {
+          "name": "commit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "branch": {
+          "name": "branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workflow": {
+          "name": "workflow",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'waiting'"
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "release_id": {
+          "name": "release_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "ci_dispatches_waiting": {
+          "name": "ci_dispatches_waiting",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "state = 'waiting'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "ci_dispatches_company_id_companies_id_fk": {
+          "name": "ci_dispatches_company_id_companies_id_fk",
+          "tableFrom": "ci_dispatches",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ci_dispatches_turn_id_turns_id_fk": {
+          "name": "ci_dispatches_turn_id_turns_id_fk",
+          "tableFrom": "ci_dispatches",
+          "tableTo": "turns",
+          "columnsFrom": [
+            "turn_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ci_dispatches_task_id_tasks_id_fk": {
+          "name": "ci_dispatches_task_id_tasks_id_fk",
+          "tableFrom": "ci_dispatches",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ci_dispatches_agent_id_agents_id_fk": {
+          "name": "ci_dispatches_agent_id_agents_id_fk",
+          "tableFrom": "ci_dispatches",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ci_dispatches_release_id_turn_releases_id_fk": {
+          "name": "ci_dispatches_release_id_turn_releases_id_fk",
+          "tableFrom": "ci_dispatches",
+          "tableTo": "turn_releases",
+          "columnsFrom": [
+            "release_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "ci_dispatches_company_commit": {
+          "name": "ci_dispatches_company_commit",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "commit"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "ci_dispatches_commit": {
+          "name": "ci_dispatches_commit",
+          "value": "\"ci_dispatches\".\"commit\" ~ '^[0-9a-f]{40}$'"
+        },
+        "ci_dispatches_state": {
+          "name": "ci_dispatches_state",
+          "value": "\"ci_dispatches\".\"state\" IN ('waiting', 'recorded', 'ended')"
+        },
+        "ci_dispatches_settled": {
+          "name": "ci_dispatches_settled",
+          "value": "(\"ci_dispatches\".\"state\" = 'waiting') = (\"ci_dispatches\".\"settled_at\" IS NULL)"
+        },
+        "ci_dispatches_recorded": {
+          "name": "ci_dispatches_recorded",
+          "value": "(\"ci_dispatches\".\"state\" = 'recorded') = (\"ci_dispatches\".\"release_id\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
     },
     "public.companies": {
       "name": "companies",
@@ -3365,6 +3624,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "repo_release_workflow": {
+          "name": "repo_release_workflow",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "owner_person_id": {
           "name": "owner_person_id",
           "type": "uuid",
@@ -3378,24 +3643,18 @@
           "notNull": true,
           "default": false
         },
+        "slot_cap": {
+          "name": "slot_cap",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "repo_release_workflow": {
-          "name": "repo_release_workflow",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "slot_cap": {
-          "name": "slot_cap",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -5233,11 +5492,45 @@
           "method": "btree",
           "with": {}
         },
-        "jobs_node_agent_conversation": {
-          "name": "jobs_node_agent_conversation",
+        "jobs_agent_conversation_ended": {
+          "name": "jobs_agent_conversation_ended",
           "columns": [
             {
-              "expression": "node_id",
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "coalesce(\"finished_at\", \"created_at\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"jobs\".\"kind\" = 'conversation' and \"jobs\".\"status\" in ('done', 'failed')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "jobs_agent_conversation_retry_waiting": {
+          "name": "jobs_agent_conversation_retry_waiting",
+          "columns": [
+            {
+              "expression": "company_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -5251,34 +5544,46 @@
             {
               "expression": "created_at",
               "isExpression": false,
-              "asc": false,
-              "nulls": "first"
+              "asc": true,
+              "nulls": "last"
             }
           ],
           "isUnique": false,
-          "where": "\"jobs\".\"kind\" = 'conversation' and (\"jobs\".\"started_at\" is not null or \"jobs\".\"status\" in ('queued', 'running'))",
+          "where": "\"jobs\".\"kind\" = 'conversation' and \"jobs\".\"status\" = 'queued' and \"jobs\".\"not_before\" is not null and \"jobs\".\"continue_of\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "jobs_not_logged_in": {
-          "name": "jobs_not_logged_in",
+        "jobs_agent_conversation_obsolete": {
+          "name": "jobs_agent_conversation_obsolete",
           "columns": [
             {
-              "expression": "node_id",
+              "expression": "company_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "finished_at",
+              "expression": "agent_id",
               "isExpression": false,
-              "asc": false,
-              "nulls": "first"
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "coalesce(\"finished_at\", \"created_at\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
             }
           ],
           "isUnique": false,
-          "where": "\"jobs\".\"error\" = 'not_logged_in'",
+          "where": "\"jobs\".\"kind\" = 'conversation' and \"jobs\".\"status\" = 'obsolete'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -6045,6 +6350,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "copy_schema_since": {
+          "name": "copy_schema_since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "copy_schema_attempt": {
+          "name": "copy_schema_attempt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "copy_old": {
           "name": "copy_old",
           "type": "integer",
@@ -6089,18 +6406,6 @@
         },
         "internet_mbps": {
           "name": "internet_mbps",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "copy_schema_since": {
-          "name": "copy_schema_since",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "copy_schema_attempt": {
-          "name": "copy_schema_attempt",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
@@ -6203,6 +6508,10 @@
           "name": "machines_file_store_used",
           "value": "file_store_used_bytes >= 0 AND file_store_used_bytes <= 9007199254740991"
         },
+        "machines_files_disk": {
+          "name": "machines_files_disk",
+          "value": "(files_disk_free IS NULL OR files_disk_free BETWEEN 0 AND 9007199254740991) AND (files_disk_total IS NULL OR files_disk_total BETWEEN 0 AND 9007199254740991)"
+        },
         "machines_update_state": {
           "name": "machines_update_state",
           "value": "update_state IS NULL OR update_state IN ('ready', 'installing', 'failed')"
@@ -6234,10 +6543,6 @@
         "machines_measures_range": {
           "name": "machines_measures_range",
           "value": "link_rtt_ms >= 0 AND link_mbps >= 0 AND internet_rtt_ms >= 0 AND internet_mbps >= 0"
-        },
-        "machines_files_disk": {
-          "name": "machines_files_disk",
-          "value": "(files_disk_free IS NULL OR files_disk_free BETWEEN 0 AND 9007199254740991) AND (files_disk_total IS NULL OR files_disk_total BETWEEN 0 AND 9007199254740991)"
         }
       },
       "isRLSEnabled": false
@@ -12472,6 +12777,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "asked_by_person_id": {
+          "name": "asked_by_person_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subtask_reason": {
+          "name": "subtask_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "why": {
           "name": "why",
           "type": "text",
@@ -12487,6 +12804,12 @@
         },
         "due_at": {
           "name": "due_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "queued_at": {
+          "name": "queued_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -12529,24 +12852,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "asked_by_person_id": {
-          "name": "asked_by_person_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "subtask_reason": {
-          "name": "subtask_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "queued_at": {
-          "name": "queued_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -12570,6 +12875,42 @@
           "columns": [
             {
               "expression": "responsible_person_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tasks_asked_by": {
+          "name": "tasks_asked_by",
+          "columns": [
+            {
+              "expression": "asked_by_person_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tasks_queued": {
+          "name": "tasks_queued",
+          "columns": [
+            {
+              "expression": "department_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "queued_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -12697,42 +13038,6 @@
           ],
           "isUnique": false,
           "where": "\"tasks\".\"external_wait\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "tasks_asked_by": {
-          "name": "tasks_asked_by",
-          "columns": [
-            {
-              "expression": "asked_by_person_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "tasks_queued": {
-          "name": "tasks_queued",
-          "columns": [
-            {
-              "expression": "department_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "queued_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -12882,6 +13187,19 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "tasks_asked_by_person_id_people_id_fk": {
+          "name": "tasks_asked_by_person_id_people_id_fk",
+          "tableFrom": "tasks",
+          "tableTo": "people",
+          "columnsFrom": [
+            "asked_by_person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "tasks_pipeline_id_pipelines_id_fk": {
           "name": "tasks_pipeline_id_pipelines_id_fk",
           "tableFrom": "tasks",
@@ -12907,19 +13225,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "tasks_asked_by_person_id_people_id_fk": {
-          "name": "tasks_asked_by_person_id_people_id_fk",
-          "tableFrom": "tasks",
-          "tableTo": "people",
-          "columnsFrom": [
-            "asked_by_person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -12938,6 +13243,10 @@
         "tasks_priority_known": {
           "name": "tasks_priority_known",
           "value": "\"tasks\".\"priority\" in ('urgent', 'high', 'normal', 'low')"
+        },
+        "tasks_subtask_reason_known": {
+          "name": "tasks_subtask_reason_known",
+          "value": "\"tasks\".\"subtask_reason\" is null or \"tasks\".\"subtask_reason\" in ('independent_result', 'other_owner', 'parallel_block')"
         },
         "tasks_counts": {
           "name": "tasks_counts",
@@ -12962,10 +13271,6 @@
         "tasks_risk_class": {
           "name": "tasks_risk_class",
           "value": "\"tasks\".\"risk_class\" IS NULL OR \"tasks\".\"risk_class\" IN ('money', 'access', 'security', 'data', 'none')"
-        },
-        "tasks_subtask_reason_known": {
-          "name": "tasks_subtask_reason_known",
-          "value": "\"tasks\".\"subtask_reason\" IS NULL OR \"tasks\".\"subtask_reason\" IN ('independent_result', 'other_owner', 'parallel_block')"
         }
       },
       "isRLSEnabled": false
@@ -14373,6 +14678,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "ci_state": {
+          "name": "ci_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ci_checks": {
+          "name": "ci_checks",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "tasks": {
           "name": "tasks",
           "type": "jsonb",
@@ -14423,18 +14740,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "ci_state": {
-          "name": "ci_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ci_checks": {
-          "name": "ci_checks",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -16088,215 +16393,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.ci_dispatches": {
-      "name": "ci_dispatches",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "turn_id": {
-          "name": "turn_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "task_id": {
-          "name": "task_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "agent_id": {
-          "name": "agent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "commit": {
-          "name": "commit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "branch": {
-          "name": "branch",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "workflow": {
-          "name": "workflow",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "run_id": {
-          "name": "run_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'waiting'"
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "release_id": {
-          "name": "release_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "settled_at": {
-          "name": "settled_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "ci_dispatches_waiting": {
-          "name": "ci_dispatches_waiting",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "state = 'waiting'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "ci_dispatches_company_id_companies_id_fk": {
-          "name": "ci_dispatches_company_id_companies_id_fk",
-          "tableFrom": "ci_dispatches",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "ci_dispatches_turn_id_turns_id_fk": {
-          "name": "ci_dispatches_turn_id_turns_id_fk",
-          "tableFrom": "ci_dispatches",
-          "tableTo": "turns",
-          "columnsFrom": [
-            "turn_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "ci_dispatches_task_id_tasks_id_fk": {
-          "name": "ci_dispatches_task_id_tasks_id_fk",
-          "tableFrom": "ci_dispatches",
-          "tableTo": "tasks",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "ci_dispatches_agent_id_agents_id_fk": {
-          "name": "ci_dispatches_agent_id_agents_id_fk",
-          "tableFrom": "ci_dispatches",
-          "tableTo": "agents",
-          "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "ci_dispatches_release_id_turn_releases_id_fk": {
-          "name": "ci_dispatches_release_id_turn_releases_id_fk",
-          "tableFrom": "ci_dispatches",
-          "tableTo": "turn_releases",
-          "columnsFrom": [
-            "release_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "ci_dispatches_company_commit": {
-          "name": "ci_dispatches_company_commit",
-          "nullsNotDistinct": false,
-          "columns": [
-            "company_id",
-            "commit"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "ci_dispatches_commit": {
-          "name": "ci_dispatches_commit",
-          "value": "\"ci_dispatches\".\"commit\" ~ '^[0-9a-f]{40}$'"
-        },
-        "ci_dispatches_state": {
-          "name": "ci_dispatches_state",
-          "value": "\"ci_dispatches\".\"state\" IN ('waiting', 'recorded', 'ended')"
-        },
-        "ci_dispatches_settled": {
-          "name": "ci_dispatches_settled",
-          "value": "(\"ci_dispatches\".\"state\" = 'waiting') = (\"ci_dispatches\".\"settled_at\" IS NULL)"
-        },
-        "ci_dispatches_recorded": {
-          "name": "ci_dispatches_recorded",
-          "value": "(\"ci_dispatches\".\"state\" = 'recorded') = (\"ci_dispatches\".\"release_id\" IS NOT NULL)"
-        }
-      },
       "isRLSEnabled": false
     }
   },

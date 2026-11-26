@@ -1195,8 +1195,15 @@
     {
       "idx": 171,
       "version": "7",
-      "when": 1795565849081,
-      "tag": "0172_jobs_hello_and_sign_in_reads",
+      "when": 1795631214986,
+      "tag": "0172_hot_query_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "7",
+      "when": 1795631215986,
+      "tag": "0174_jobs_hello_and_sign_in_reads",
       "breakpoints": true
     }
   ]

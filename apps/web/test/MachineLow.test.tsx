@@ -4,7 +4,7 @@ import { LanguageProvider } from '../src/i18n';
 import type { MachineLowCard } from '../src/types';
 import { MachineLow } from '../src/ui/MachineLow';
 
-const GIB = 1024 ** 3;
+const GB = 1_000_000_000;
 /* A made-up machine of Lisa's: 40 GB free of 500, under the 50 GB it needs, after cleaning 8 GB of check files and 3 GB of
    build cache, and 1 GB more of check files before that. */
 const LOW: MachineLowCard = {
@@ -13,15 +13,15 @@ const LOW: MachineLowCard = {
   owner: { id: 'p1', name: 'Lisa' },
   since: '2026-11-20T10:00:00.000Z',
   disk: {
-    total: 500 * GIB,
-    free: 40 * GIB,
-    threshold: 50 * GIB,
-    parts: { images: 60 * GIB, volumes: 30 * GIB, buildCache: 20 * GIB, workingCopies: 120 * GIB, checkTemp: 5 * GIB },
+    total: 500 * GB,
+    free: 40 * GB,
+    threshold: 50 * GB,
+    parts: { images: 60 * GB, volumes: 30 * GB, buildCache: 20 * GB, workingCopies: 120 * GB, checkTemp: 5 * GB },
     low: { since: '2026-11-20T10:00:00.000Z' },
     cleaned: [
-      { part: 'checkTemp', bytes: 8 * GIB, at: '2026-11-20T09:59:00.000Z' },
-      { part: 'buildCache', bytes: 3 * GIB, at: '2026-11-20T09:58:00.000Z' },
-      { part: 'checkTemp', bytes: 1 * GIB, at: '2026-11-20T09:30:00.000Z' },
+      { part: 'checkTemp', bytes: 8 * GB, at: '2026-11-20T09:59:00.000Z' },
+      { part: 'buildCache', bytes: 3 * GB, at: '2026-11-20T09:58:00.000Z' },
+      { part: 'checkTemp', bytes: 1 * GB, at: '2026-11-20T09:30:00.000Z' },
     ],
   },
   names: {},
@@ -36,8 +36,8 @@ const KEEPS: MachineLowCard = {
   disk: {
     ...LOW.disk,
     kept: [
-      { part: 'workingCopies', agent: STRAY, path: 'scratch/copy', task: null, bytes: 2.5 * GIB, why: 'unpushed' },
-      { part: 'workingCopies', agent: THEO, path: 'hornhoof-1750', task: 1750, bytes: 9 * GIB, why: 'uncommitted' },
+      { part: 'workingCopies', agent: STRAY, path: 'scratch/copy', task: null, bytes: 2.5 * GB, why: 'unpushed' },
+      { part: 'workingCopies', agent: THEO, path: 'hornhoof-1750', task: 1750, bytes: 9 * GB, why: 'uncommitted' },
     ],
   },
 };
@@ -50,7 +50,7 @@ afterEach(() => {
 });
 
 describe('a machine short of disk space, as its people read it', () => {
-  it('says which and whose, the free space it has and needs, what Hornhoof takes, what it cleaned, what goes on and what to do', () => {
+  it('says which and whose, the free space it has and needs in decimal GB, what Hornhoof takes, what it cleaned, what goes on, and that Operations handles it without asking a person to run commands', () => {
     shown([LOW]);
     const card = screen.getByRole('region', { name: 'Machine studio-laptop (Lisa) is low on disk space' });
     expect(within(card).getByText('Free: 40 GB of 500 GB. It needs at least 50 GB.')).toBeInTheDocument();
@@ -58,7 +58,13 @@ describe('a machine short of disk space, as its people read it', () => {
     expect(within(card).getByText('Removed in the last 24 hours: check temp files 9 GB, build cache 3 GB.')).toBeInTheDocument();
     expect(within(card).queryByText(/^Docker's own disk/)).not.toBeInTheDocument();
     expect(within(card).getByText('It keeps running its turns, but takes no new checks or builds until space is back.')).toBeInTheDocument();
-    expect(within(card).getByText('What to do: remove files you no longer need from this machine, or give Docker more disk space.')).toBeInTheDocument();
+    expect(within(card).getByText('Operations is notified to check this machine and free space. You do not need to run any commands.')).toBeInTheDocument();
+  });
+
+  it('names the 22 GB resume mark when free space is in the hysteresis band above 20 GB, so the card never contradicts itself', () => {
+    shown([{ ...LOW, disk: { ...LOW.disk, total: 126 * GB, free: 20.4 * GB, threshold: 20 * GB } }]);
+    const card = screen.getByRole('region', { name: 'Machine studio-laptop (Lisa) is low on disk space' });
+    expect(within(card).getByText('Free: 20.4 GB of 126 GB. It needs at least 22 GB.')).toBeInTheDocument();
   });
 
   it("reads the machine's and its owner's names each in its own direction, in any language", () => {
@@ -77,15 +83,15 @@ describe('a machine short of disk space, as its people read it', () => {
     expect(within(card).getByText('Hornhoof занимает: рабочие копии 120 ГБ, образы 60 ГБ, тома 30 ГБ, кэш сборки 20 ГБ, временные файлы проверок 5 ГБ.')).toBeInTheDocument();
     expect(within(card).getByText('Убрано за последние сутки: временные файлы проверок 9 ГБ, кэш сборки 3 ГБ.')).toBeInTheDocument();
     expect(within(card).getByText('Она продолжает свои ходы, но не берет новых проверок и сборок, пока место не освободится.')).toBeInTheDocument();
-    expect(within(card).getByText('Что сделать: удалите с этой машины ненужные файлы или дайте Docker больше места на диске.')).toBeInTheDocument();
+    expect(within(card).getByText('Отдел операций получил сигнал, проверит эту машину и освободит место. Вводить команды не нужно.')).toBeInTheDocument();
   });
 
   it("says how Docker's own disk does where Docker keeps its data apart", () => {
-    shown([{ ...LOW, disk: { ...LOW.disk, docker: { total: 200 * GIB, free: 15 * GIB, threshold: 20 * GIB } } }]);
+    shown([{ ...LOW, disk: { ...LOW.disk, docker: { total: 200 * GB, free: 15 * GB, threshold: 20 * GB } } }]);
     expect(screen.getByText("Docker's own disk: free 15 GB of 200 GB. It needs at least 20 GB.")).toBeInTheDocument();
     cleanup();
     localStorage.setItem('hh-lang', 'ru');
-    shown([{ ...LOW, disk: { ...LOW.disk, docker: { total: 200 * GIB, free: 15 * GIB, threshold: 20 * GIB } } }]);
+    shown([{ ...LOW, disk: { ...LOW.disk, docker: { total: 200 * GB, free: 15 * GB, threshold: 20 * GB } } }]);
     expect(screen.getByText('Свой диск Docker: свободно 15 ГБ из 200 ГБ. Нужно не меньше 20 ГБ.')).toBeInTheDocument();
   });
 
@@ -98,7 +104,7 @@ describe('a machine short of disk space, as its people read it', () => {
   it("lists the work it keeps because it can't be restored, biggest first: whose, where, for which task, how big and why", () => {
     shown([KEEPS]);
     const card = screen.getByRole('region', { name: 'Machine studio-laptop (Lisa) is low on disk space' });
-    const kept = within(card).getByRole('list', { name: 'Not removed: a person needs to check it' });
+    const kept = within(card).getByRole('list', { name: 'Not removed automatically' });
     expect(within(kept).getAllByRole('listitem').map(row => row.textContent)).toEqual([
       'Theo, hornhoof-1750: task 1750, 9 GB, changes not committed',
       `${STRAY}, scratch/copy: 2.5 GB, commits not pushed`,
@@ -109,7 +115,7 @@ describe('a machine short of disk space, as its people read it', () => {
   it('says what it keeps in Russian', () => {
     localStorage.setItem('hh-lang', 'ru');
     shown([KEEPS]);
-    const kept = screen.getByRole('list', { name: 'Не убрано, нужна проверка человека' });
+    const kept = screen.getByRole('list', { name: 'Не убрано автоматически' });
     expect(within(kept).getAllByRole('listitem').map(row => row.textContent)).toEqual([
       'Theo, hornhoof-1750: задача 1750, 9 ГБ, изменения не закоммичены',
       `${STRAY}, scratch/copy: 2,5 ГБ, коммиты не отправлены`,
@@ -123,14 +129,14 @@ describe('a machine short of disk space, as its people read it', () => {
       disk: {
         ...LOW.disk,
         kept: [
-          { part: 'workingCopies', agent: THEO, path: 'empty-list', task: 9, bytes: 512 * 1024 ** 2, why: 'ignored', ignored: [] },
-          { part: 'workingCopies', agent: THEO, path: 'shop-7', task: 7, bytes: 3 * GIB, why: 'ignored', ignored: ['.env', 'local/data.sqlite'] },
-          { part: 'workingCopies', agent: STRAY, path: 'empty-note', task: null, bytes: GIB, why: 'ignored' },
+          { part: 'workingCopies', agent: THEO, path: 'empty-list', task: 9, bytes: 0.5 * GB, why: 'ignored', ignored: [] },
+          { part: 'workingCopies', agent: THEO, path: 'shop-7', task: 7, bytes: 3 * GB, why: 'ignored', ignored: ['.env', 'local/data.sqlite'] },
+          { part: 'workingCopies', agent: STRAY, path: 'empty-note', task: null, bytes: GB, why: 'ignored' },
         ],
       },
     };
     shown([ignored]);
-    const kept = screen.getByRole('list', { name: 'Not removed: a person needs to check it' });
+    const kept = screen.getByRole('list', { name: 'Not removed automatically' });
     expect(within(kept).getAllByRole('listitem').map(row => row.textContent)).toEqual([
       'Theo, shop-7: task 7, 3 GB, ignored files not on a remote: .env, local/data.sqlite',
       `${STRAY}, empty-note: 1 GB, ignored files not on a remote`,
@@ -147,13 +153,13 @@ describe('a machine short of disk space, as its people read it', () => {
       disk: {
         ...LOW.disk,
         kept: [
-          { part: 'workingCopies', agent: THEO, path: 'shop-7', task: 7, bytes: 3 * GIB, why: 'ignored', ignored: ['.env', 'local/data.sqlite'] },
-          { part: 'workingCopies', agent: STRAY, path: 'empty-note', task: null, bytes: GIB, why: 'ignored' },
+          { part: 'workingCopies', agent: THEO, path: 'shop-7', task: 7, bytes: 3 * GB, why: 'ignored', ignored: ['.env', 'local/data.sqlite'] },
+          { part: 'workingCopies', agent: STRAY, path: 'empty-note', task: null, bytes: GB, why: 'ignored' },
         ],
       },
     };
     shown([ignored]);
-    const kept = screen.getByRole('list', { name: 'Не убрано, нужна проверка человека' });
+    const kept = screen.getByRole('list', { name: 'Не убрано автоматически' });
     expect(within(kept).getAllByRole('listitem').map(row => row.textContent)).toEqual([
       'Theo, shop-7: задача 7, 3 ГБ, игнорируемые файлы без копии в репозитории: .env, local/data.sqlite',
       `${STRAY}, empty-note: 1 ГБ, игнорируемые файлы без копии в репозитории`,

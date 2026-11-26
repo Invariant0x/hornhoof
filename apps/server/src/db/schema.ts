@@ -898,6 +898,9 @@ export const jobs = pgTable(
       .where(sql`${t.kind} = 'conversation' and (${t.startedAt} is not null or ${t.status} in ('queued', 'running'))`),
     /* The newest turn that failed for want of a sign-in on a node, which the minute check of the nodes that need one asks for: a few turns of all. */
     index('jobs_not_logged_in').on(t.nodeId, t.finishedAt.desc().nullsFirst()).where(sql`${t.error} = 'not_logged_in'`),
+    index('jobs_agent_conversation_ended').on(t.companyId, t.agentId, sql`coalesce(${t.finishedAt}, ${t.createdAt})`, t.createdAt).where(sql`${t.kind} = 'conversation' and ${t.status} in ('done', 'failed')`),
+    index('jobs_agent_conversation_retry_waiting').on(t.companyId, t.agentId, t.createdAt).where(sql`${t.kind} = 'conversation' and ${t.status} = 'queued' and ${t.notBefore} is not null and ${t.continueOf} is not null`),
+    index('jobs_agent_conversation_obsolete').on(t.companyId, t.agentId, sql`coalesce(${t.finishedAt}, ${t.createdAt})`, t.createdAt).where(sql`${t.kind} = 'conversation' and ${t.status} = 'obsolete'`),
     check('jobs_builtin_machine', sql`builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'`),
   ],
 );
@@ -1033,6 +1036,8 @@ export const agentEvents = pgTable(
     uniqueIndex('agent_events_operator_evidence').on(t.companyId, sql`(data->>'operatorEvidenceId')`).where(sql`data->>'operatorEvidenceId' is not null`),
     uniqueIndex('agent_events_operator_ordinal').on(t.companyId, sql`(data->'operatorEvidence'->>'instance')`, sql`(data->'operatorEvidence'->>'ordinal')`).where(sql`data->>'operatorEvidenceId' is not null`),
     index('agent_events_operator_instance').on(t.agentId, sql`(data->'operatorEvidence'->>'instance')`).where(sql`data->>'operatorEvidenceId' is not null`),
+    index('agent_events_operator_delivery').on(t.agentId, t.jobId, sql`(data->'operatorDelivery'->>'id')`).where(sql`data->'operatorDelivery'->>'id' is not null`),
+    index('agent_events_operator_evidence_delivery').on(t.agentId, sql`(data->'operatorEvidence'->>'deliveryId')`).where(sql`data->'operatorEvidence'->>'deliveryId' is not null`),
   ],
 );
 

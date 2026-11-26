@@ -308,10 +308,11 @@ describe('one build of a harness unit for all machines', () => {
     expect((await turnsOf(c, c.head.id)).filter(prompt => prompt.includes('no such version'))).toHaveLength(1);
   });
 
-  it('builds a unit again when its bundle is gone', async () => {
+  it('builds a unit again when its bundle is gone, and answers 404 before streaming if asked for the missing bundle', async () => {
     const c = await shared(), one = await c.machine(c.ceo, 'one'), bytes = Buffer.from('a bundle');
     await c.claim(one.key); await c.uploaded(one.key, bytes);
     await rm(join(c.dir, c.dev.companyId, KEY + '.' + (await c.db.select().from(harnessBuilds))[0]!.id + '.zst'));
+    expect((await c.bundle(one.key, 'bytes=0-3')).statusCode).toBe(404);
     expect((await c.claim(one.key)).json().state).toBe('build');
   });
 
