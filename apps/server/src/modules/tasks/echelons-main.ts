@@ -6,7 +6,7 @@ import type { RepoAddress } from '../testruns/refs.js';
 import { checkingIdentity, heldCheckingIdentity } from './echelons-assign.js';
 import { currentCandidate, producedCandidate } from './echelons-candidates.js';
 import type { Submission, submissionOperation } from './echelons-operations.js';
-import { sameChecker, type CheckerIdentity } from './echelons-policy.js';
+import type { CheckerIdentity } from './echelons-policy.js';
 import { changeRoute, skippedAuthorReview, type Route } from './route-records.js';
 import { reviewReplacement } from './echelons-handoff.js';
 import { move } from './transitions.js';
@@ -165,8 +165,8 @@ export async function keepCandidateAtTests(
     kind: 'submitted', actor: { agentId }, text: input.summary,
     data: { evidence: input.evidence, candidate, ...detail, ...(operation ? { operation } : {}), routeRevision: route.revision, review },
   }, async tx => {
-    if (!sameChecker(await heldCheckingIdentity(tx, task, route, parent), identity)) throw refuse(409, 'task_changed', 'The checking assignment changed. Ask the head to assign it again.');
-    await changeRoute(tx, route, reviewAgain?.state ?? { ...route.state, candidateId: candidate.id });
+    await heldCheckingIdentity(tx, task, route, parent, identity);
+    await changeRoute(tx, route, reviewAgain?.state ?? { ...route.state, candidateId: candidate.id, assignment: identity });
   }, reviewAgain?.wakes);
   return { task: row, wakes: reviewAgain?.wakes ?? [] };
 }

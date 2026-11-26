@@ -7,7 +7,7 @@ import { forwardHandoff, reviewReplacement } from './echelons-handoff.js';
 import { changeRoute, routeOf, skippedAuthorReview, type Route } from './route-records.js';
 import { REVIEW_SKIP_ENABLED } from './author-check.js';
 import { skippedData } from './echelons-store.js';
-import { sameChecker, type CheckerIdentity } from './echelons-policy.js';
+import type { CheckerIdentity } from './echelons-policy.js';
 import { loadTask, refuse, waitsForPerson, type Moved, type Task, type Tx, type Wake } from './state.js';
 import { move } from './transitions.js';
 import type { ReviewVerdict } from './review-verdict.js';
@@ -78,10 +78,10 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
   requireNamedCandidate(candidate, verdict);
   const identity = await checkingIdentity(ctx, task, route, candidate);
   if (await waitsForPerson(ctx.db, task.id)) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
-  const state = verdictState(route, verdict, agentId);
+  const state = { ...verdictState(route, verdict, agentId), assignment: identity };
   const issues = await verdictIssues(ctx, task, route, candidate, identity, verdict);
   const n = { kind: 'verdict' as const, actor: { agentId }, text: verdict.comment.trim(), data: verdictData(route, candidate, identity, verdict, issues, state) };
-  const held = async (tx: Tx) => { if (!sameChecker(await heldCheckingIdentity(tx, task, route, candidate), identity)) throw refuse(409, 'task_changed', 'The checking assignment changed. Ask the head to assign it again.'); };
+  const held = (tx: Tx) => heldCheckingIdentity(tx, task, route, candidate, identity);
   if (verdict.escalate) {
     const wakes: Wake[] = [{ agentId: await departmentHead(ctx.db, task), taskId: task.id, why: 'blocked', text: verdict.comment.trim() }];
     const escalated: typeof state = { ...state, phase: 'escalated', stages: state.stages.map(step => step.stage === state.stage ? { ...step, reason: 'wrong_goal' } : step) };

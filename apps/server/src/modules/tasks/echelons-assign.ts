@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, isNotNull, isNull, notLike } from 'drizzle-orm';
 import type { HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
-import { agents, departments, subscriptions, turnTokens } from '../../db/schema.js';
+import { agentFallbacks, agents, departments, subscriptions, turnTokens } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Task, Tx } from './state.js';
@@ -128,18 +128,58 @@ export async function populateSecurityOwner(db: Reader['db'], task: Task, state:
   return ownerAgentId ? { ...state, stages: state.stages.map(item => item.stage === 'security' ? { ...item, ownerAgentId } : item) } : state;
 }
 
-/* A verdict and a repair use the same live assignment, including its ability and subscription. */
+const CHANGED_ASSIGNMENT = 'The checking assignment changed. Ask the head to assign it again.';
+
+function pinnedChecker(task: Task, route: Route): { identity: CheckerIdentity; ability: string } {
+  const { stage, phase, assignment } = route.state;
+  const ability = stage ? route.state.abilities[stage] : undefined;
+  const step = route.state.stages.find(item => item.stage === stage);
+  if (!assignment || !ability || phase !== 'active' || step?.status !== 'active'
+    || step.ownerAgentId !== assignment.agentId || task.assigneeAgentId !== assignment.agentId) {
+    throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
+  }
+  return { identity: assignment, ability };
+}
+
+/* The fallback row and the card are written together. A move by hand has no such proof. */
+async function fellBack(db: Reader['db'], task: Task, pinned: CheckerIdentity, live: CheckerIdentity): Promise<boolean> {
+  if (pinned.subscriptionId === live.subscriptionId) return false;
+  const [fallback] = await db.select({ homeModel: agentFallbacks.homeModel }).from(agentFallbacks)
+    .where(and(eq(agentFallbacks.companyId, task.companyId), eq(agentFallbacks.agentId, pinned.agentId),
+      eq(agentFallbacks.homeSubscriptionId, pinned.subscriptionId), eq(agentFallbacks.subscriptionId, live.subscriptionId)));
+  /* Default is stored as an empty setting. The pin holds the model reported by its previous turn. */
+  return fallback !== undefined && (fallback.homeModel === '' || fallback.homeModel === pinned.model);
+}
+
+function requireIndependentChecker(task: Task, route: Route, agentId: string): void {
+  if (agentId === task.executorAgentId) throw new ApiError(409, 'conflict', 'The original producer cannot check this task.', 'task_invalid');
+  const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
+  const earlier = route.state.stages.slice(0, at).some(step => step.status === 'complete' && step.ownerAgentId === agentId
+    && ['review', 'cleanup', 'security', 'tests'].includes(step.stage));
+  if (earlier) throw new ApiError(409, 'conflict', 'This employee already checked an earlier stage of the task. The head must assign another checker.', 'task_invalid');
+}
+
+/* A verdict and a repair use the live identity of the same checking owner. A saved automatic fallback may outlive its pin. */
 export async function checkingIdentity(ctx: Reader, task: Task, route: Route, candidate: HandedCandidate): Promise<CheckerIdentity> {
-  const ability = route.state.stage ? route.state.abilities[route.state.stage] : undefined;
-  if (task.assigneeAgentId && (await keptFromReview(ctx.db, task, route.state.stage, candidate)).has(task.assigneeAgentId)) throw new ApiError(409, 'conflict', PRODUCER_REVIEW, 'task_invalid');
-  const identity = ability ? await checkerFor(ctx, task, await checkedProducer(ctx.db, task, route, candidate), ability, task.assigneeAgentId) : null;
-  if (!identity || !sameChecker(identity, route.state.assignment)) throw new ApiError(409, 'conflict', 'The checking assignment changed. Ask the head to assign it again.', 'task_changed');
+  const { identity: assignment, ability } = pinnedChecker(task, route);
+  const owner = assignment.agentId;
+  if ((await keptFromReview(ctx.db, task, route.state.stage, candidate)).has(owner)) throw new ApiError(409, 'conflict', PRODUCER_REVIEW, 'task_invalid');
+  requireIndependentChecker(task, route, owner);
+  const [member] = await stageStaff(ctx.db, task, owner);
+  const identity = member && canCheckTask(member, task, ability, owner) ? await agentIdentity(ctx.db, task.companyId, owner) : null;
+  if (!identity) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
+  const rule = reviewEligibility(await checkedProducer(ctx.db, task, route, candidate), identity);
+  if (!rule && sameChecker(identity, assignment)) return identity;
+  if (!(await fellBack(ctx.db, task, assignment, identity))) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
+  if (rule === 'weaker_model') throw new ApiError(409, 'conflict', 'The checker fell back to a weaker model than the producer. The head must assign another checker.', 'task_changed');
+  if (rule) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
   return identity;
 }
 
-/* Inside the transaction that commits a checker's result: the card is held until it commits, so a model, subscription
-   or ability change either lands before this read and refuses the result, or waits until the result is in. */
-export async function heldCheckingIdentity(tx: Tx, task: Task, route: Route, candidate: HandedCandidate): Promise<CheckerIdentity> {
+/* Hold the card until the result commits, so a concurrent change cannot invalidate the checked identity. */
+export async function heldCheckingIdentity(tx: Tx, task: Task, route: Route, candidate: HandedCandidate, expected?: CheckerIdentity): Promise<CheckerIdentity> {
   if (task.assigneeAgentId) await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.id, task.assigneeAgentId), eq(agents.companyId, task.companyId))).for('share');
-  return checkingIdentity({ db: tx }, task, route, candidate);
+  const live = await checkingIdentity({ db: tx }, task, route, candidate);
+  if (expected && !sameChecker(live, expected)) throw new ApiError(409, 'conflict', CHANGED_ASSIGNMENT, 'task_changed');
+  return live;
 }

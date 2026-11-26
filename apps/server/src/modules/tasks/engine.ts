@@ -440,12 +440,12 @@ async function commitHandIn(ctx: Live, agentId: string, task: Task, route: Route
   const prior = route.state.candidateId ? await currentCandidate(ctx.db, task, route) : null;
   const checkerStage = route.state.stage !== 'development';
   const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review, prior?.branch);
-  const producer = await producerIdentity(ctx.db, task, agentId);
-  if (prior && checkerStage) await checkingIdentity(ctx, task, route, prior);
+  const input = checkerStage ? prior : null;
+  const producer = input ? await checkingIdentity(ctx, task, route, input) : await producerIdentity(ctx.db, task, agentId);
   const candidate = producedCandidate(route, producer, review);
   if (prior) await requireRepairHistory(ctx, task, prior, candidate);
   if (!checkerStage) await requireBaseOnLine(ctx, task, candidate.baseCommit);
-  return { input: checkerStage ? prior : null, candidate, review, recorded: undefined };
+  return { input, candidate, review, recorded: undefined };
 }
 
 async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Submission, operation: ReturnType<typeof submissionOperation>): Promise<Moved> {
@@ -460,7 +460,7 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
     kind: 'submitted', actor: { agentId }, text: r.summary, returned: true,
     data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...(recorded ? { recorded } : {}), ...(next.authorCheckSkip ? { authorCheckSkip: next.authorCheckSkip } : {}), ...skippedData(next.skipped) },
   }, async tx => {
-    if (input) await heldCheckingIdentity(tx, task, route, input);
+    if (input) await heldCheckingIdentity(tx, task, route, input, candidate.producedBy);
     await changeRoute(tx, route, next.state);
     await unstuck.also(tx);
   }, next.wakes);
@@ -780,6 +780,7 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   let edited: Task | null = null;
   const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields: Object.keys(c), ...independentData(declaration), ...(policy ? { turnCleanup: policy } : {}) } }, async (tx, row) => {
     if (policy) changed = await applyTurnCleanup(tx, task, policy.turnId, agentId, c.cleanup!, wakes);
+    if (revised.repin) await heldCheckingIdentity(tx, task, route, revised.repin.candidate, revised.repin.identity);
     await changeRoute(tx, route, revised.state, revised.paths);
     if (set.after) await rebindAfter(tx, row, await checkAfter(tx, task.companyId, set.after), c.afterPlans, { agentId });
     independent = await insertIndependentChange(tx, row, agentId, independentChange, wakes);
@@ -792,7 +793,7 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   return { task: edited ?? row, wakes };
 }
 
-function futureAssignmentOnly(change: TaskChange): boolean {
+function stageAssignmentOnly(change: TaskChange): boolean {
   return change.echelonStage !== undefined && Object.keys(change).every(key => ['echelonStage', 'ownerAgentId'].includes(key));
 }
 
@@ -852,7 +853,7 @@ async function insertIndependentChange(tx: Tx, row: Task, agentId: string, chang
 }
 
 async function wakeUpdatedHolder(tx: Tx, task: Task, row: Task, set: Partial<Task>, holder: string | null, wakes: Wake[], change: TaskChange): Promise<void> {
-  if (futureAssignmentOnly(change)) return;
+  if (stageAssignmentOnly(change)) return;
   if (!(await openAfter(tx, row)).length && holder) wakes.push({ agentId: holder, taskId: task.id, why: set.assigneeAgentId ? (row.status === 'review' ? 'review' : 'assigned') : 'updated' });
 }
 

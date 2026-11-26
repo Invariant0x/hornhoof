@@ -1,9 +1,10 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, tasks } from '../../db/schema.js';
-import { checkerFor, keptFromReview, populateSecurityOwner, PRODUCER_REVIEW } from './echelons-assign.js';
+import { checkerFor, checkingIdentity, keptFromReview, populateSecurityOwner, PRODUCER_REVIEW } from './echelons-assign.js';
 import { checkedProducer, currentHanded } from './echelons-candidates.js';
-import { isStaged, type EchelonStage } from '@hornhoof/protocol/echelons';
+import { isStaged, type EchelonStage, type HandedCandidate } from '@hornhoof/protocol/echelons';
+import type { CheckerIdentity } from './echelons-policy.js';
 import { changeRoute, routeOf, type Route } from './route-records.js';
 import { checkedScopePaths } from './echelons-store.js';
 import { CLOSED, refuse, type Task, type Tx, type Wake } from './state.js';
@@ -28,7 +29,8 @@ function withCleanup(route: Route, enabled: boolean): Route['state'] {
   return { ...route.state, stages };
 }
 
-type RouteChange = { state: Route['state']; set: Partial<Task>; paths: string[] };
+type OwnerChange = { state: Route['state']; set: Partial<Task>; repin?: { candidate: HandedCandidate; identity: CheckerIdentity } };
+type RouteChange = OwnerChange & { paths: string[] };
 
 const changedPaths = (route: Route, change: TaskChange): string[] => checkedScopePaths(change.paths ?? route.paths);
 
@@ -54,7 +56,7 @@ export async function prepareRouteChange(ctx: Ctx, task: Task, route: Route, age
     const producer = route.state.candidateId ? await checkedProducer(ctx.db, task, route, await currentHanded(ctx.db, task, route)) : null;
     state = await populateSecurityOwner(ctx.db, task, state, producer);
   }
-  if (change.echelonStage) return { ...await changedFutureOwner(ctx, task, route, state, change), paths };
+  if (change.echelonStage) return { ...await changedStageOwner(ctx, task, route, state, change), paths };
   requireProducerChange(state, change.executor);
   const ownerId = change.ownerAgentId ?? change.executor;
   const owner = ownerId ? await changedOwner(ctx, task, route, state, ownerId, change.executor) : { state, set: {} };
@@ -69,8 +71,13 @@ function futureStep(state: Route['state'], stage: EchelonStage | undefined): Rou
   return step;
 }
 
-async function changedFutureOwner(ctx: Ctx, task: Task, route: Route, state: Route['state'], change: TaskChange): Promise<Pick<RouteChange, 'state' | 'set'>> {
-  if (!change.ownerAgentId || change.executor) throw refuse(400, 'task_invalid', 'A future stage assignment needs ownerAgentId and cannot also change executor.');
+async function changedStageOwner(ctx: Ctx, task: Task, route: Route, state: Route['state'], change: TaskChange): Promise<OwnerChange> {
+  if (!change.ownerAgentId || change.executor) throw refuse(400, 'task_invalid', 'An echelon assignment needs ownerAgentId and cannot also change executor.');
+  if (state.phase === 'active' && state.stage === change.echelonStage && state.assignment?.agentId === change.ownerAgentId) {
+    const candidate = await currentHanded(ctx.db, task, route);
+    const identity = await checkingIdentity(ctx, task, route, candidate);
+    return { state: { ...state, assignment: identity }, set: {}, repin: { candidate, identity } };
+  }
   const step = futureStep(state, change.echelonStage);
   await requireAvailableOwner(ctx, task, change.ownerAgentId);
   const ownerAgentId = await futureOwner(ctx, task, { ...route, state }, step.stage, change.ownerAgentId);
