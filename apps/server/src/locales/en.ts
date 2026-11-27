@@ -46,6 +46,7 @@ export const en = {
     fileTooBig: (name: string, limit: number) => `${name} is too big: a bot gets files of up to ${limit} MB from Telegram. Send it as a link, or in parts.`,
     bigFile: (name: string, url: string, days: number) => `${name} is over 50 MB, more than Telegram passes on. Its link downloads it for ${days} days: ${url}`,
     noRoom: (name: string) => `${name} did not come through: Hornhoof has no room left for the company's files. Ask the company's owner about it.`,
+    machineOffline: (agent: string) => `The machine running ${agent} is offline. Try again when it reconnects.`,
     notReady: (agent: string) => `${agent} cannot answer right now. Open Hornhoof to see why, or write again later.`,
     failed: 'Your message did not go through. Please write it again in a little while.',
     noAnswer: (agent: string) => `${agent} could not answer this time. Open Hornhoof to see why, or write again.`,
