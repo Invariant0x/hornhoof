@@ -2235,9 +2235,6 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-where bdi { min-inline-size: 0; }
 .tr-search { flex: 1 1 160px; max-inline-size: 280px; min-inline-size: 0; margin-inline-start: auto; }
 .tr-search .field > label { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }
-.tr-view-as { max-inline-size: 100%; min-inline-size: 0; }
-.tr-view-as .field { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12.5px; color: var(--muted); }
-.tr-view-as .field-control { flex: 0 1 auto; max-inline-size: 100%; min-inline-size: 0; }
 .tr-top .task-search input { padding-inline: 12px 44px; }
 .tr-top .task-search .zbtn { inset-inline: auto 0; inset-block-start: 0; }
 /* The mockup's search: 34px high in 13px for a mouse on a wide screen; a finger keeps the form's own height. */
@@ -2258,10 +2255,6 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; margin: 0; padding: 3px 10px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); font: inherit; font-size: 12.5px; color: var(--ink); text-align: start; overflow-wrap: break-word; cursor: pointer; }
 .tr-chip:hover { border-color: var(--cyan); }
 .tr-chip.on { border-color: var(--tracker-working-ring); color: var(--cyan-ink); }
-.tr-person-picker { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; inline-size: max-content; max-inline-size: min(100%, 180px); min-block-size: 36px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: 600 13px var(--f-display); overflow-wrap: anywhere; }
-.tr-person-picker .ic { transform: rotate(90deg); }
-.tr-person-picker:focus-within { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-.tr-chip select, .tr-person-picker select { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; font: inherit; }
 /* In the light skin a cyan line on white is too faint for a border: a chosen card or node, a goal's node and a node under
    the pointer draw their border in the ink of the accent, as chips and views do through --tracker-working-ring. */
 :root[data-scheme="light"] :is(.tr-node.goal, .tr-node.on, button.tr-node:hover) { border-color: var(--cyan-ink); }
@@ -2648,7 +2641,6 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
    layout's sizes, none under 24 by 24 px (WCAG 2.5.8; the subtask caret is that floor). Both sizes are tokens of the
    tracker's own, --tracker-target-touch and --tracker-target-fine. */
 @media (max-width: 760px), (pointer: coarse) {
-  .tr-views label, .tr-chip, .tr-group-toggle, .tr-person-picker, .tr-new { min-block-size: var(--tracker-target-touch); }
   .tr-new { inline-size: var(--tracker-target-touch); }
   .tr-card-title .linkish { min-block-size: var(--tracker-target-touch); }
   .tr-card-body > .entry-actions > .act { min-block-size: var(--tracker-target-touch); }
@@ -2673,7 +2665,6 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
   .tr-main > :not(.tr-top, .tr-bar) { margin-inline: 12px; }
   .tr-search { flex: 1 1 100%; max-inline-size: none; margin-inline-start: 0; }
   .tr-where { flex: 1 1 200px; }
-  .tr-view-as { flex: 1 1 100%; }
   /* The lists as a drawer down to the bottom of the screen, so nothing of the page shows under it. */
   .tr-side, .tr-main { grid-area: 1 / 1; }
   .tr-side { display: none; z-index: 8; margin-inline-end: 16px; box-shadow: 0 24px 60px var(--shadow); }

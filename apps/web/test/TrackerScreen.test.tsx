@@ -134,24 +134,21 @@ it('keeps a pipeline chevron beside the first line of its full name', async () =
   expect(decl('.tr-pipelines .tr-item-name > .ic', 'margin-block-start') ?? '').toContain('1lh');
 });
 
-describe('My tasks and View as', () => {
-  it("lands on the person's own open tasks and goals, and shows another person's with View as", async () => {
-    const user = userEvent.setup();
-    shell();
+describe('My tasks', () => {
+  it("keeps the CEO on their own tasks with search and all three views, including on an old viewer link", async () => {
+    shell('/tasks?person=p2');
     const list = await main();
     await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#23 Refund button', '#24 Fix the login page']));
     /* Goals have their own page: none of them is piled into the tasks. */
     expect(screen.queryByRole('region', { name: 'Your goals' })).not.toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Waiting for you' })).toBeInTheDocument();
-    await user.selectOptions(screen.getByRole('combobox', { name: 'View as' }), 'p2');
-    expect(location.search).toBe('?person=p2');
-    /* Her subtasks stand open under their task, as "Subtasks: show" says. */
-    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#21 Take card payments', '#22 Card form']));
-    expect(screen.queryByRole('region', { name: 'Goals of Maria' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'View as' })).not.toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: 'Search tasks' })).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'View' })).getAllByRole('radio')).toHaveLength(3);
   });
 
-  it('offers View as only to the CEO and the CEO delegate', async () => {
+  it('keeps the viewer switch out of a department member’s tracker', async () => {
     shell('/tasks', {}, { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } });
     await main();
     expect(screen.queryByRole('combobox', { name: 'View as' })).not.toBeInTheDocument();
@@ -194,10 +191,10 @@ describe('My tasks and View as', () => {
     expect(await within(await main()).findAllByRole('listitem')).toHaveLength(2);
   });
 
-  it("opens another person's screen from the address for the CEO delegate", async () => {
+  it("keeps the delegate on their own tasks when opening an old viewer link", async () => {
     shell('/tasks?person=p2', {}, { ...ME, person: { ...ME.person, isOwner: false, isCeoDelegate: true } });
     const list = await main();
-    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#21 Take card payments', '#22 Card form']));
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#23 Refund button', '#24 Fix the login page']));
   });
 
   it('shows people with assigned task counts and opens department goals, dates and tasks without a pipeline', async () => {
@@ -253,12 +250,7 @@ describe('the views and the card', () => {
     await act(async () => {});
     const title = screen.getByRole('heading', { level: 1, name: 'Development / Payments way' });
     expect(title.querySelector('.tr-dept-mark')).toHaveAttribute('data-tone', 'accent');
-    const picker = screen.getByRole('combobox', { name: 'View as' });
-    expect(within(picker).getByRole('option', { name: 'Me, Ivan' })).toBeInTheDocument();
-    expect(screen.getByRole('searchbox', { name: 'Search tasks' }).closest('header')).toContainElement(picker);
-    await user.selectOptions(picker, 'p2');
-    expect(location.search).toBe('?department=d2&pipeline=pl1&person=p2');
-    expect(screen.getByRole('heading', { level: 1, name: 'Development / Payments way' })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'View as' })).not.toBeInTheDocument();
     const tabs = screen.getByRole('group', { name: 'View' });
     /* List, Board and Graph, as the mockup's tabs, nothing more on the row. */
     expect(within(tabs).getAllByRole('radio').map(tab => tab.parentElement?.textContent)).toEqual(['List', 'Board', 'Graph']);
@@ -626,7 +618,7 @@ describe('making work in a department', () => {
   });
 });
 
-it('fits the lists directly beside the main header with its breadcrumb, viewer and search', async () => {
+it('fits the lists directly beside the main header with its breadcrumb and search', async () => {
   shell('/tasks?department=d2&pipeline=pl1');
   await main();
   const side = screen.getByRole('navigation', { name: 'Task lists' });
@@ -635,7 +627,7 @@ it('fits the lists directly beside the main header with its breadcrumb, viewer a
   const tracker = side.parentElement;
   expect(tracker).toHaveClass('fit');
   expect(tracker?.firstElementChild).toBe(side);
-  expect(header).toContainElement(screen.getByRole('combobox', { name: 'View as' }));
+  expect(within(header!).queryByRole('combobox')).toBeNull();
   expect(header?.lastElementChild).toContainElement(screen.getByRole('searchbox', { name: 'Search tasks' }));
   expect(screen.getByRole('group', { name: 'View' })).toContainElement(screen.getByRole('radio', { name: 'Board' }));
   expect(screen.getByRole('group', { name: 'Filters' })).toContainElement(screen.getByRole('combobox', { name: 'Status' }));
@@ -844,7 +836,7 @@ describe('what waits for people', () => {
     expect(articles(waiting)).toEqual(['#21 Take card payments']);
   });
 
-  it("names the person of a filter in the page's title alone, and Me takes the filter off", async () => {
+  it("names the person of a filter in the page's title alone, and the personal queue opens from the sidebar", async () => {
     const user = userEvent.setup();
     shell('/tasks?show=waits&person=p-theo', routes);
     const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
@@ -854,7 +846,7 @@ describe('what waits for people', () => {
        person nor a way to everyone's decisions. */
     expect(waiting).not.toHaveTextContent('Decisions for Theo');
     expect(screen.queryByRole('button', { name: "Show everyone's decisions" })).toBeNull();
-    await user.selectOptions(screen.getByRole('combobox', { name: 'View as' }), 'Me, Ivan');
+    await user.click(within(screen.getByRole('navigation', { name: 'Task lists' })).getByRole('button', { name: /^Waits for me/ }));
     expect(screen.getByRole('heading', { level: 1, name: 'Waits for me' })).toBeInTheDocument();
     expect(articles(screen.getByRole('region', { name: 'Waiting for you' }))).toEqual(['#23 Refund button']);
   });

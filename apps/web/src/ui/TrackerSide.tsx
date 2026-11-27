@@ -231,7 +231,6 @@ export function TrackerSide({ id, place, onPlace, onOpenTask, onOpenAgent, org, 
     onPlace(next);
     onClose();
   };
-  const person = place.personId ? { personId: place.personId } : {};
   const mine = !place.show && !place.department && !place.responsible && !place.goal && !place.root;
   const people = mapPeople(org).filter(p => !p.assistant && p.status === 'active');
   const departments = places?.departments ?? [];
@@ -253,10 +252,10 @@ export function TrackerSide({ id, place, onPlace, onOpenTask, onOpenAgent, org, 
         </button>
       </div>
       <ul className="tr-items">
-        <li><Item icon={<TrackerIcon name="waits" />} on={place.show === 'waits'} count={counts.waits} tone="attention" onClick={() => go({ show: 'waits', ...person })}>{words.waits}</Item></li>
+        <li><Item icon={<TrackerIcon name="waits" />} on={place.show === 'waits' && !place.personId} count={counts.waits} tone="attention" onClick={() => go({ show: 'waits' })}>{words.waits}</Item></li>
         <PeopleWaitsItem count={counts.people} on={place.show === 'people'} go={go} />
-        <li><Item icon={<TrackerIcon name="mine" />} on={mine} count={counts.mine} onClick={() => go({ ...person, view: 'list' })}>{words.mine}</Item></li>
-        <li><Item icon={<span className="tr-live" aria-hidden="true" />} on={place.show === 'working'} count={counts.working} tone="working" onClick={() => go({ show: 'working', ...person, view: 'list' })}>{words.working}</Item></li>
+        <li><Item icon={<TrackerIcon name="mine" />} on={mine} count={counts.mine} onClick={() => go({ view: 'list' })}>{words.mine}</Item></li>
+        <li><Item icon={<span className="tr-live" aria-hidden="true" />} on={place.show === 'working'} count={counts.working} tone="working" onClick={() => go({ show: 'working', view: 'list' })}>{words.working}</Item></li>
       </ul>
       <h2 className="tr-side-heading">{words.people}</h2>
       <ul className="tr-items">
@@ -264,7 +263,7 @@ export function TrackerSide({ id, place, onPlace, onOpenTask, onOpenAgent, org, 
           return (
             <li key={p.id}>
               <Item icon={<PersonMark person={p} decorative />} on={place.responsible === p.id} sub={answersFor(p)} count={assigned.get(p.id)}
-                onClick={() => go({ ...person, responsible: p.id, view: 'list' })}>{p.name}</Item>
+                onClick={() => go({ responsible: p.id, view: 'list' })}>{p.name}</Item>
             </li>
           );
         })}
@@ -274,10 +273,10 @@ export function TrackerSide({ id, place, onPlace, onOpenTask, onOpenAgent, org, 
         {departments.map(d => <DepartmentItem key={d.id} d={d} org={org} place={place} go={go} onOpenTask={task => { onOpenTask(task); onClose(); }} onOpenAgent={onOpenAgent} pipelines={pipelines} goals={goals} />)}
       </ul>
       <ul className="tr-items tr-more">
-        <li><Item icon={<TrackerIcon name="goals" />} on={place.show === 'goals' && !place.department} count={companyGoals.length} tone="plain" onClick={() => go({ show: 'goals', ...person })}>{words.allGoals}</Item></li>
-        <li><Item icon={<TrackerIcon name="dates" />} on={place.show === 'due'} onClick={() => go({ show: 'due', ...person })}>{words.dates}</Item></li>
-        <li><Item icon={<TrackerIcon name="failure" />} on={place.show === 'failures'} count={counts.failures} tone="attention" onClick={() => go({ show: 'failures', ...person, view: 'list' })}>{words.failures}</Item></li>
-        {places?.whole && <li><Item icon={<TrackerIcon name="list" />} on={place.department === 'none'} onClick={() => go({ ...person, department: 'none', view: 'list' })}>{words.orchestrator}</Item></li>}
+        <li><Item icon={<TrackerIcon name="goals" />} on={place.show === 'goals' && !place.department} count={companyGoals.length} tone="plain" onClick={() => go({ show: 'goals' })}>{words.allGoals}</Item></li>
+        <li><Item icon={<TrackerIcon name="dates" />} on={place.show === 'due'} onClick={() => go({ show: 'due' })}>{words.dates}</Item></li>
+        <li><Item icon={<TrackerIcon name="failure" />} on={place.show === 'failures'} count={counts.failures} tone="attention" onClick={() => go({ show: 'failures', view: 'list' })}>{words.failures}</Item></li>
+        {places?.whole && <li><Item icon={<TrackerIcon name="list" />} on={place.department === 'none'} onClick={() => go({ department: 'none', view: 'list' })}>{words.orchestrator}</Item></li>}
         <li><Item icon={<TrackerIcon name="dates" />} on={place.show === 'turns'} onClick={() => go({ show: 'turns' })}>{words.turns}</Item></li>
       </ul>
     </nav>

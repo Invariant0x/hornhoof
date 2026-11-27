@@ -107,7 +107,7 @@ test('names what waits for people once, in the title of the page', async ({ page
   await expect(page.getByRole('heading', { name: t.tracker.peopleWaits.title, exact: true })).toHaveCount(1);
 });
 
-test('shows what waits for one person under a title with their name alone, and Me takes the filter off', async ({ page }) => {
+test('shows what waits for one person under a title with their name alone, and the personal queue opens from the sidebar', async ({ page }) => {
   const t = DICTIONARIES.en;
   await open(page, 'en', 1440, '/tasks?show=waits&person=p-max');
   const mine = page.getByRole('region', { name: t.tasks.waiting });
@@ -116,7 +116,7 @@ test('shows what waits for one person under a title with their name alone, and M
   /* What waits for other people has its own section, so the list neither names the person again nor offers everyone's
      decisions. */
   await expect(mine.getByText(/^Decisions for /)).toHaveCount(0);
-  await page.getByRole('combobox', { name: t.tracker.viewAs }).selectOption({ label: t.tracker.viewAsSelf(ME.person.name) });
+  await page.getByRole('navigation', { name: t.tracker.side.label }).getByRole('button', { name: new RegExp('^' + t.tracker.side.waits) }).click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(t.tracker.where.waits);
   await expect(mine).toContainText(QUESTION);
   await expect(mine).not.toContainText(MAX_QUESTION);

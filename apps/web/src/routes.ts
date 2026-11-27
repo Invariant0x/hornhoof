@@ -10,7 +10,7 @@ export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
    releases instead of their own tasks, all the company's goals and tasks, the goals (of a department with one named) or the
    tasks with a due date; a
    department, its pipeline, a goal, the task the graph grows from and a person who answers for the work; and the view.
-   personId: whose screen is looked at. A card is a task's, or with card a goal's. */
+   personId: the addressee of an explicitly opened waiting list. A card is a task's, or with card a goal's. */
 export const TRACKER_SHOWS = ['waits', 'people', 'working', 'failures', 'turns', 'company', 'goals', 'due'] as const;
 export type TrackerShow = (typeof TRACKER_SHOWS)[number];
 export type TrackerPlace = { show?: TrackerShow; department?: string; product?: string; pipeline?: string; goal?: string; root?: string; responsible?: string; personId?: string; view?: TrackerView };
@@ -34,10 +34,12 @@ const unavailable = (): Route => ({ kind: 'unavailable' });
 
 /* The query of the tracker, in the order an address writes it; each id the same safe kind as a path's. */
 const PLACE_KEYS = [['show', 'show'], ['department', 'department'], ['product', 'product'], ['pipeline', 'pipeline'], ['goal', 'goal'], ['root', 'root'], ['responsible', 'responsible'], ['personId', 'person'], ['view', 'view']] as const;
+const placeKeys = (show?: string | null) => show === 'waits' ? PLACE_KEYS : PLACE_KEYS.filter(([key]) => key !== 'personId');
+
 /* Where the tracker is, without the card that sits on top of it. */
 export function placeOf(route: TasksRoute): TrackerPlace {
   const place: TrackerPlace = {};
-  for (const [key] of PLACE_KEYS) if (route[key]) Object.assign(place, { [key]: route[key] });
+  for (const [key] of placeKeys(route.show)) if (route[key]) Object.assign(place, { [key]: route[key] });
   return place;
 }
 
@@ -52,7 +54,7 @@ function tasksRoute(id: string | undefined, query: string): TasksRoute {
   const params = new URLSearchParams(query);
   if (id) return params.get('card') === 'goal' ? { kind: 'tasks', id, card: 'goal' } : { kind: 'tasks', id };
   const route: TasksRoute = { kind: 'tasks' };
-  for (const [key, name] of PLACE_KEYS) {
+  for (const [key, name] of placeKeys(params.get('show'))) {
     const value = placeValue(key, params.get(name));
     if (value) Object.assign(route, { [key]: value });
   }
@@ -98,7 +100,7 @@ export function routePath(route: Route): string {
   const base = `/${PATHS[route.kind]}${id ? `/${id}` : ''}`;
   if (route.kind !== 'tasks') return base;
   if (route.id) return route.card === 'goal' ? `${base}?card=goal` : base;
-  const query = PLACE_KEYS.flatMap(([key, name]) => {
+  const query = placeKeys(route.show).flatMap(([key, name]) => {
     const value = placeValue(key, route[key]);
     return value ? [`${name}=${value}`] : [];
   });
