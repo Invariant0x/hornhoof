@@ -190,7 +190,8 @@ export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | Tele
   } catch (err) {
     const notReady = err instanceof ApiError && (err.reason === 'agent_not_ready' || err.reason === 'orchestrator_not_ready');
     if (!notReady) ctx.log.warn({ error: loggable(err), agentId: agent.id }, 'A message from Telegram did not reach its agent.');
-    await say(chatId, notReady ? words.notReady(name) : words.failed);
+    const offline = notReady && err.details?.undelivered === 'machine_offline';
+    await say(chatId, offline ? words.machineOffline(name) : notReady ? words.notReady(name) : words.failed);
     return false;
   }
   await awaitAnswer(ctx, bot, jobId, chatId, update.update_id, before, lang);

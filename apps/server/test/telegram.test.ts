@@ -373,6 +373,17 @@ describe('a message through the bot', () => {
     expect(run.prompt).toContain("This is Wes writing to you directly in Telegram. Wes is the CEO's delegate and responsible for your department.");
   });
 
+  it('names the offline machine when it cannot take a Telegram message', async () => {
+    const { app, ceo, owner, tg, builtin } = await company();
+    await setTelegram(app, ceo, owner.id, '@Ivan_K');
+    await connectBot(app, ceo, 'orchestrator', TOKEN);
+    builtin.close();
+    await until(async () => (await state(app, ceo)).reason === 'machine_offline');
+    tg.write(TOKEN, IVAN, 'Hello.');
+    await until(() => tg.sent.length > 0);
+    expect(tg.sent[0]!.text).toContain('offline');
+  });
+
   it.each(['agent_failed', 'cancelled'] as const)('sends only the failure words when a turn ends with %s after progress', async error => {
     const { app, db, ceo, owner, tg, builtin } = await company();
     await setTelegram(app, ceo, owner.id, '@Ivan_K');

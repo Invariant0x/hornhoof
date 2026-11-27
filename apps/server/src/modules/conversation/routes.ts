@@ -90,10 +90,11 @@ const NOT_READY = 'This employee cannot answer right now. See the window for wha
 async function requireTakes(ctx: Ctx, me: Person, agent: AgentRow, task: Written['task']): Promise<void> {
   const state = await agentState(ctx, agent.id);
   if (state.ready) return;
-  if (agent.kind === 'orchestrator') throw new ApiError(409, 'conflict', 'The orchestrator cannot answer right now. See the window for what to do.', 'orchestrator_not_ready');
-  if (!me.via) throw new ApiError(409, 'conflict', NOT_READY, 'agent_not_ready');
+  const details = { undelivered: state.reason ?? 'cannot_run' };
+  if (agent.kind === 'orchestrator') throw new ApiError(409, 'conflict', 'The orchestrator cannot answer right now. See the window for what to do.', 'orchestrator_not_ready', details);
+  if (!me.via) throw new ApiError(409, 'conflict', NOT_READY, 'agent_not_ready', details);
   if (state.reason === 'machine_offline' && (await reconnecting(ctx, agent.id))) return;
-  const refusal = new ApiError(409, 'conflict', NOT_READY, 'agent_not_ready', { undelivered: state.reason ?? 'cannot_run' });
+  const refusal = new ApiError(409, 'conflict', NOT_READY, 'agent_not_ready', details);
   throw await refusedMessage(ctx, { companyId: me.companyId, agentId: me.via }, { recipient: agent.id, task }, refusal);
 }
 
