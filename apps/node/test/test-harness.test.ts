@@ -516,8 +516,7 @@ describe('the registry over HTTP', () => {
     const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), said: string[] = [], postgresUnit = { ...UNIT, unit: 'postgres' };
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     onTestFinished(() => { stop.abort(); stream?.destroy(); vi.useRealTimers(); });
-    let settled = false;
-    const preparing = prepareCache(here.dir, KEY, INPUT, { ...here, signal: stop.signal, log: line => said.push(line) }, async () => source, harnessShare(remote, postgresUnit)).finally(() => { settled = true; });
+    const preparing = prepareCache(here.dir, KEY, INPUT, { ...here, signal: stop.signal, log: line => said.push(line) }, async () => source, harnessShare(remote, postgresUnit));
     void preparing.catch(() => {});
     await eventually(async () => stream !== undefined && heard.length === 2 && await bundleBytesOnDisk(here.dir) === 2_500);
     await new Promise<void>(resolve => { setImmediate(resolve); });
@@ -529,14 +528,10 @@ describe('the registry over HTTP', () => {
       await new Promise<void>(resolve => { setImmediate(resolve); });
     }
     await vi.advanceTimersByTimeAsync(30_000);
-    for (let turn = 0; turn < 50 && !said.some(line => line.includes('could not be taken from Hornhoof')); turn++) {
-      await new Promise<void>(resolve => { setImmediate(resolve); });
-    }
+    const entry = await preparing;
     expect(heard).toHaveLength(2);
     expect(said.some(line => line.startsWith('Transferred ') && line.includes('25%'))).toBe(true);
     expect(said.at(-1)).toMatch(/^The prepared a{12} could not be taken from Hornhoof, so it is built here: .*within 5 min.*25%/);
-    const entry = await preparing;
-    expect(settled).toBe(true);
     expect(entry).toMatchObject({ hit: false, fetched: false });
     expect(await readFile(join(entry.path, 'payload', 'node_modules', 'dep'), 'utf8')).toBe('locked');
   });
