@@ -164,22 +164,25 @@ function QueueFact({ task }: { task: TaskLine }) {
 }
 
 /* Who answers for it and who does it, its pipeline and its due day with how long it is in its status, a name beside each. */
-function CardFacts({ task, status }: { task: TaskLine; status: ReturnType<typeof humanStatus> }) {
+function CardFacts({ task, status, org }: { task: TaskDetail; org: Org | null | undefined; status: ReturnType<typeof humanStatus> }) {
   const t = useT();
   const { language } = useLanguage();
   const { pipelines } = usePipelines(!!task.pipelineId);
   const pipeline = pipelines?.find(p => p.id === task.pipelineId);
   const stage = pipeline?.stages.find(s => s.id === task.pipelineStageId);
+  const lead = task.department
+    ? org?.departments.find(dept => dept.id === task.department?.id)?.employees.find(employee => employee.kind === 'head')
+    : org?.orchestrator;
   const words = t.tracker.card;
   const due = dueText(t, language, task);
   const inStatus = task.time ? words.inStatus(t.tracker.groups[status], spanText(t, sinceSeconds(task.time.inStatusSince))) : null;
   return (
     <div role="group" aria-label={words.facts}>
       <dl className="tp-card-facts">
-        <Fact name={words.askedBy}><Answers person={task.askedBy} /></Fact>
+        <Fact name={words.askedBy}><Answers person={task.askedBy ?? task.createdBy} /></Fact>
         <Fact name={words.decides}><Answers person={task.responsible} /></Fact>
         <QueueFact task={task} />
-        <Fact name={words.executor}><bdi>{task.executor?.name ?? task.assignee?.name ?? t.tracker.nobody}</bdi></Fact>
+        <Fact name={words.executor}><bdi>{task.executor?.name ?? task.assignee?.name ?? lead?.name ?? t.tracker.nobody}</bdi></Fact>
         {pipeline && <Fact name={words.pipeline}>{stage ? words.pipelineStage(pipeline.name, stage.name) : pipeline.name}</Fact>}
         {due ? <Fact name={words.due}><DueDay due={due} />{inStatus && ` · ${inStatus}`}</Fact> : inStatus && <Fact name={words.time}>{inStatus}</Fact>}
       </dl>
@@ -351,7 +354,7 @@ function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: 
         if (next !== 'secret') selection.current = '';
         setView(next);
       }} onClose={closeMenu} onOpen={onOpen} onChanged={onChanged} waiting={waiting} />
-      <CardFacts task={task} status={status} />
+      <CardFacts task={task} status={status} org={org} />
       <GraphFromHere id={task.id} onGraph={leads.onGraph} />
       {task.body && <FoldedMarkdown text={task.body} />}
       <Subtasks task={task} onOpen={onOpen} />

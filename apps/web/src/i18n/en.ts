@@ -2827,12 +2827,12 @@ export const en = {
       facts: 'Facts',
       responsible: 'Responsible',
       /* Of a task: whose request started its tree, and who answers its questions and approvals. */
-      askedBy: 'Asked by',
+      askedBy: 'Initiator',
       decides: 'Decides',
       /* Where a task waits while every slot of its department's turn is busy. */
       queue: 'Waits for',
       queueText: (ahead: number, openTurn: number | null) => `${ahead === 1 ? 'The next turn' : ahead === 2 ? 'The turn after next' : `The turn ${ahead} turns ahead`}${openTurn === null ? '' : `, after turn ${openTurn}`}`,
-      executor: 'Executor',
+      executor: 'Responsible',
       pipeline: 'Pipeline',
       pipelineStage: (pipeline: string, stage: string) => `${pipeline} · stage ${stage}`,
       due: 'Due',
