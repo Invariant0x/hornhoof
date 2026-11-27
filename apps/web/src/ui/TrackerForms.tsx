@@ -2,7 +2,7 @@ import { TASK_PRIORITIES, type TaskPriority, say, sayIf } from '@hornhoof/protoc
 import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
-import { mapPeople, useOrg } from '../org';
+import { departmentHead, mapPeople, useOrg } from '../org';
 import { useGoals, usePipelines } from '../tasks';
 import { stagesInOrder } from '../tracker';
 import type { Department, GoalView, Org, PersonRef, Pipeline, PipelineStage, TaskDetail } from '../types';
@@ -374,7 +374,7 @@ export function PipelineForm({ pipeline, department, onDone, onCancel }: { pipel
    after its role. */
 export function TrackerNewTask({ department, pipelineId, onCreated, onCancel, place }: { department: Department; pipelineId?: string | null; onCreated: (task: TaskDetail) => void; onCancel: () => void; place?: ReactNode }) {
   const { language } = useLanguage();
-  const head = department.employees.find(e => e.kind === 'head');
+  const head = departmentHead(department);
   if (!head) return null;
   return <NewTask department={department} showPriority pipelineId={pipelineId} head={sayIf(head.title, language) === head.name ? null : head.name} onCreated={onCreated} onCancel={onCancel} place={place} />;
 }
