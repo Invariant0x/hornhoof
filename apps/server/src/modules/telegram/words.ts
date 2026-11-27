@@ -14,12 +14,10 @@ export const agentName = (agent: { kind: string; name: string }, lang: BotLang):
 export function botWords(lang: BotLang) {
   const words = wordsFor(lang).bot;
   const failureMessage = (agent: string, kind?: FailureKind): string => {
-    switch (kind) {
-      case 'usage_limit': return words.planLimit(agent);
-      case 'rate_limited': return words.tooMany(agent);
-      case 'tools': return words.toolsUnavailable(agent);
-      default: return words.noAnswer(agent);
-    }
+    if (kind === 'usage_limit') return words.planLimit(agent);
+    if (kind === 'rate_limited') return words.tooMany(agent);
+    if (kind === 'tools') return words.toolsUnavailable(agent);
+    return words.noAnswer(agent);
   };
   return { ...words, failureMessage, bigFile: (name: string, url: string) => words.bigFile(name, url, LINK_DAYS) };
 }
