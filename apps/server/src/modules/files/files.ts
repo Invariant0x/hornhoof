@@ -1,4 +1,4 @@
-import { rowsOf } from '../../db/selections.js';
+import { rowsOf } from '../../db/result-rows.js';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, statfsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
