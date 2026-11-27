@@ -131,7 +131,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     lit = await givesBack(tx, row, n, event);
     await also?.(tx, row);
     await doneWhole(tx, task, set, n, true);
-    if (CLOSED.includes(row.status)) unstuck = await letStuckGo(tx, row.id);
+    if (CLOSED.includes(row.status)) unstuck = await withdrawQuestions(tx, row.id, ['question', 'choice', 'stuck']);
     await keepWaitsWithMove(tx, task, row, { kind: n.kind, actor: n.actor, eventId: event.id });
     if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, row, n.actor.agentId)));
     /* What waited for it starts with the same move, so its turn is kept with it. */
@@ -154,7 +154,9 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
 }
 
 /* Hornhoof's notes that the task stood still are over once it moves again: handed on, handed in or reported. */
-export async function letStuckGo(tx: Tx, taskId: string): Promise<boolean> {
-  const gone = await tx.update(requests).set({ status: 'withdrawn', answeredAt: new Date() }).where(and(eq(requests.taskId, taskId), eq(requests.status, 'open'), eq(requests.kind, 'stuck'))).returning({ id: requests.id });
+export const letStuckGo = (tx: Tx, taskId: string) => withdrawQuestions(tx, taskId, ['stuck']);
+
+async function withdrawQuestions(tx: Tx, taskId: string, kinds: (typeof requests.$inferSelect.kind)[]): Promise<boolean> {
+  const gone = await tx.update(requests).set({ status: 'withdrawn', answeredAt: new Date() }).where(and(eq(requests.taskId, taskId), eq(requests.status, 'open'), inArray(requests.kind, kinds))).returning({ id: requests.id });
   return gone.length > 0;
 }

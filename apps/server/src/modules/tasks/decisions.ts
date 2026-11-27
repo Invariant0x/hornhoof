@@ -1,5 +1,5 @@
 import { candidates } from './decision-people.js';
-import { and, asc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { seesAgentId, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { canReach } from '../../auth/access.js';
@@ -12,7 +12,7 @@ import { idOnly } from '../../db/selections.js';
 import { DELETION_CONFLICT } from '../merge/picks.js';
 import { isAddressedTo, machinesAway, type MachineAway } from '../nodes/machine-away.js';
 import { machinesLow, type MachineLow } from '../nodes/machine-low.js';
-import { requestSubject, taskSpot, type Request, type Task } from './state.js';
+import { CLOSED, requestSubject, taskSpot, type Request, type Task } from './state.js';
 import { seesTask, type TaskPlace } from './visibility.js';
 /* What waits for people, as each person may see it: whose card counts each decision and whose filter shows it, and whether
    this person may take it (auth/decisions.ts). */
@@ -107,7 +107,7 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'startedAt' | 'hub'
     .select({ request: requests, task: tasks })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
-    .where(and(eq(requests.companyId, me.companyId), openPersonRequests()))
+    .where(and(eq(requests.companyId, me.companyId), openPersonRequests(), or(eq(requests.kind, 'approval'), notInArray(tasks.status, [...CLOSED]))))
     .orderBy(asc(requests.createdAt), asc(requests.id));
   /* As the routes that take them let them. */
   const judged = (subject: DecisionSubject) => ({ ownerPersonId: decisionOwner(subject, everyone), canAnswer: canDecide(subject, me, access, me.companyId), decidedBy: decidedBy(subject, everyone) });

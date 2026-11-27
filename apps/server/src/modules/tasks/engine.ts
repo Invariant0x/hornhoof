@@ -1201,6 +1201,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
        is now, not as it was read before: one closed meanwhile stays closed. */
     const [current] = await tx.select(only(tasks, 'status')).from(tasks).where(eq(tasks.id, task.id)).for('update');
     const answeredBy = await mayAnswer(tx, actor, found, task, on);
+    if (current && CLOSED.includes(current.status) && found.kind !== 'approval') throw refuse(409, 'request_closed', 'The task is closed.');
     const { audit, forWhom } = auditOf(on);
     const [request] = await tx
       .update(requests)
@@ -1247,7 +1248,7 @@ const openForPeople = (db: Live['db'], agentId: string) =>
     .select({ id: requests.id, companyId: requests.companyId, kind: requests.kind, decisionTopic: requests.decisionTopic, recipientPersonId: requests.recipientPersonId, departmentId: tasks.departmentId, productId: tasks.productId, text: requests.text, taskId: tasks.id, number: tasks.number, createdAt: requests.createdAt })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
-    .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), inArray(requests.kind, ['question', 'stuck']), or(ne(requests.kind, 'stuck'), eq(requests.audience, 'human'))))
+    .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), notInArray(tasks.status, [...CLOSED]), inArray(requests.kind, ['question', 'stuck']), or(ne(requests.kind, 'stuck'), eq(requests.audience, 'human'))))
     .orderBy(asc(requests.createdAt));
 type OpenForPeople = Awaited<ReturnType<typeof openForPeople>>[number];
 
