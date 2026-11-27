@@ -1109,6 +1109,13 @@ async function mayAnswer(tx: Tx, actor: Actor, found: Request, task: Task, on?: 
   return personId;
 }
 
+async function lockAnswer(tx: Tx, actor: Actor, found: Request, task: Task, on?: Delegation) {
+  const [current] = await tx.select(only(tasks, 'status')).from(tasks).where(eq(tasks.id, task.id)).for('update');
+  const answeredBy = await mayAnswer(tx, actor, found, task, on);
+  if (current && CLOSED.includes(current.status) && found.kind !== 'approval') throw refuse(409, 'request_closed', 'The task is closed.');
+  return { current, answeredBy };
+}
+
 /* What the request and its log keep of the orchestrator's answer for a person: which turn, on whose words. */
 function auditOf(on: Delegation | undefined) {
   if (!on) return { audit: {}, forWhom: {} };
@@ -1199,14 +1206,12 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   const row = await ctx.db.transaction(async tx => {
     /* The task first and then its request, in the order a cancel takes them, so the two never wait on each other. As the task
        is now, not as it was read before: one closed meanwhile stays closed. */
-    const [current] = await tx.select(only(tasks, 'status')).from(tasks).where(eq(tasks.id, task.id)).for('update');
-    const answeredBy = await mayAnswer(tx, actor, found, task, on);
-    if (current && CLOSED.includes(current.status) && found.kind !== 'approval') throw refuse(409, 'request_closed', 'The task is closed.');
+    const { current, answeredBy } = await lockAnswer(tx, actor, found, task, on);
     const { audit, forWhom } = auditOf(on);
     const [request] = await tx
       .update(requests)
       .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy, ...audit, ...(orchestrator ? { answeredByAgentId: orchestrator } : {}), ...recordedAudit(recorded), answeredByAssistantId: assistant ?? null, answeredAt: new Date() })
-      .where(and(eq(requests.id, requestId), eq(requests.status, 'open'), found.recipientPersonId === null ? isNull(requests.recipientPersonId) : eq(requests.recipientPersonId, found.recipientPersonId)))
+      .where(and(eq(requests.id, requestId), eq(requests.status, 'open'), sql`${requests.recipientPersonId} IS NOT DISTINCT FROM ${found.recipientPersonId}::uuid`))
       .returning();
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
     await endRequest(tx, request, status, answerer(answeredBy, actor));

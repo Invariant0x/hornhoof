@@ -1,4 +1,4 @@
-import { canReaddress, readdress } from './request-recipient.js';
+import { canReaddress, mayAssignQuestions, readdress } from './request-recipient.js';
 import { TASK_PRIORITIES } from '@hornhoof/protocol';
 import { idOnly, only } from '../../db/selections.js';
 import { turnCounts } from './turn-progress.js';
@@ -322,7 +322,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   const detail = async (me: Person, task: Task) => {
     const viewer = await viewerOf(db, me);
     const manages = await runsDepartment(db, me, task.departmentId);
-    return { ...(await detailFor(ctx, viewer, task)), mayPause: manages, mayAssignQuestions: manages && !me.via && !me.assistant, mayHideSecret: !me.via && !me.assistant && manages, mayEdit: actsOnTask(viewer, task), version: task.version, revision: task.trackerRevision };
+    return { ...(await detailFor(ctx, viewer, task)), mayPause: manages, mayAssignQuestions: mayAssignQuestions(me, manages), mayHideSecret: !me.via && !me.assistant && manages, mayEdit: actsOnTask(viewer, task), version: task.version, revision: task.trackerRevision };
   };
 
   /* The departments whose tasks this person reads, for the Tasks screen to choose from: every one of the company. mine: one

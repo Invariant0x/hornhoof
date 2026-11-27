@@ -1,3 +1,4 @@
+import type { FailureKind } from '@hornhoof/protocol';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { and, asc, eq, gt, inArray, isNull, lte } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -232,6 +233,14 @@ class Listener {
     this.typing.delete(id);
   }
 
+  private async sayFailure(row: ReplyRow, error: string | null, kind?: FailureKind): Promise<void> {
+    const [agent] = await this.ctx.db.select({ kind: agents.kind, name: agents.name }).from(agents).where(eq(agents.id, this.bot.agentId));
+    if (!agent) return;
+    const name = agentName(agent, row.lang);
+    const words = botWords(row.lang);
+    await this.say(row.chatId, error === 'machine_offline' ? words.machineOffline(name) : words.failureMessage(name, kind));
+  }
+
   private async answerOne(row: ReplyRow, settling: boolean): Promise<void> {
     const { db } = this.ctx;
     const person = await authorizedRecipient(db, this.bot, row.chatId);
@@ -260,12 +269,7 @@ class Listener {
     try {
       if (job?.status === 'done') await this.sayAnswer(person, row);
       if (job?.status === 'failed') {
-        const [agent] = await db.select({ kind: agents.kind, name: agents.name }).from(agents).where(eq(agents.id, this.bot.agentId));
-        if (agent) {
-          const name = agentName(agent, row.lang);
-          const words = botWords(row.lang);
-          await this.say(row.chatId, job.error === 'machine_offline' ? words.machineOffline(name) : words.failureMessage(name, job.failure?.kind));
-        }
+        await this.sayFailure(row, job.error, job.failure?.kind);
       }
     } catch (err) {
       if (!chatGone(err)) throw err;

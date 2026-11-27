@@ -39,7 +39,7 @@ const defaultPlaceName = (p: TaskPlace) => p?.name ?? '';
 /* onOpenAgent opens the asking agent's window, to see in its terminal what it did. */
 /* waitsFor: whom a request waits for, by the person it is for, on lists of more people than one. */
 /* viewerId: the signed-in person; headings address them directly only when the request waits for them and they may answer it. */
-type Shared = { recipientEditor?: (request: WaitingRequest) => ReactNode; onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName?: (p: TaskPlace) => string; inline?: boolean; waitsFor?: (personId: string) => string; viewerId?: string; onDefer?: () => void };
+type Shared = { destination?: (request: WaitingRequest) => ReactNode; onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName?: (p: TaskPlace) => string; inline?: boolean; waitsFor?: (personId: string) => string; viewerId?: string; onDefer?: () => void };
 
 const isAddressedToViewer = (request: WaitingRequest, viewerId?: string): boolean =>
   request.canAnswer && (viewerId === undefined || request.ownerPersonId === viewerId);
@@ -416,9 +416,9 @@ function RequestItem({ request, onDone, inline, onDefer, viewerId, ...shared }: 
   const who = whoAsked(t, request, viewerId);
   return (
     <article className={`req req-${request.kind}`} aria-label={`#${task.number} ${task.title}`} aria-busy={busy}>
-      {inline ? <header><RequestAuthor who={who} request={request} />{shared.waitsFor && <small>{shared.waitsFor(request.ownerPersonId)}</small>}</header> : <RequestHeader who={who} request={request} onDefer={onDefer} {...shared} />}
+      {inline ? <header><RequestAuthor who={who} request={request} /></header> : <RequestHeader who={who} request={request} onDefer={onDefer} {...shared} />}
       <RequestWords request={request} said={said} inline={inline} />
-      {shared.recipientEditor?.(request)}
+      {shared.destination?.(request)}
       <RequestMaterialsZone items={manifest.common} failure={manifestFailure} onOpen={openViewer} heading={onDefer ? t.tasks.queue.materials : undefined} />
       <RequestForm
         request={request}
