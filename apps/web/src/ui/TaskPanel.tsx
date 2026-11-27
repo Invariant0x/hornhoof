@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } fr
 import { api } from '../api';
 import { HIDDEN } from '@hornhoof/protocol/redaction';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
-import { useOrg } from '../org';
+import { mapPeople, useOrg } from '../org';
 import { routePath } from '../routes';
 import { knownLine, knownSubtasks, placeName, useGoals, usePipelines, useTask } from '../tasks';
 import { doerOf, graphPath } from '../tracker';
@@ -42,6 +42,7 @@ function TaskWaitingSection({ waiting, org, onOpen, onChanged, inline }: { waiti
   const requests = inline ? waiting.requests.filter(request => request.canAnswer || namedReadOnly(request)) : waiting.requests.map(request => ({ ...request, canAnswer: false }));
   if (requests.length === 0) return null;
   const heading = inline ? t.tasks.waitingHere : t.tasks.questions;
+  const people = mapPeople(org);
 
   return (
     <section className={inline ? 'tp-wait tp-question' : 'tp-wait'} aria-label={heading}>
@@ -50,6 +51,7 @@ function TaskWaitingSection({ waiting, org, onOpen, onChanged, inline }: { waiti
         requests={requests}
         inline={inline}
         viewerId={waiting.viewerId}
+        waitsFor={id => t.tracker.card.decisionPerson(people.find(person => person.id === id)?.name ?? t.tasks.someone)}
         onChanged={() => {
           waiting.onRequestsChanged();
           onChanged();
@@ -163,9 +165,7 @@ function QueueFact({ task }: { task: TaskLine }) {
   return task.queue ? <Fact name={words.queue}>{words.queueText(task.queue.ahead, task.queue.openTurn)}</Fact> : null;
 }
 
-function responsibleAgent(task: TaskLine, org?: Org | null): string | undefined {
-  const assigned = doerOf(task);
-  if (assigned) return assigned.name;
+function departmentLead(task: TaskLine, org?: Org | null): string | undefined {
   const department = task.department?.id;
   if (!department) return org?.orchestrator?.name;
   return org?.departments.find(dept => dept.id === department)?.employees.find(employee => employee.kind === 'head')?.name;
@@ -185,9 +185,9 @@ function CardFacts({ task, status, org }: { task: TaskLine & Partial<Pick<TaskDe
     <div role="group" aria-label={words.facts}>
       <dl className="tp-card-facts">
         <Fact name={words.askedBy}><Answers person={task.askedBy ?? task.createdBy} /></Fact>
-        <Fact name={words.decides}><Answers person={task.responsible} /></Fact>
+        <Fact name={words.responsible}>{task.responsible ? <Answers person={task.responsible} /> : <bdi>{departmentLead(task, org) ?? t.tracker.nobody}</bdi>}</Fact>
         <QueueFact task={task} />
-        <Fact name={words.executor}><bdi>{responsibleAgent(task, org) ?? t.tracker.nobody}</bdi></Fact>
+        <Fact name={words.executor}><bdi>{doerOf(task)?.name ?? t.tracker.nobody}</bdi></Fact>
         {pipeline && <Fact name={words.pipeline}>{stage ? words.pipelineStage(pipeline.name, stage.name) : pipeline.name}</Fact>}
         {due ? <Fact name={words.due}><DueDay due={due} />{inStatus && ` · ${inStatus}`}</Fact> : inStatus && <Fact name={words.time}>{inStatus}</Fact>}
       </dl>
