@@ -1,3 +1,4 @@
+import { rowsOf } from '../../db/selections.js';
 import { sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { FilesDb } from './files.js';
@@ -17,7 +18,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
    comes in over a few. */
 const BATCH = 200;
 
-const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 const listOf = (values: string[]) => `{${values.join(',')}}`;
 const iso = (at: Date | string | null | undefined): string | null => (at == null ? null : new Date(at).toISOString());
 

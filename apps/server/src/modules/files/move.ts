@@ -1,3 +1,4 @@
+import { rowsOf } from '../../db/selections.js';
 import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -16,7 +17,6 @@ import { hasOldBytes } from './legacy.js';
    then does the mover clear that list's rows, each only while Postgres finds its bytes are the bytes stored. */
 
 type Tx = Pick<Db, 'execute'>;
-const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 const isoOf = (at: unknown): string | null => (at === null || at === undefined ? null : new Date(at as string).toISOString());
 const numberOf = (n: unknown): number | null => (n === null || n === undefined ? null : Number(n));
 

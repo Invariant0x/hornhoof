@@ -1,3 +1,4 @@
+import { rowsOf } from '../../db/selections.js';
 import { sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -26,7 +27,6 @@ const WANTED_MS = 600_000;
 /* How many machines that keep a file the leading machine lacks are asked to send it back at once. */
 const WANT_FROM = 2;
 
-const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 type Tx = Pick<Db, 'execute'>;
 const listOf = (values: string[]): string => `{${values.join(',')}}`;
 const SHA = z.string().regex(/^[0-9a-f]{64}$/);
