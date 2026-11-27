@@ -733,6 +733,8 @@
           "apps/server/test/development-checks-template.test.ts",
           "apps/server/test/development-echelons-cleanup.test.ts",
           "apps/server/test/development-echelons-template.test.ts",
+          "apps/server/test/development-shape-move.test.ts",
+          "apps/server/test/development-template-shape.test.ts",
           "apps/server/test/instructions.test.ts",
           "apps/server/test/long-text-storage.test.ts",
           "apps/server/test/notebook.test.ts",
@@ -784,6 +786,7 @@
           "apps/server/test/video-template.test.ts",
           "apps/server/test/wait-producers.test.ts",
           "apps/server/test/work-tree-route.test.ts",
+          "apps/server/test/world-rewards.test.ts",
           "packages/protocol/test/world.test.ts"
         ]
       },
