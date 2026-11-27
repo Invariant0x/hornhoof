@@ -1,6 +1,7 @@
+import { languageOfText } from '@hornhoof/protocol';
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
-import { useT, type Messages } from '../i18n';
+import { useLanguage, useT, type Messages } from '../i18n';
 import type { TaskPlace, UncheckedItem, WaitingRequest } from '../types';
 import { DecidedByNote } from './DecidedBy';
 import { Field } from './Field';
@@ -38,7 +39,7 @@ const defaultPlaceName = (p: TaskPlace) => p?.name ?? '';
 /* onOpenAgent opens the asking agent's window, to see in its terminal what it did. */
 /* waitsFor: whom a request waits for, by the person it is for, on lists of more people than one. */
 /* viewerId: the signed-in person; headings address them directly only when the request waits for them and they may answer it. */
-type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName?: (p: TaskPlace) => string; inline?: boolean; waitsFor?: (personId: string) => string; viewerId?: string; onDefer?: () => void };
+type Shared = { recipientEditor?: (request: WaitingRequest) => ReactNode; onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName?: (p: TaskPlace) => string; inline?: boolean; waitsFor?: (personId: string) => string; viewerId?: string; onDefer?: () => void };
 
 const isAddressedToViewer = (request: WaitingRequest, viewerId?: string): boolean =>
   request.canAnswer && (viewerId === undefined || request.ownerPersonId === viewerId);
@@ -141,20 +142,26 @@ function RequestHeader({ who, request, onOpenTask, onOpenAgent, placeName = defa
   );
 }
 
+export function requestPreview(request: WaitingRequest, language: string): string {
+  const explained = request.explained;
+  if (explained && languageOfText(explained) === language && languageOfText(request.text) !== language) return explained;
+  return request.text;
+}
+
 function RequestWords({ request, said, inline }: { request: WaitingRequest; said: string; inline?: boolean }) {
   const t = useT();
+  const { language } = useLanguage();
   if (request.explained) {
-    return (
-      <>
-        <div className="req-explained">
-          <Markdown text={request.explained} />
-        </div>
-        {!inline && <details className="req-more">
-          <summary>{t.tasks.inDetail}</summary>
-          <p className="req-text" dir="auto">{said}</p>
-        </details>}
-      </>
-    );
+    const explanation = <div className="req-explained"><Markdown text={request.explained} /></div>;
+    const original = <p className="req-text" dir="auto">{said}</p>;
+    const preferOriginal = languageOfText(said) === language && languageOfText(request.explained) !== language;
+    return <>
+      {preferOriginal ? original : explanation}
+      {!inline && <details className="req-more">
+        <summary>{t.tasks.inDetail}</summary>
+        {preferOriginal ? explanation : original}
+      </details>}
+    </>;
   }
   return (
     <>
@@ -409,8 +416,9 @@ function RequestItem({ request, onDone, inline, onDefer, viewerId, ...shared }: 
   const who = whoAsked(t, request, viewerId);
   return (
     <article className={`req req-${request.kind}`} aria-label={`#${task.number} ${task.title}`} aria-busy={busy}>
-      {inline ? <header><RequestAuthor who={who} request={request} /></header> : <RequestHeader who={who} request={request} onDefer={onDefer} {...shared} />}
+      {inline ? <header><RequestAuthor who={who} request={request} />{shared.waitsFor && <small>{shared.waitsFor(request.ownerPersonId)}</small>}</header> : <RequestHeader who={who} request={request} onDefer={onDefer} {...shared} />}
       <RequestWords request={request} said={said} inline={inline} />
+      {shared.recipientEditor?.(request)}
       <RequestMaterialsZone items={manifest.common} failure={manifestFailure} onOpen={openViewer} heading={onDefer ? t.tasks.queue.materials : undefined} />
       <RequestForm
         request={request}

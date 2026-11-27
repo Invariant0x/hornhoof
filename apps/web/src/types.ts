@@ -554,6 +554,7 @@ export type TaskRequest = { id: string; kind: 'question' | 'choice' | 'approval'
 export type TaskFile = { id: string; name: string; size: number; by: { id: string; name: string } | null; at: string };
 
 export type TaskDetail = TaskLine & {
+  mayAssignQuestions?: boolean;
   echelonFindings: EchelonFindingsView;
   /* The person reading it may pause and resume it. */
   mayPause?: boolean;
@@ -669,6 +670,8 @@ export type UncheckedItem =
   | { kind: 'merge' | 'commit'; commit: string };
 
 export type WaitingRequest = MaterialStampView & {
+  canReaddress?: boolean;
+  namedRecipient?: string | null;
   id: string;
   kind: 'question' | 'choice' | 'approval' | 'stuck';
   text: string;

@@ -346,7 +346,7 @@ describe('the views and the card', () => {
     expect(path).toHaveTextContent('Card payments');
     expect(panel).toHaveTextContent('Shops sell online.');
     const facts = within(within(panel).getByRole('group', { name: 'Facts' }));
-    expect(facts.getByRole('definition', { name: 'Decides' })).toHaveTextContent('Maria');
+    expect(facts.getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Maria');
     await waitFor(() => expect(facts.getByRole('definition', { name: 'Pipeline' })).toHaveTextContent('Payments way · stage Build'));
     expect(within(within(panel).getByRole('region', { name: 'Links' })).getByRole('link', { name: '#23 Refund button' })).toHaveAttribute('title', 'Needed for');
     await user.click(within(within(panel).getByRole('region', { name: 'Subtasks' })).getByRole('link', { name: '#22 Card form' }));
@@ -744,6 +744,23 @@ describe('what waits for people', () => {
     });
     const request = await screen.findByRole('article', { name: '#21 Take card payments' });
     expect(request).toHaveTextContent(/Asked:\s*.*Theo/);
+  });
+
+  it('keeps the original Russian question visible when its saved explanation is English', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    const original = asked('original', LOGIN, 'Какой вариант согласовать?', { explained: 'Which version should we approve?' });
+    shell('/tasks?show=waits', { ...routes, 'GET /api/requests': [200, decisions([original])] });
+    const article = await screen.findByRole('article');
+    expect(within(article).getByText('Какой вариант согласовать?', { selector: 'p.req-text' })).toBeVisible();
+  });
+
+  it('shows the Russian explanation of an English question in the collapsed personal queue', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    const english = asked('translation', LOGIN, 'Which headline is ready?', { explained: 'Какой заголовок готов?' });
+    shell('/tasks?show=waits', { ...routes, 'GET /api/requests': [200, decisions([FOR_IVAN, english])] });
+    const waiting = await screen.findByRole('region', { name: ru.tasks.waiting });
+    const strip = await within(waiting).findByRole('button', { expanded: false });
+    expect(strip).toHaveTextContent('Какой заголовок готов?');
   });
 
   it('shows urgent questions before normal questions, oldest first within a priority', async () => {

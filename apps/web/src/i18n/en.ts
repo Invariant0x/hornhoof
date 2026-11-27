@@ -2828,6 +2828,8 @@ export const en = {
       responsible: 'Responsible',
       /* Of a task: whose request started its tree, and who answers its questions and approvals. */
       askedBy: 'Initiator',
+      changeDecider: 'Change who decides',
+      whoDecides: 'Who decides',
       decisionPerson: (name: string) => `Decides: ${name}`,
       /* Where a task waits while every slot of its department's turn is busy. */
       queue: 'Waits for',
@@ -2911,6 +2913,7 @@ export const en = {
       passed: (from: string, to: string) => `${from} no longer reaches this place, so ${to} answers for it now.`,
       goalCreated: (by: string) => `${by} set the goal`,
       fields: {
+        decisionRecipient: 'who answers the question',
         priority: 'the priority',
         title: 'the title', brief: 'the short text', why: 'the why', goal: 'the goal', responsible: 'who answers for it', due: 'the due date', pipeline: 'the pipeline',
         stage: 'the stage', parent: 'the bigger goal', target: 'the target', current: 'where it stands now', unit: 'what it is counted in',

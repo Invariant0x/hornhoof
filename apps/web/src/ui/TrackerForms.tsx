@@ -24,7 +24,7 @@ const isoOf = (day: string) => (day ? new Date(`${day}T00:00:00.000Z`).toISOStri
 
 /* A form's work: one send at a time, its refusal kept in words, and done once the server took it. onRefused: what else a
    refusal asks for. */
-function useSend(onDone: () => void, onRefused?: (failure: unknown) => void) {
+export function useSend(onDone: () => void, onRefused?: (failure: unknown) => void) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
   const sending = useRef(false);

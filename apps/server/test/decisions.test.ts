@@ -204,9 +204,27 @@ describe('decisions waiting for people', () => {
     for (const bad of ['?person=me', '?person=', '?owner=x']) expect((await c.app.inject({ url: `/api/requests${bad}`, ...as(c.tokens.ceo) })).statusCode, bad).toBe(400);
   });
 
+  it('moves one open task question to another person without changing its task or answering for anyone', async () => {
+    const c = await company();
+    const { task, request } = await c.asking('dev', { kind: 'question', text: 'Which wording?', topic: 'task', recipientPersonId: c.ids.dan });
+    const change = (token: string, expected: string, to: string) => c.app.inject({
+      method: 'PUT', url: `/api/tasks/${task.id}/question-recipient`, payload: { request: request.id, expected, to }, ...as(token),
+    });
+    expect((await change(c.tokens.zed, c.ids.dan, c.ids.ivan)).statusCode).toBe(403);
+    expect((await change(c.tokens.ceo, c.ids.dan, c.ids.ivan)).statusCode).toBe(200);
+    expect((await change(c.tokens.ceo, c.ids.dan, c.ids.dan)).statusCode).toBe(409);
+    const [moved] = await c.db.select().from(requests).where(eq(requests.id, request.id));
+    expect(moved).toMatchObject({ taskId: task.id, recipientPersonId: c.ids.ivan, status: 'open', answer: null });
+    expect((await c.view(c.tokens.ceo)).requests.find(r => r.id === request.id)).toMatchObject({ ownerPersonId: c.ids.ivan, canAnswer: true });
+    expect((await c.app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { answer: 'Yes' }, ...as(c.tokens.dan) })).statusCode).toBe(403);
+    const approval = await c.asking('dev', { kind: 'approval', text: 'Approve?', commit: 'b'.repeat(40) });
+    expect((await c.app.inject({ method: 'PUT', url: `/api/tasks/${approval.task.id}/question-recipient`,
+      payload: { request: approval.request.id, expected: null, to: c.ids.dan }, ...as(c.tokens.ceo) })).statusCode).toBe(409);
+  });
+
   it('takes unanswered choices off a completed task, including a legacy open row', async () => {
     const c = await company();
-    const choice = () => c.asking('dev', { kind: 'choice', text: 'Which wording?', options: [{ label: 'A' }, { label: 'B' }], topic: 'task' });
+    const choice = () => c.asking('dev', { kind: 'choice', text: 'Which wording?', options: [{ label: 'A', image: null }, { label: 'B', image: null }], topic: 'task' });
     const first = await choice();
     const old = await choice();
     const [active] = await c.db.select().from(tasks).where(eq(tasks.id, first.task.id));

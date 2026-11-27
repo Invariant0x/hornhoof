@@ -11,7 +11,7 @@ import type { GoalView, Org, TaskDetail, TaskLine, TaskStatus, WaitingRequest } 
 import { Field } from './Field';
 import { useLoadFailure } from './LoadFailure';
 import { Busy, Hold, Idle, LoadState, useLoad, type Load } from './Loading';
-import { TaskEdit } from './TrackerForms';
+import { responsibleChoices, TaskEdit, useSend } from './TrackerForms';
 import { dueText, sinceSeconds, spanText } from './tracker-words';
 import { FoldedMarkdown, Markdown } from './Markdown';
 import { namedReadOnly, Requests, wordsAnswer } from './Requests';
@@ -37,7 +37,30 @@ function WorkLabels({ task }: { task: TaskDetail }) {
   return labels.length > 0 && <p className="muted">{labels.join(', ')}</p>;
 }
 
-function TaskWaitingSection({ waiting, org, onOpen, onChanged, inline }: { waiting: Waiting; org: Org | null; onOpen: (id: string) => void; onChanged: () => void; inline?: boolean }) {
+function QuestionRecipient({ request, org, refresh }: { request: WaitingRequest; org: Org | null; refresh: () => void }) {
+  const t = useT();
+  const [picked, setPicked] = useState(request.ownerPersonId);
+  const { busy, failure, send } = useSend(refresh);
+  const people = responsibleChoices(org, request.task.department?.id ?? null);
+  const names = t.tracker.card;
+  return <details className="req-more">
+    <summary>{names.changeDecider}</summary>
+    <form className="tp-comment" onSubmit={event => {
+      event.preventDefault();
+      void send(() => api.put(`/api/tasks/${request.task.id}/question-recipient`, {
+        request: request.id, expected: request.namedRecipient ?? null, to: picked,
+      }));
+    }}>
+      <Field label={names.whoDecides}>{props => <select {...props} value={picked} onChange={e => setPicked(e.target.value)}>
+        {people.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}
+      </select>}</Field>
+      {failure != null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      <button type="submit" className="btn small" disabled={busy || picked === request.ownerPersonId}>{t.common.save}</button>
+    </form>
+  </details>;
+}
+
+function TaskWaitingSection({ waiting, org, onOpen, onChanged, inline, canAssign }: { canAssign?: boolean; waiting: Waiting; org: Org | null; onOpen: (id: string) => void; onChanged: () => void; inline?: boolean }) {
   const t = useT();
   const requests = inline ? waiting.requests.filter(request => request.canAnswer || namedReadOnly(request)) : waiting.requests.map(request => ({ ...request, canAnswer: false }));
   if (requests.length === 0) return null;
@@ -51,6 +74,7 @@ function TaskWaitingSection({ waiting, org, onOpen, onChanged, inline }: { waiti
         requests={requests}
         inline={inline}
         viewerId={waiting.viewerId}
+        recipientEditor={canAssign ? request => request.canReaddress && <QuestionRecipient key={request.ownerPersonId} request={request} org={org} refresh={waiting.onRequestsChanged} /> : undefined}
         waitsFor={id => t.tracker.card.decisionPerson(people.find(person => person.id === id)?.name ?? t.tasks.someone)}
         onChanged={() => {
           waiting.onRequestsChanged();
@@ -366,7 +390,7 @@ function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: 
       <Relations task={task} onOpen={onOpen} />
       <Materials task={task} />
       <ShortTaskLog task={task} asksYou={asksYou} heading={words.history} />
-      <TaskWaitingSection inline waiting={waiting} org={org} onOpen={onOpen} onChanged={onChanged} />
+      <TaskWaitingSection inline canAssign={task.mayAssignQuestions} waiting={waiting} org={org} onOpen={onOpen} onChanged={onChanged} />
     </>
   );
 }
