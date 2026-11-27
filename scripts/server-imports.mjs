@@ -16,7 +16,8 @@ export function valueGraph(texts) {
       const specifier = statement.moduleSpecifier;
       if (!specifier || !ts.isStringLiteral(specifier) || !specifier.text.startsWith('.')) continue;
       const target = posix.normalize(posix.join(posix.dirname(path), specifier.text)).replace(/\.js$/, '.ts');
-      if (texts.has(target)) edges.add(target);
+      const found = [target, target + '.ts', target + '.tsx', target + '/index.ts', target + '/index.tsx'].find(name => texts.has(name));
+      if (found) edges.add(found);
     }
     return [path, [...edges].sort()];
   }));
@@ -49,11 +50,12 @@ export function cyclicGroups(graph) {
   return groups.sort((a, b) => a[0].localeCompare(b[0]));
 }
 
-export function serverGraph(root) {
-  const directory = join(root, 'apps/server/src');
-  const files = readdirSync(directory, { recursive: true }).filter(path => path.endsWith('.ts') && !path.endsWith('.d.ts')).sort();
+export function directoryGraph(directory) {
+  const files = readdirSync(directory, { recursive: true }).filter(path => /\.tsx?$/.test(path) && !path.endsWith('.d.ts')).sort();
   return valueGraph(new Map(files.map(path => [path, readFileSync(join(directory, path), 'utf8')])));
 }
+
+export const serverGraph = root => directoryGraph(join(root, 'apps/server/src'));
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const graph = serverGraph(resolve(dirname(fileURLToPath(import.meta.url)), '..'));

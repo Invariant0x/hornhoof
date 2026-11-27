@@ -9,14 +9,14 @@ import type { VariantStep } from './building-variants';
 import type { BuildingKind, CityBuilding } from './city-layout';
 import { resolveStageSpecForBuilding, type BuildingConstructionState } from './construction';
 import { tileTopVertexToWorld, type Point2D } from './coords';
-import {
-  CONSTRUCTION_STAGE_IDS,
-  type BuildingLoopKind,
-  type ConstructionStageId,
-  type Direction8,
-  type FootprintKey,
-  type UniqueRenderAngle5,
-  type WorldPackManifest,
+import { CONSTRUCTION_STAGE_IDS } from './construction-stages';
+import type {
+  BuildingLoopKind,
+  ConstructionStageId,
+  Direction8,
+  FootprintKey,
+  UniqueRenderAngle5,
+  WorldPackManifest,
 } from './manifest';
 import { hashSeed } from './prng';
 import type { ResidentEntity, ResidentPose } from './residents';

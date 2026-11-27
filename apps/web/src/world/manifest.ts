@@ -6,6 +6,7 @@ import type { ResidentRoleClass, RoleArchetype } from '@hornhoof/protocol/world'
 import { validateArtCatalog, type WorldArtCatalog } from './art';
 import type { TileCoord } from './coords';
 import { text } from './pack-text';
+import type { ConstructionStageId } from './construction-stages';
 
 export type EngineKind = 'isometric-2d' | '3d';
 export type OuterWallMode = 'ring' | 'none';
@@ -71,20 +72,7 @@ export type AltarAnchorSpec = Readonly<{
   label?: string;
 }>;
 
-export const CONSTRUCTION_STAGE_IDS = [
-  'stakes_and_rope',
-  'foundation',
-  'low_walls_open',
-  'waist_walls_scaffold',
-  'full_walls',
-  'roof_beams',
-  'roof',
-  'finishing',
-  'complete',
-  'upgraded',
-] as const;
-
-export type ConstructionStageId = (typeof CONSTRUCTION_STAGE_IDS)[number];
+export { CONSTRUCTION_STAGE_IDS, type ConstructionStageId } from './construction-stages';
 
 export type BuildingLoopKind =
   | 'crane'
@@ -608,155 +596,7 @@ const ENGINE_DEFAULT_CLASS_LOOKS: Readonly<Record<ResidentRoleClass, PackRoleLoo
   },
 };
 
-export const DEFAULT_CONSTRUCTION_STAGES: readonly ConstructionStageSpec[] = [
-  {
-    stage: 1,
-    id: 'stakes_and_rope',
-    label: text('Stakes and Rope'),
-    heightRatio: 0.05,
-    openInteriorVisible: false,
-    hasScaffolding: false,
-    hasRamp: false,
-    hasRoofBeams: false,
-    hasRoof: false,
-    hasFinishing: false,
-    hasUpgrades: false,
-    defaultLoops: ['dust'],
-  },
-  {
-    stage: 2,
-    id: 'foundation',
-    label: text('Site and Foundation'),
-    heightRatio: 0.16,
-    openInteriorVisible: false,
-    hasScaffolding: false,
-    hasRamp: false,
-    hasRoofBeams: false,
-    hasRoof: false,
-    hasFinishing: false,
-    hasUpgrades: false,
-    defaultLoops: ['dust'],
-  },
-  {
-    stage: 3,
-    id: 'low_walls_open',
-    label: text('First Wall Courses (Open Rooms)'),
-    heightRatio: 0.34,
-    openInteriorVisible: true,
-    hasScaffolding: false,
-    hasRamp: false,
-    hasRoofBeams: false,
-    hasRoof: false,
-    hasFinishing: false,
-    hasUpgrades: false,
-    defaultLoops: ['dust'],
-  },
-  {
-    stage: 4,
-    id: 'waist_walls_scaffold',
-    label: text('Waist Walls with Scaffolding and Ramp'),
-    heightRatio: 0.56,
-    openInteriorVisible: true,
-    hasScaffolding: true,
-    hasRamp: true,
-    hasRoofBeams: false,
-    hasRoof: false,
-    hasFinishing: false,
-    hasUpgrades: false,
-    defaultLoops: ['crane', 'hoist_block', 'dust'],
-  },
-  {
-    stage: 5,
-    id: 'full_walls',
-    label: text('Full-Height Walls'),
-    heightRatio: 0.82,
-    openInteriorVisible: false,
-    hasScaffolding: true,
-    hasRamp: true,
-    hasRoofBeams: false,
-    hasRoof: false,
-    hasFinishing: false,
-    hasUpgrades: false,
-    defaultLoops: ['crane', 'hoist_block', 'dust'],
-  },
-  {
-    stage: 6,
-    id: 'roof_beams',
-    label: text('Roof Beams'),
-    heightRatio: 0.9,
-    openInteriorVisible: false,
-    hasScaffolding: true,
-    hasRamp: false,
-    hasRoofBeams: true,
-    hasRoof: false,
-    hasFinishing: false,
-    hasUpgrades: false,
-    defaultLoops: ['crane', 'hoist_block', 'dust'],
-  },
-  {
-    stage: 7,
-    id: 'roof',
-    label: text('Roofing'),
-    heightRatio: 0.96,
-    openInteriorVisible: false,
-    hasScaffolding: true,
-    hasRamp: false,
-    hasRoofBeams: false,
-    hasRoof: true,
-    hasFinishing: false,
-    hasUpgrades: false,
-    defaultLoops: ['dust'],
-  },
-  {
-    stage: 8,
-    id: 'finishing',
-    label: text('Finishing Trim'),
-    heightRatio: 1.0,
-    openInteriorVisible: false,
-    hasScaffolding: true,
-    hasRamp: false,
-    hasRoofBeams: false,
-    hasRoof: true,
-    hasFinishing: true,
-    hasUpgrades: false,
-    defaultLoops: ['dust', 'awning'],
-  },
-  {
-    stage: 9,
-    id: 'complete',
-    label: text('Complete'),
-    heightRatio: 1.0,
-    openInteriorVisible: false,
-    hasScaffolding: false,
-    hasRamp: false,
-    hasRoofBeams: false,
-    hasRoof: true,
-    hasFinishing: true,
-    hasUpgrades: false,
-    defaultLoops: ['awning', 'smoke'],
-  },
-  {
-    stage: 10,
-    id: 'upgraded',
-    label: text('Upgraded Annex'),
-    heightRatio: 1.16,
-    openInteriorVisible: false,
-    hasScaffolding: false,
-    hasRamp: false,
-    hasRoofBeams: false,
-    hasRoof: true,
-    hasFinishing: true,
-    hasUpgrades: true,
-    defaultLoops: ['awning', 'smoke'],
-  },
-];
-
-export function resolveConstructionStages(pack: WorldPackManifest): readonly ConstructionStageSpec[] {
-  if (pack.constructionStages && pack.constructionStages.length > 0) {
-    return pack.constructionStages;
-  }
-  return DEFAULT_CONSTRUCTION_STAGES;
-}
+export { DEFAULT_CONSTRUCTION_STAGES, resolveConstructionStages } from './construction-stages';
 
 /* Resolves a resident's visual look from the active world pack:
    exact roleKey -> archetype -> nearest class fallback -> neutral engine default. */
