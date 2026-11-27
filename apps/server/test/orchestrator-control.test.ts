@@ -1,3 +1,4 @@
+import { telegramBots, telegramChatLanguages } from '../src/db/schema.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -263,6 +264,18 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect(people.map(a => a.roleKey).sort()).toEqual(roster.sort());
     expect(people.every(a => a.skills.length > 0)).toBe(true);
     expect(await db.select().from(agents).where(eq(agents.departmentId, finance!.id))).toEqual([]);
+  });
+
+  it('names the recipient language when an agent asks a person a question in another language', async () => {
+    const { app, db, ceoId, orchestrator, bruno, task } = await company();
+    await db.delete(jobs).where(eq(jobs.agentId, orchestrator.id));
+    await db.update(people).set({ telegramUserId: 550001 }).where(eq(people.id, ceoId));
+    const [bot] = await db.insert(telegramBots).values({ companyId: task.companyId, agentId: bruno.id, createdBy: ceoId, tokenEnc: 'fixture', botUserId: 550002, username: 'fixture_bot' }).returning();
+    await db.insert(telegramChatLanguages).values({ botId: bot!.id, chatId: 550001, lang: 'ru' });
+    const { wakes } = await ask(app.ctx, bruno.id, task.id, { kind: 'question', text: 'Which wording?', topic: 'task', recipientPersonId: ceoId });
+    await wakeAll(app.ctx, wakes);
+    const [job] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id));
+    expect(job!.prompt).toContain('Write the explanation in Russian');
   });
 
   it('is asked to put what an employee asks a person into plain words, and its words show with the request', async () => {
