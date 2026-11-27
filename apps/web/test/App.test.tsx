@@ -31,7 +31,9 @@ const TRACKER: Record<string, Reply> = {
 
 async function answerField(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
-  const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+  const lists = await screen.findByRole('navigation', { name: 'Task lists' });
+  await user.click(await within(lists).findByRole('button', { name: /^Waiting for people/ }));
+  const waiting = await screen.findByRole('region', { name: 'Waiting for people' });
   return within(await within(waiting).findByRole('article', { name: /#9/ })).getByLabelText('Your answer');
 }
 
