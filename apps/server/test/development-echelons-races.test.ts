@@ -72,6 +72,9 @@ describe('one current assignment under retries and identity changes', () => {
     const changed = changeModelBeforeCommit(f, f.tester.id);
     await expect(report(f.ctx, f.tester.id, f.task.id, f.verified()).then(() => null)).rejects.toMatchObject({ status: 409 });
     expect(changed.done).toBe(true);
-    expect((await f.detail()).echelons).toMatchObject({ stage: 'tests', phase: 'active' });
+    const detail = await f.detail();
+    expect(detail.echelons).toMatchObject({ stage: 'tests', phase: 'waiting', ownerAgentId: null, assignment: null });
+    expect(detail.log.some(event => event.kind === 'report' && typeof event.data === 'object' && event.data !== null
+      && 'verifiedCandidate' in event.data)).toBe(false);
   });
 });
