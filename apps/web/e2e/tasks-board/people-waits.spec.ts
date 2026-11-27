@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { LANGUAGES, type ShippedLanguage, type Messages } from '../../src/i18n';
 import { DICTIONARIES } from '../../src/i18n/dictionaries';
 import { BUILTIN_SKINS, builtinSkin, DEFAULT_SKIN } from '../../src/skins/registry';
-import { ME } from '../api';
+import { detail, ME } from '../api';
 import { captureWith } from '../capture';
 import { MARIA_QUESTION, MAX_QUESTION, QUESTION, SALES, servePeopleWaits, serveTasksBoard, TASKS } from './api';
 
@@ -46,6 +46,31 @@ const countOn = async (side: Locator, name: string) => Number(await side.getByRo
 async function listed(region: Locator) {
   const tasks = await region.locator('article.req, article.wait-question, .tr-waits li').evaluateAll(els => els.map(e => (e.getAttribute('aria-label') ?? e.textContent ?? '').match(/#(\d+)/)?.[1]));
   return new Set(tasks).size + await region.locator('.t-card').count();
+}
+
+for (const lang of LOOK_LANGUAGES) {
+  test(`changes the person answering a question in its task card at phone width: ${lang}`, async ({ page }) => {
+    const t = DICTIONARIES[lang];
+    await page.setViewportSize({ width: 375, height: 900 });
+    await page.addInitScript(language => localStorage.setItem('hh-lang', language), lang);
+    await serveTasksBoard(page);
+    const decisions = await servePeopleWaits(page);
+    const before = decisions.requests.find(request => request.text === MARIA_QUESTION)!;
+    const task = TASKS.find(row => row.id === before.task.id)!;
+    const request = { ...before, namedRecipient: ME.person.id, ownerPersonId: ME.person.id, canReaddress: true };
+    await page.route('**/api/requests', route => route.fulfill({ json: { ...decisions, requests: [request] } }));
+    await page.route(`**/api/tasks/${task.id}`, route => route.fulfill({ json: { task: { ...detail(task), mayAssignQuestions: true } } }));
+    const path = `/api/tasks/${task.id}/question-recipient`;
+    await page.route('**' + path, route => route.fulfill({ json: { ok: true } }));
+    await page.goto('/tasks/' + task.id);
+    const panel = page.getByRole('complementary', { name: `#${task.number} ${task.title}` });
+    await panel.getByText(t.tracker.card.changeDecider, { exact: true }).click();
+    await panel.getByRole('combobox', { name: t.tracker.card.whoDecides }).selectOption('p2');
+    const saving = page.waitForRequest(sent => new URL(sent.url()).pathname === path && sent.method() === 'PUT');
+    await panel.getByRole('button', { name: t.common.save, exact: true }).click();
+    expect((await saving).postDataJSON()).toEqual({ request: request.id, expected: ME.person.id, to: 'p2' });
+    expect(await panel.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+  });
 }
 
 test('lists what waits for people with whom each waits for, counts it, and keeps decisions assigned to others off Waits for me', async ({ page }) => {
