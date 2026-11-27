@@ -1,4 +1,4 @@
-import { matchLocale, type LocaleId } from '@hornhoof/protocol';
+import { matchLocale, type FailureKind, type LocaleId } from '@hornhoof/protocol';
 import { wordsFor } from '../../locales/index.js';
 import { LINK_DAYS } from '../assistants/files.js';
 
@@ -13,5 +13,13 @@ export const agentName = (agent: { kind: string; name: string }, lang: BotLang):
 
 export function botWords(lang: BotLang) {
   const words = wordsFor(lang).bot;
-  return { ...words, bigFile: (name: string, url: string) => words.bigFile(name, url, LINK_DAYS) };
+  const failureMessage = (agent: string, kind?: FailureKind): string => {
+    switch (kind) {
+      case 'usage_limit': return words.planLimit(agent);
+      case 'rate_limited': return words.tooMany(agent);
+      case 'tools': return words.toolsUnavailable(agent);
+      default: return words.noAnswer(agent);
+    }
+  };
+  return { ...words, failureMessage, bigFile: (name: string, url: string) => words.bigFile(name, url, LINK_DAYS) };
 }

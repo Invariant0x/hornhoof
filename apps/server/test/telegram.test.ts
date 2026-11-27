@@ -384,7 +384,13 @@ describe('a message through the bot', () => {
     expect(tg.sent[0]!.text).toContain('offline');
   });
 
-  it.each(['agent_failed', 'cancelled'] as const)('sends only the failure words when a turn ends with %s after progress', async error => {
+  it.each([
+    ['agent_failed', undefined, 'Orchestrator could not answer this time. Open Hornhoof to see why, or write again.'],
+    ['cancelled', undefined, 'Orchestrator could not answer this time. Open Hornhoof to see why, or write again.'],
+    ['agent_failed', 'usage_limit', 'Orchestrator has reached the usage limit for its plan. Try again when the limit resets.'],
+    ['agent_failed', 'rate_limited', 'Orchestrator is receiving too many requests. Try again later.'],
+    ['agent_failed', 'tools', 'Orchestrator could not connect to the tools it needs in Hornhoof. Ask the machine owner to check the connection.'],
+  ] as const)('sends only the failure words when a turn ends with %s/%s after progress', async (error, kind, expected) => {
     const { app, db, ceo, owner, tg, builtin } = await company();
     await setTelegram(app, ceo, owner.id, '@Ivan_K');
     await connectBot(app, ceo, 'orchestrator', TOKEN);
@@ -394,10 +400,11 @@ describe('a message through the bot', () => {
     builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'I am looking into it.' } });
     builtin.send({ type: 'job.done', jobId: run.jobId, ok: false, sessionId: null, result: '', tail: 'boom', error });
     await until(() => builtin.acks.includes(run.jobId));
+    if (kind) await db.update(jobs).set({ failure: { kind, text: 'private diagnostic', retryable: false } }).where(eq(jobs.id, run.jobId));
     await pollOnce(tg, TOKEN);
     await pollOnce(tg, TOKEN);
     await until(async () => (await db.select().from(telegramReplies)).length === 0);
-    expect(tg.sent.map(s => s.text)).toEqual(['Orchestrator could not answer this time. Open Hornhoof to see why, or write again.']);
+    expect(tg.sent.map(s => s.text)).toEqual([expected]);
   });
 
   it('keeps where it read up to, so a restart neither loses nor repeats a message', async () => {

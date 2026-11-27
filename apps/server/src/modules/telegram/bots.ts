@@ -5,7 +5,6 @@ import { canContactAgent } from '../../auth/agent-view.js';
 import { personColumns, type Person } from '../../auth/session.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { agentEvents, agents, jobs, people, telegramBots, telegramReplies } from '../../db/schema.js';
-import { only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { fileLink } from '../assistants/files.js';
 import { turnGoingOn } from '../conversation/turn-records.js';
@@ -243,7 +242,7 @@ class Listener {
       return;
     }
     /* Whether the turn is over is read before its words, so none it said before its end is missed. */
-    const [job] = await db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, row.jobId));
+    const [job] = await db.select({ status: jobs.status, failure: jobs.failure, error: jobs.error }).from(jobs).where(eq(jobs.id, row.jobId));
     if (job?.status === 'running') return this.showTyping(row);
     this.stopTyping(row.id);
     if (job?.status === 'queued') return;
@@ -262,7 +261,11 @@ class Listener {
       if (job?.status === 'done') await this.sayAnswer(person, row);
       if (job?.status === 'failed') {
         const [agent] = await db.select({ kind: agents.kind, name: agents.name }).from(agents).where(eq(agents.id, this.bot.agentId));
-        if (agent) await this.say(row.chatId, botWords(row.lang).noAnswer(agentName(agent, row.lang)));
+        if (agent) {
+          const name = agentName(agent, row.lang);
+          const words = botWords(row.lang);
+          await this.say(row.chatId, job.error === 'machine_offline' ? words.machineOffline(name) : words.failureMessage(name, job.failure?.kind));
+        }
       }
     } catch (err) {
       if (!chatGone(err)) throw err;
