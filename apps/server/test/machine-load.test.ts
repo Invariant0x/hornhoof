@@ -81,7 +81,7 @@ describe("a machine's load", () => {
     expect((await lend(ceo, 'no')).statusCode).toBe(400);
     const off = await lend(ceo, false);
     expect(off.statusCode).toBe(200);
-    expect(off.json()).toEqual({ lendsTests: false, keepsBackups: true });
+    expect(off.json()).toEqual({ lendsTests: false, keepsBackups: true, fileStoreLimitBytes: null });
     expect((await machinesOf(app, ceo)).machines[0].lendsTests).toBe(false);
     expect((await app.inject({ method: 'PATCH', url: '/api/machines/00000000-0000-4000-8000-000000000000', payload: { lendsTests: true }, ...as(ceo) })).statusCode).toBe(404);
   });
