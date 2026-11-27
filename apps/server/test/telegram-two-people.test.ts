@@ -66,6 +66,7 @@ describe('two people who write to one head in Telegram', () => {
     const { tg, builtin } = await company();
     tg.send(TOKEN, from, {
       text: 'Send this to the editor',
+      quote: { text: 'Website copy' },
       reply_to_message: { message_id: 17, chat: { id: from.id, type: 'private' }, ...original },
     });
     const run = await nextOf(builtin, 'job.run');

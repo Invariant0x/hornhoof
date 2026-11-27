@@ -180,7 +180,7 @@ export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | Tele
   if (!said.length && !came.notes.length && !brought.ids.length) return false;
   const source = messages.find(m => m.reply_to_message?.chat.id === chatId);
   const original = source?.reply_to_message;
-  const reply = original && { id: original.message_id, text: source?.quote?.text ?? original.text ?? original.caption ?? '' };
+  const reply = original && { id: original.message_id, text: original.text ?? original.caption ?? source?.quote?.text ?? '' };
   const before = await lastSeq(ctx, agent.id);
   let jobId: string;
   try {
