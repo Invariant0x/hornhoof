@@ -737,6 +737,23 @@ describe('what waits for people', () => {
     expect(request).toHaveTextContent(/Asked:\s*.*Theo/);
   });
 
+  it('shows urgent questions before normal questions, oldest first within a priority', async () => {
+    const user = userEvent.setup();
+    const urgent = { ...LOGIN, urgent: true };
+    const recent = asked('recent', urgent, 'New urgent question?', { at: '2026-11-25T12:00:00Z' });
+    const older = asked('older', urgent, 'Older urgent question?', { at: '2026-11-24T12:00:00Z' });
+    shell('/tasks?show=waits', {
+      ...routes,
+      'GET /api/tasks?status=all': [200, { tasks: [urgent, REFUND] }],
+      'GET /api/requests': [200, decisions([FOR_IVAN, recent, older])],
+    });
+    const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+    const active = await within(waiting).findByRole('article');
+    expect(active).toHaveTextContent('Older urgent question?');
+    await user.click(within(waiting).getByRole('button', { name: 'Defer' }));
+    expect(within(waiting).getByRole('article')).toHaveTextContent('New urgent question?');
+  });
+
   it('opens one queue card, moves a deferred card to the end, and advances on an accepted answer', async () => {
     const user = userEvent.setup();
     const third = asked('r-third', PAY, 'Which currency?', {});
@@ -947,7 +964,7 @@ describe('what waits for people', () => {
       [ivanPolicy, 'Bruno asks you to approve this'],
       [ivanQuestion, 'Bruno asks'],
     ] as const) {
-      shell('/tasks?show=waits', { ...routes, 'GET /api/requests': [200, decisions([req])] });
+      shell('/tasks?show=waits', { ...routes, 'GET /api/tasks?status=all': [200, { tasks: [] }], 'GET /api/requests': [200, decisions([req])] });
       const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
       expect(await within(waiting).findByText(expected)).toBeInTheDocument();
       cleanup();
@@ -984,7 +1001,7 @@ describe('what waits for people', () => {
       expect(headerOf('#23 Refund button')).toHaveTextContent('Bruno просит вас это одобрить');
       cleanup();
 
-      shell('/tasks?show=waits', { ...routes, 'GET /api/requests': [200, decisions([ivanPolicy])] });
+      shell('/tasks?show=waits', { ...routes, 'GET /api/tasks?status=all': [200, { tasks: [] }], 'GET /api/requests': [200, decisions([ivanPolicy])] });
       const waiting = await screen.findByRole('region', { name: 'Ждут вас' });
       expect(await within(waiting).findByText('Bruno просит вас это одобрить')).toBeInTheDocument();
       cleanup();
