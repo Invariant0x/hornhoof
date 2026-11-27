@@ -68,10 +68,10 @@ describe('the simple task card', () => {
     const facts = card.getByRole('group', { name: 'Facts' });
     /* Whose request it is and who decides are two facts, in this order. */
     expect(within(facts).getByRole('definition', { name: 'Initiator' })).toHaveTextContent('Oleg');
-    expect(within(facts).getByRole('definition', { name: 'Decides' })).toHaveTextContent('Ivan');
+    expect(within(facts).getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Ivan');
     expect(within(facts).queryByRole('definition', { name: 'Waits for' })).not.toBeInTheDocument();
-    expect(within(facts).getByRole('definition', { name: 'Decides' }).querySelector('.tr-avatar')).toBeInTheDocument();
-    expect(within(facts).getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Bruno');
+    expect(within(facts).getByRole('definition', { name: 'Responsible' }).querySelector('.tr-avatar')).toBeInTheDocument();
+    expect(within(facts).getByRole('definition', { name: 'Does the work' })).toHaveTextContent('Bruno');
     expect(within(facts).getByRole('definition', { name: 'Due' })).toHaveTextContent(/^20 Nov · Review for/);
     const subtasks = card.getByRole('region', { name: 'Subtasks' });
     expect(within(subtasks).getByRole('heading', { name: 'Subtasks · 0 of 1' })).toBeInTheDocument();
@@ -265,11 +265,12 @@ describe('the simple task card', () => {
     await user.click(card.getByRole('button', { name: 'Task actions' }));
     await user.click(card.getByRole('button', { name: 'Edit' }));
     const form = within(card.getByRole('form', { name: 'Edit the task' }));
+    await user.selectOptions(form.getByRole('combobox', { name: 'Responsible' }), 'p2');
     const title = form.getByRole('textbox', { name: 'Title' });
     await user.clear(title);
     await user.type(title, 'Checkout and refunds');
     await user.click(form.getByRole('button', { name: 'Save' }));
-    expect(calls.find(c => c.method === 'PATCH' && c.path === '/api/tasks/t12')?.body).toEqual({ title: 'Checkout and refunds', version: 2, revision: 4 });
+    expect(calls.find(c => c.method === 'PATCH' && c.path === '/api/tasks/t12')?.body).toEqual({ title: 'Checkout and refunds', responsible: 'p2', version: 2, revision: 4 });
     await waitFor(() => expect(card.queryByRole('form', { name: 'Edit the task' })).not.toBeInTheDocument());
     await user.click(card.getByRole('button', { name: 'Task actions' }));
     await user.click(card.getByRole('button', { name: 'Make urgent' }));
