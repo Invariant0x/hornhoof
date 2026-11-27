@@ -2677,7 +2677,6 @@ export const ru: Messages = {
     },
     where: {
       mine: 'Мои задачи',
-      theirs: (name: string) => `Задачи: ${name}`,
       waits: 'Ждет моего ответа',
       waitsFor: (name: string) => `Работа ждет ответа (${name})`,
       working: 'Сейчас в работе',
@@ -2687,8 +2686,6 @@ export const ru: Messages = {
       goal: (title: string) => `Цель: ${title}`,
       task: (number: number, title: string) => `#${number} ${title}`,
     },
-    viewAs: 'Смотреть как',
-    viewAsSelf: (name: string) => `Я, ${name}`,
     views: { label: 'Вид', list: 'Список', board: 'Доска', graph: 'Граф' },
     filters: { label: 'Фильтры', status: 'Статус', executor: 'Исполнитель', responsible: 'Ответственный', any: 'Любой',
       group: (status?: string) => status ? `Группа: ${status}` : 'Группа: статус',

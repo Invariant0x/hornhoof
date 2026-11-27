@@ -21,7 +21,7 @@ describe('workspace addresses', () => {
     ['/settings/company', { kind: 'settings', group: 'company' }],
     ['/about', { kind: 'about' }],
     ['/invite/abc123', { kind: 'invite', token: 'abc123' }],
-    ['/tasks?person=p2', { kind: 'tasks', personId: 'p2' }],
+
     ['/tasks/g1?card=goal', { kind: 'tasks', id: 'g1', card: 'goal' }],
     ['/tasks?department=d2&pipeline=pl1&view=board', { kind: 'tasks', department: 'd2', pipeline: 'pl1', view: 'board' }],
     ['/tasks?department=d2&product=pd1', { kind: 'tasks', department: 'd2', product: 'pd1' }],
@@ -81,8 +81,13 @@ describe('workspace addresses', () => {
 });
 
 describe('the place of the tracker', () => {
+  it('ignores old whole-tracker viewer links outside a named waiting list', () => {
+    expect(parseRoute('/tasks?person=p2')).toEqual({ kind: 'tasks' });
+    expect(routePath({ kind: 'tasks', personId: 'p2' })).toBe('/tasks');
+  });
+
   it('keeps where the tracker is and leaves out the card on top of it', () => {
-    expect(placeOf({ kind: 'tasks', department: 'd2', view: 'graph', personId: 'p2' })).toEqual({ department: 'd2', view: 'graph', personId: 'p2' });
+    expect(placeOf({ kind: 'tasks', department: 'd2', view: 'graph', personId: 'p2' })).toEqual({ department: 'd2', view: 'graph' });
     expect(placeOf({ kind: 'tasks', id: 'g1', card: 'goal' })).toEqual({});
   });
 });

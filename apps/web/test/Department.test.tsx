@@ -377,7 +377,7 @@ describe('Department view', () => {
     expect(card).toHaveTextContent('2');
     await user.click(card);
     expect(await screen.findByRole('heading', { level: 1, name: 'Waits for Sasha' })).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'View as' })).toHaveValue('p3');
+    expect(screen.queryByRole('combobox', { name: 'View as' })).toBeNull();
     expect(screen.getByRole('region', { name: 'Waiting for you' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
   });

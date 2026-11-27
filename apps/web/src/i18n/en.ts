@@ -2691,7 +2691,6 @@ export const en = {
     },
     where: {
       mine: 'My tasks',
-      theirs: (name: string) => `Tasks of ${name}`,
       waits: 'Waits for me',
       waitsFor: (name: string) => `Waits for ${name}`,
       working: 'Working now',
@@ -2701,8 +2700,6 @@ export const en = {
       goal: (title: string) => `Goal: ${title}`,
       task: (number: number, title: string) => `#${number} ${title}`,
     },
-    viewAs: 'View as',
-    viewAsSelf: (name: string) => `Me, ${name}`,
     views: { label: 'View', list: 'List', board: 'Board', graph: 'Graph' },
     filters: { label: 'Filters', status: 'Status', executor: 'Executor', responsible: 'Responsible', any: 'Any',
       group: (status?: string) => status ? `Group: ${status}` : 'Group: status',

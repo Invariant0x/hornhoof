@@ -629,17 +629,9 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
   const goals = goalList ?? [];
   const pipelines = pipelineList ?? [];
   const people = mapPeople(org);
-  /* View as is the CEO's and the CEO delegate's, as the server checks it; for anyone else an address naming a person still
-     shows their own screen. The map's way to a person's decisions stays everyone's: it picks among the decisions the person
-     sees anyway. */
-  const viewAs = me.canDecideCompany ?? (me.person.isOwner || (Boolean(me.person.isCeoDelegate) && me.person.scopeKind === 'company'));
-  const viewed = viewAs ? (place.personId ?? null) : null;
-  const decisionsOf = viewed ?? (place.show === 'waits' ? (place.personId ?? null) : null);
-  const recipient = decisionsOf ?? me.person.id;
-  const who = viewed ?? me.person.id;
-  const whoName = people.find(p => p.id === who)?.name ?? t.tasks.someone;
-  const other = who !== me.person.id;
-  const pickerPeople = people.filter(p => p.id !== me.person.id && !p.assistant && (p.status === 'active' || p.id === viewed));
+  const decisionsOf = place.show === 'waits' ? place.personId ?? null : null;
+  const who = me.person.id;
+  const recipient = decisionsOf ?? who;
   const questions = new Map((decisions?.requests ?? []).filter(r => r.canAnswer && r.ownerPersonId === who).map(r => [r.task.id, r.at]));
   const questionAt = (id: string) => questions.get(id);
   const asksYou = (id: string) => questions.has(id);
@@ -712,7 +704,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
     const goal = goals.find(g => g.id === place.goal);
     const product = org?.departments.find(d => d.id === place.department)?.products.find(p => p.id === place.product);
     switch (section.kind) {
-      case 'mine': return { title: other ? t.tracker.where.theirs(whoName) : t.tracker.where.mine };
+      case 'mine': return { title: t.tracker.where.mine };
       case 'waits': return { title: recipient === me.person.id ? t.tracker.where.waits : t.tracker.where.waitsFor(people.find(p => p.id === recipient)?.name ?? t.tasks.someone) };
       case 'people': return { title: t.tracker.peopleWaits.title };
       case 'failures': return { title: t.tracker.side.failures };
@@ -779,7 +771,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
     />
   );
   const empty = section.kind === 'mine' ? t.tracker.noMine : section.kind === 'working' ? t.tracker.nothingWorking : t.tracker.noTasks;
-  const makeDepartment = departmentId ?? (other ? 'none' : null);
+  const makeDepartment = departmentId ?? null;
   const makeHere = <MakeHere org={org} places={places} department={makeDepartment} pipeline={pipeline} loose={place.pipeline === 'none'} making={making} setMaking={setMaking} onOpenTask={onOpenTask} />;
   const makeOnTop = found || MAKE_ON_TOP.has(section.kind);
   /* The mockup's one way to make something: the + beside Tasks, on every page, with what the person may make there and the
@@ -810,7 +802,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
         tasks={all}
         onOpenAgent={onOpenAgent}
         counts={{
-          waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf, me.person.id)), waitsOnWho, keptShown(kept, decisionsOf)),
+          waits: waitsCount(shownDecisions(decisions, { viewer: who }), waitingOn(otherWaits, who), kept ?? []),
           people: peopleCount(decisions, waitsOnPeople, company),
           failures: failures.length + machinesAway.filter(machine => !machine.back).length + copySchemaFailures.length + copyGaveUp.length + machinesLow.length + githubLimits.length,
           mine: own.tasks.length,
@@ -828,22 +820,6 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
             <bdi>{where.title}</bdi>
             {where.within && <><span className="tr-divider">{' / '}</span><bdi>{where.within}</bdi></>}
           </h1>
-          {viewAs && (
-            <div className="tr-view-as">
-              <Field label={t.tracker.viewAs}>
-                {p => (
-                  <span className="tr-person-picker">
-                    <span aria-hidden="true" dir="auto">{other ? whoName : t.tracker.viewAsSelf(me.person.name)}</span>
-                    <TrackerIcon name="chevron" />
-                    <select {...p} value={other ? who : ''} onChange={e => onPlace({ ...place, personId: e.target.value || undefined })}>
-                      <option value="">{t.tracker.viewAsSelf(me.person.name)}</option>
-                      {pickerPeople.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </span>
-                )}
-              </Field>
-            </div>
-          )}
           <div className="tr-search"><TaskSearch query={query} onChange={setQuery} /></div>
         </header>
         {broken !== null && <p className="alert" role="alert">{errorText(t, broken)}</p>}

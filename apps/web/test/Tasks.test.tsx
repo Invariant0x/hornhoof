@@ -289,7 +289,7 @@ const AT = '2026-11-02T12:00:00.000Z';
 const STRUCTURE: ProposalDecision = { id: 'pr1', kind: 'structure', agent: { id: 'a1', name: 'Orchestrator' }, department: null, brief: 'Add Support.', items: [{ template: 'support', checked: true, note: 'Answers customers.' }], at: AT, ownerPersonId: 'p1', canAnswer: true };
 
 describe('the decisions of one person', () => {
-  it("open from that person's card on the map under a title with their name, and Me takes the filter off", async () => {
+  it("open from that person's card on the map under a title with their name, and the personal queue opens from the sidebar", async () => {
     const user = userEvent.setup();
     shell({ 'GET /api/org': [200, counted({ p1: 1, p4: 1 })], 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: 'p4' }, REQUESTS[1]!])] });
     await user.click(await screen.findByRole('button', { name: 'Dan: 1 decision waits' }));
@@ -300,7 +300,7 @@ describe('the decisions of one person', () => {
        decisions. */
     expect(waiting).not.toHaveTextContent('Decisions for Dan');
     expect(within(waiting).queryByRole('button', { name: "Show everyone's decisions" })).toBeNull();
-    await user.selectOptions(screen.getByRole('combobox', { name: 'View as' }), 'Me, Ivan');
+    await user.click(within(screen.getByRole('navigation', { name: 'Task lists' })).getByRole('button', { name: /^Waits for me/ }));
     expect(screen.getByRole('heading', { level: 1, name: 'Waits for me' })).toBeInTheDocument();
     expect(within(waiting).getAllByRole('article')).toHaveLength(1);
     expect(within(waiting).queryByText('Stripe or Adyen?')).toBeNull();
@@ -639,7 +639,7 @@ describe('cards for the person', () => {
     await screen.findByRole('region', { name: 'Waiting for you' });
     expect(screen.getByRole('heading', { level: 1, name: 'Waits for Dan' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'A version was marked without a release' })).not.toBeInTheDocument();
-    await user.selectOptions(screen.getByRole('combobox', { name: 'View as' }), 'Me, Ivan');
+    await user.click(within(screen.getByRole('navigation', { name: 'Task lists' })).getByRole('button', { name: /^Waits for me/ }));
     await user.click(await within(screen.getByRole('region', { name: 'Waiting for you' })).findByRole('button', { name: /Version .* was marked/, expanded: false }));
     expect(await screen.findByRole('region', { name: 'A version was marked without a release' })).toBeInTheDocument();
   });

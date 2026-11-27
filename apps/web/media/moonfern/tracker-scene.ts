@@ -57,7 +57,7 @@ const listTasks = MOONFERN_TASKS.map(task => task.number === 221 ? {
 /* Count the translated parts shown in each tracker view. A blank argument removes fixture data from a phrase. */
 function trackerWords(t: Messages, view: 'tasks' | 'board' | 'turns'): string[] {
   const { side, where, views, filters, statuses, list, board } = t.tracker;
-  const common = [...Object.values(side).filter((word): word is string => typeof word === 'string'), t.tracker.viewAs, t.tracker.viewAsSelf(''), t.tasks.search];
+  const common = [...Object.values(side).filter((word): word is string => typeof word === 'string'), t.tasks.search];
   if (view === 'turns') {
     const words = t.tasks.board;
     return [...common, where.turns, t.tasks.department, words.show, words.showReleases, words.showOutside, words.relsWhy, words.nextWhy,
