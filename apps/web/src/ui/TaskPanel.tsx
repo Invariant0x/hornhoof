@@ -164,7 +164,7 @@ function QueueFact({ task }: { task: TaskLine }) {
 }
 
 /* Who answers for it and who does it, its pipeline and its due day with how long it is in its status, a name beside each. */
-function CardFacts({ task, status, org }: { task: TaskDetail; org: Org | null | undefined; status: ReturnType<typeof humanStatus> }) {
+function CardFacts({ task, status, org }: { task: TaskLine & Partial<Pick<TaskDetail, 'createdBy'>>; org?: Org | null; status: ReturnType<typeof humanStatus> }) {
   const t = useT();
   const { language } = useLanguage();
   const { pipelines } = usePipelines(!!task.pipelineId);
