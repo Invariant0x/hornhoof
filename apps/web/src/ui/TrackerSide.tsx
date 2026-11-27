@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { deptLabel, useT } from '../i18n';
 import type { TrackerPlace } from '../routes';
 import { mapPeople } from '../org';
-import { shownEmployees, waitingOn } from '../tracker';
+import { shownEmployees } from '../tracker';
 import type { Employee, GoalView, Org, Pipeline, TaskDepartments, TaskLine } from '../types';
 import { TrackerIcon } from './icons';
 import { DepartmentMark, PersonMark } from './TrackerMarks';
@@ -230,6 +230,13 @@ export function TrackerSide({ id, place, onPlace, onOpenTask, onOpenAgent, org, 
     const own = departments.filter(d => d.responsible?.id === p.id).map(d => deptLabel(t, d));
     return own.length ? own.join(', ') : p.title || undefined;
   };
+  const assigned = new Map<string, number>();
+  for (const task of tasks) {
+    if (task.responsible && task.status !== 'cancelled') {
+      const id = task.responsible.id;
+      assigned.set(id, (assigned.get(id) ?? 0) + 1);
+    }
+  }
   const companyGoals = goals.filter(g => g.status !== 'dropped');
   return (
     <nav id={id} className={`tr-side${open ? ' open' : ''}`} aria-label={words.label}>
@@ -249,10 +256,9 @@ export function TrackerSide({ id, place, onPlace, onOpenTask, onOpenAgent, org, 
       <h2 className="tr-side-heading">{words.people}</h2>
       <ul className="tr-items">
         {people.map(p => {
-          const waits = waitingOn(tasks, p.id).length;
           return (
             <li key={p.id}>
-              <Item icon={<PersonMark person={p} decorative />} on={place.responsible === p.id} sub={answersFor(p)} count={waits || undefined} tone="attention"
+              <Item icon={<PersonMark person={p} decorative />} on={place.responsible === p.id} sub={answersFor(p)} count={assigned.get(p.id)}
                 onClick={() => go({ ...person, responsible: p.id, view: 'list' })}>{p.name}</Item>
             </li>
           );

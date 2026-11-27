@@ -1,3 +1,4 @@
+import { shownDecisions, waitsCount } from '../tracker';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type RefObject } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useT } from '../i18n';
@@ -216,7 +217,7 @@ function ShellTabs({ tab, waiting, navigate, fit }: { tab: Route['kind']; waitin
             className={tab === id ? 'on' : ''}
             aria-current={tab === id ? 'page' : undefined}
             aria-label={count || fit.icons ? name : undefined}
-            title={fit.icons ? name : undefined}
+            title={fit.icons || count ? name : undefined}
             onClick={() => {
               navigate({ kind: id });
             }}
@@ -251,7 +252,7 @@ function ShellAccount({ me, menu, setMenu, company, inbox, navigate, openAccount
 
 /* What waits for people as the navigation counts it and the screens show it, and whose decisions the Tasks screen shows
    after a click on a person's card: null shows everyone's. */
-function useDecisionsView() {
+function useDecisionsView(personId: string) {
   const { decisions, failure, load } = useDecisions();
   const requests = decisions?.requests ?? [];
   return {
@@ -260,7 +261,7 @@ function useDecisionsView() {
     failure,
     load,
     /* What agents ask, the orchestrator's cards and his request for the computer. */
-    waiting: decisions?.counts.total ?? 0,
+    waiting: waitsCount(shownDecisions(decisions, { viewer: personId }), [], []),
     /* What agents ask on one task, for its panel. */
     requestsOf: (taskId: string) => requests.filter(r => r.task.id === taskId),
   };
@@ -458,7 +459,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const missingDepartment = departmentIsMissing({ deptId, org, orgFailure });
   const updates = useUpdates(company);
   useUpdateRoad(updates);
-  const decisions = useDecisionsView();
+  const decisions = useDecisionsView(me.person.id);
   /* A person's card, on the map or in a department, opens the decisions screen showing theirs. */
   const openDecisions = (personId: string) => {
     navigate({ kind: 'tasks', show: 'waits', personId });
