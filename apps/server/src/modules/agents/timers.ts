@@ -1,3 +1,4 @@
+import { hasNotebookChanges } from '../notebook/reviews.js';
 import { and, eq, gt, inArray, isNotNull, isNull, notInArray, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -59,7 +60,7 @@ async function workFor(ctx: Ctx, a: AgentRow): Promise<boolean> {
       ),
     )
     .limit(1);
-  return Boolean(failed);
+  return Boolean(failed) || await hasNotebookChanges(ctx.db, a, a.timerAt);
 }
 
 const every = (minutes: number) => (minutes % 60 === 0 ? `${minutes / 60} ${minutes === 60 ? 'hour' : 'hours'}` : `${minutes} minutes`);

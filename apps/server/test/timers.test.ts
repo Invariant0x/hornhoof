@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agentChanges, agentEvents, agents, companies, departments, jobs, requests, tasks } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, jobs, notebookNotes, requests, tasks } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { leadSweeps, minuteRound, timerTick } from '../src/modules/agents/timers.js';
 import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
@@ -123,6 +123,17 @@ describe('timers', () => {
     const [walt] = await db.select().from(agents).where(eq(agents.id, hired.json().hired[0] as string));
     expect([walt!.timerMinutes, walt!.timerOrder, walt!.timerForWork]).toEqual([10, role.timer!.order, true]);
     expect(walt!.timerAt).toEqual(hiredAt);
+  });
+
+  it('runs one Operations review for changed notebook rules even in an otherwise quiet company', async () => {
+    const { app, db, ceo, wandaId, orchestrator } = await company();
+    await patch(app, ceo, wandaId, { timer: { minutes: 10, order: 'Review changed rules.', forWork: true } });
+    const [collector] = await db.update(agents).set({ roleKey: 'OPS-BUGS' }).where(eq(agents.id, wandaId)).returning();
+    const at = (minutes: number) => new Date(collector!.timerAt!.getTime() + minutes * MIN);
+    await db.insert(notebookNotes).values({ companyId: orchestrator.companyId, number: 1, text: 'Use the new process.', updatedAt: at(2) });
+    expect(await timerTick(app.ctx, at(10))).toBe(1);
+    await db.update(jobs).set({ status: 'done', finishedAt: at(11) }).where(eq(jobs.agentId, wandaId));
+    expect(await timerTick(app.ctx, at(20))).toBe(0);
   });
 
   it('skips the round of a timer for work while nothing is open or failed since the last one, and counts from the skip', async () => {
