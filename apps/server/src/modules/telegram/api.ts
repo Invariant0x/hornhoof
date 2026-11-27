@@ -11,6 +11,8 @@ export type TelegramMessage = {
   chat: { id: number; type: string };
   text?: string;
   caption?: string;
+  reply_to_message?: Pick<TelegramMessage, 'message_id' | 'chat' | 'text' | 'caption'>;
+  quote?: { text: string };
   /* The photos and files sent together as one album share it, each in an update of its own. */
   media_group_id?: string;
   /* Each size of one photo, the biggest last. */

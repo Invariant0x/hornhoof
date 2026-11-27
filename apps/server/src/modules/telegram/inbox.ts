@@ -65,6 +65,11 @@ const seconds = (f: TelegramFile) => (f.duration ? `, ${f.duration} s` : '');
 export function whatCame(m: TelegramMessage): Came {
   const notes: string[] = [];
   const files: Incoming[] = [];
+  const original = m.reply_to_message;
+  if (original && original.chat.id === m.chat.id) {
+    const quote = m.quote?.text ?? original.text ?? original.caption;
+    notes.push(`[Reply to Telegram message ${original.message_id}]${quote ? ' ' + JSON.stringify(quote) : ''}`);
+  }
   if (m.forward_origin) notes.push('[This message is forwarded from someone else.]');
   if (m.document) files.push({ file: m.document, name: m.document.file_name ?? 'file' });
   const photo = m.photo?.at(-1);
