@@ -185,13 +185,22 @@ describe('My tasks and View as', () => {
     expect(waiting).not.toHaveTextContent(/Fix the login page|Run the checks|Deployment/);
   });
 
+  it('counts the tasks opened by the responsible person row', async () => {
+    const user = userEvent.setup();
+    shell('/tasks');
+    const side = await screen.findByRole('navigation', { name: 'Task lists' });
+    const maria = await within(side).findByRole('button', { name: /Maria.*2/ });
+    await user.click(maria);
+    expect(await within(await main()).findAllByRole('listitem')).toHaveLength(2);
+  });
+
   it("opens another person's screen from the address for the CEO delegate", async () => {
     shell('/tasks?person=p2', {}, { ...ME, person: { ...ME.person, isOwner: false, isCeoDelegate: true } });
     const list = await main();
     await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#21 Take card payments', '#22 Card form']));
   });
 
-  it('shows people with wait counts and opens department goals, dates and tasks without a pipeline', async () => {
+  it('shows people with assigned task counts and opens department goals, dates and tasks without a pipeline', async () => {
     const user = userEvent.setup();
     shell('/tasks?department=d2', { 'GET /api/tasks?status=all': [200, { tasks: [
       ...TASKS, line({ id: 'dated', number: 42, title: 'Deliver the list', dueAt: '2026-12-01T00:00:00.000Z' }),
@@ -199,12 +208,12 @@ describe('My tasks and View as', () => {
     const side = await screen.findByRole('navigation', { name: 'Task lists' });
     expect(within(side).getByRole('heading', { name: 'Responsible' })).toBeInTheDocument();
     await act(async () => {});
-    const ivan = within(side).getByRole('button', { name: 'Ivan 1' });
+    const ivan = within(side).getByRole('button', { name: 'Ivan 3' });
     expect(ivan.querySelector('.tr-avatar')).toBeInTheDocument();
-    expect(ivan.querySelector('.tr-count')).toHaveClass('attention');
+    expect(ivan.querySelector('.tr-count')).not.toHaveClass('attention');
     /* Under each name, what the person answers for: the CEO the whole company, Maria her department. */
     expect(ivan).toHaveAccessibleDescription('CEO, whole company');
-    expect(within(side).getByRole('button', { name: 'Maria' })).toHaveAccessibleDescription('Development');
+    expect(within(side).getByRole('button', { name: 'Maria 2' })).toHaveAccessibleDescription('Development');
     expect(within(side).getByRole('button', { name: /^My tasks / }).querySelector('.tr-count')).not.toHaveClass('attention');
     const dept = within(side).getByRole('button', { name: 'Development' });
     expect(dept.querySelector('.tr-dept-mark')).toBeInTheDocument();

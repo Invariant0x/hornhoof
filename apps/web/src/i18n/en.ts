@@ -2047,7 +2047,7 @@ export const en = {
       nothingYet: 'No turns and no tasks yet. Tell the orchestrator or a department head what to do, and the work shows up here.',
       pickDepartment: 'Pick a department of yours above to see its list for later turns.',
     },
-    navWaiting: (n: number) => `Tasks, ${n} waiting for you`,
+    navWaiting: (n: number) => `Tasks, decisions assigned to you: ${n}`,
     turn: (n: number) => `Turn ${n}`,
     workKinds: { bug: 'Bug', known_behavior: 'Known behavior', unknown_path: 'Unknown path', legacy_code: 'Legacy code' },
     riskClasses: { money: 'money', access: 'access', security: 'security', data: 'data', none: 'none' },
