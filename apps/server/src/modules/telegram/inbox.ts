@@ -9,7 +9,7 @@ import { ApiError, loggable } from '../../errors.js';
 import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.js';
 import { takenBytes } from '../tasks/attachments.js';
 import { writeToAgent } from '../conversation/routes.js';
-import { TELEGRAM_FILE_BYTES, TelegramError, type TelegramFile, type TelegramMessage, type TelegramUpdate, type TelegramUser } from './api.js';
+import { replyTo, TELEGRAM_FILE_BYTES, TelegramError, type TelegramFile, type TelegramMessage, type TelegramUpdate, type TelegramUser } from './api.js';
 import { chatLanguage } from './language.js';
 import { agentName, botWords, type BotLang } from './words.js';
 
@@ -133,6 +133,14 @@ async function bringFiles(ctx: Ctx, me: Person, agentId: string, came: Came, fet
   return { ids, notes };
 }
 
+function deliveryFailure(ctx: Ctx, err: unknown, agentId: string, words: ReturnType<typeof botWords>, name: string): string {
+  if (err instanceof ApiError && (err.reason === 'agent_not_ready' || err.reason === 'orchestrator_not_ready')) {
+    return err.details?.undelivered === 'machine_offline' ? words.machineOffline(name) : words.notReady(name);
+  }
+  ctx.log.warn({ error: loggable(err), agentId }, 'A message from Telegram did not reach its agent.');
+  return words.failed;
+}
+
 /* One message of a bot, or the updates of one album together: a person's words and files in a private chat go to the bot's
    agent as if they wrote and sent them in its window, with their rights; anyone else hears plainly why not. Returns whether
    the message went to the agent. */
@@ -178,14 +186,13 @@ export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | Tele
   const text = [...said, ...came.notes, ...brought.notes].join('\n\n');
   /* Nothing came but what the person already heard did not. */
   if (!said.length && !came.notes.length && !brought.ids.length) return false;
+  const reply = replyTo(messages, chatId);
   const before = await lastSeq(ctx, agent.id);
   let jobId: string;
   try {
-    jobId = await writeToAgent(ctx, me, agent, { text, pictures: brought.ids, telegram: { bot: bot.id, chat: chatId, update: update.update_id, lang } });
+    jobId = await writeToAgent(ctx, me, agent, { text, pictures: brought.ids, telegram: { bot: bot.id, chat: chatId, update: update.update_id, lang, ...(reply && { reply }) } });
   } catch (err) {
-    const notReady = err instanceof ApiError && (err.reason === 'agent_not_ready' || err.reason === 'orchestrator_not_ready');
-    if (!notReady) ctx.log.warn({ error: loggable(err), agentId: agent.id }, 'A message from Telegram did not reach its agent.');
-    await say(chatId, notReady ? words.notReady(name) : words.failed);
+    await say(chatId, deliveryFailure(ctx, err, agent.id, words, name));
     return false;
   }
   await awaitAnswer(ctx, bot, jobId, chatId, update.update_id, before, lang);

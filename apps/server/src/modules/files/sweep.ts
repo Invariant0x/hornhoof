@@ -1,3 +1,4 @@
+import { rowsOf } from '../../db/result-rows.js';
 import { sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
@@ -14,8 +15,6 @@ import { countedNow, keptElsewhere, placeFiles, trimTargets } from './place.js';
 export const UNUSED_MS = 86_400_000;
 /* At most this many contents leave this machine's store in one round, and as many of its copies are checked. */
 const DROP_BATCH = 500;
-
-const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 
 
 /* The contents a row names and no record describes, with the size the row gives, among those `which` lets through: the

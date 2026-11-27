@@ -242,7 +242,7 @@ describe('Shell', () => {
 /* The account menu's heading and groups of rows, with a line between groups that have entries. */
 describe('the section tabs', () => {
   const ICONS = '.tabs[data-fit="icons"]';
-  const NAMES = ['Map', 'Tasks, 2 waiting for you', 'People', 'Subscriptions & API', 'Machines'];
+  const NAMES = ['Map', 'Tasks, decisions assigned to you: 2', 'People', 'Subscriptions & API', 'Machines'];
 
   /* The top bar as wide as `width`, the logo shown or not, and what the tabs need in words. */
   function lay(width: number, brand: number, words: number) {
@@ -262,7 +262,7 @@ describe('the section tabs', () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/requests': [200, decisions(REQUESTS)], ...routes });
     render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
     const nav = screen.getByRole('navigation', { name: 'Sections' });
-    await within(nav).findByRole('button', { name: 'Tasks, 2 waiting for you' });
+    await within(nav).findByRole('button', { name: 'Tasks, decisions assigned to you: 2' });
     return { nav, measure: () => act(() => callbacks.forEach(fn => fn())) };
   }
 

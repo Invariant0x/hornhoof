@@ -1,3 +1,4 @@
+import { rowsOf } from '../../db/result-rows.js';
 import type { Dirent } from 'node:fs';
 import { open, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -12,7 +13,6 @@ import { SET_ASIDE } from './sweep.js';
    row, read a piece at a time, or, for one over 50 MB, on the disk of the machine that took it, in FILES_DIR under the
    row's id. Once every row is moved the column goes, and nothing here is read any more. */
 const PIECE_BYTES = 1024 * 1024;
-const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 
 export const fileLost = () => new ApiError(410, 'gone', 'This file was kept on one machine before files had a store, and that machine is gone with it.', 'file_lost');
 

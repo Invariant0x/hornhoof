@@ -154,13 +154,12 @@ export function withoutRequestWaits(tasks: TaskLine[], decisions?: Decisions): T
   });
 }
 
-/* Whose decisions a list shows: one person's; the viewer's own, without a question asked of another person by name, which
-   only that person answers; or everything the viewer sees in the company. */
-export type DecisionsOf = { person: string } | 'viewer' | 'everyone';
+/* A person's own queue contains only decisions assigned to them. A viewer may also see another person's queue. */
+export type DecisionsOf = { person: string } | { viewer: string } | 'everyone';
 export type ShownDecisions = Pick<Decisions, 'requests' | 'proposals'> & { merges: MergeDecision[] };
 
 const isOf = (owner: string, whose: DecisionsOf, canAnswer: boolean) =>
-  whose === 'everyone' || (whose === 'viewer' ? canAnswer : owner === whose.person);
+  whose === 'everyone' || ('viewer' in whose ? owner === whose.viewer && canAnswer : owner === whose.person);
 
 /* What of the decisions a list shows; nothing before the first answer. */
 export function shownDecisions(decisions: Decisions | undefined, whose: DecisionsOf): ShownDecisions {

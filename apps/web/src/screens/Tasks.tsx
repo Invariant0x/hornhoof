@@ -1,3 +1,4 @@
+import { TASK_PRIORITIES } from '@hornhoof/protocol';
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { mapPeople, useOrg } from '../org';
@@ -124,6 +125,7 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   personId: string | null;
   viewerId: string;
   queue: boolean;
+  allTasks: TaskLine[];
   /* The tasks that wait for that person. */
   tasks: TaskLine[];
   recipient: string;
@@ -136,7 +138,7 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
 };
 
 /* What waits lists the decisions of the person picked, or with none the viewer's own. */
-const decisionsOfWho = (personId: string | null): DecisionsOf => personId ? { person: personId } : 'viewer';
+const decisionsOfWho = (personId: string | null, viewer: string): DecisionsOf => personId ? { person: personId } : { viewer };
 
 const shownNone = (s: ShownDecisions) => !s.requests.length && !s.proposals.length && !s.merges.length;
 
@@ -231,7 +233,15 @@ function NamedQuestionRow({ request, person, onOpenTask }: { request: WaitingReq
 
 const queueDone = (done: () => void, refresh: () => void) => () => { done(); refresh(); };
 
-function QueueDeck({ shown, tasks, cards, recipient, onCardsSeen, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, viewerId, onFailure }: Omit<Listed, 'waitsFor'> & {
+function queueOrder(at?: string | null, task?: TaskLine) {
+  return {
+    priority: TASK_PRIORITIES.indexOf(task?.urgent ? 'urgent' : task?.priority ?? 'normal'),
+    since: at ? Date.parse(at) : Infinity,
+  };
+}
+
+function QueueDeck({ shown, allTasks, tasks, cards, recipient, onCardsSeen, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, viewerId, onFailure }: Omit<Listed, 'waitsFor'> & {
+  allTasks: TaskLine[];
   tasks: TaskLine[];
   cards: WaitCard[];
   recipient: string;
@@ -239,25 +249,30 @@ function QueueDeck({ shown, tasks, cards, recipient, onCardsSeen, onDecisionsCha
 }) {
   const t = useT();
   const deferButton = (defer: () => void) => <div className="entry-actions"><button className="btn ghost" type="button" onClick={defer}>{t.tasks.queue.defer}</button></div>;
-  const items: WaitQueueEntry[] = [
+  const byId = new Map(allTasks.map(task => [task.id, task]));
+  const items: (WaitQueueEntry & ReturnType<typeof queueOrder>)[] = [
     ...shown.requests.map(request => ({
+      ...queueOrder(request.at, byId.get(request.task.id)),
       id: `request:${request.id}`, title: taskTitle(request.task), icon: requestIcon[request.kind],
       text: request.kind === 'stuck' ? t.tasks.stuckText(request.agent.name, request.task.number) : request.text,
       meta: <><bdi>{request.agent.name}</bdi><span aria-hidden="true">·</span><bdi dir="ltr">#{request.task.number}</bdi><span aria-hidden="true">·</span><bdi>{age(t, request.at)}</bdi></>,
       show: (done: () => void, defer: () => void) => <Requests requests={[request]} onChanged={queueDone(done, onDecisionsChanged)} onDefer={defer} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} viewerId={viewerId} />,
     })),
     ...shown.proposals.map(card => ({
+      ...queueOrder(card.at),
       id: `proposal:${card.id}`, title: card.department ? t.staff.title(card.department.name) : t.card.title, text: card.brief, icon: 'list' as const,
       meta: <><bdi>{card.agent.name}</bdi><span aria-hidden="true">·</span><bdi>{age(t, card.at)}</bdi></>,
       show: (done: () => void, defer: () => void) => <><ProposalCard card={card} org={org} onCorrect={onOpenOrchestrator} onDone={queueDone(done, onDecisionsChanged)} />{deferButton(defer)}</>,
     })),
     ...shown.merges.map(merge => ({
+      ...queueOrder(),
       id: `merge:${merge.id}`, title: merge.label, text: merge.label, meta: null, icon: 'branch' as const,
       show: (_done: () => void, defer: () => void) => <><MergeCard merge={merge} onChange={onDecisionsChanged} onFailure={onFailure} />{deferButton(defer)}</>,
     })),
     ...cards.map(card => {
       const { title, text } = cardWords(t, card);
       return {
+        ...queueOrder(card.at, card.taskId ? byId.get(card.taskId) : undefined),
         id: `card:${card.id}`, title, text, meta: age(t, card.at), icon: 'waits' as const,
         show: (done: () => void, defer: () => void) => <><WaitCards cards={[card]} onOpenTask={onOpenTask} onSeen={queueDone(done, onCardsSeen)} />{deferButton(defer)}</>,
       };
@@ -265,6 +280,7 @@ function QueueDeck({ shown, tasks, cards, recipient, onCardsSeen, onDecisionsCha
     ...tasks.map(task => {
       const wait = waitText(t, task, undefined, recipient);
       return {
+        ...queueOrder(task.time?.inStatusSince ?? task.createdAt, task),
         id: `task:${task.id}`, title: taskTitle(task), text: task.title, meta: wait, icon: 'waits' as const,
         show: (_done: () => void, defer: () => void) => <>
           <p className="wait-meta">{wait}</p>
@@ -277,6 +293,7 @@ function QueueDeck({ shown, tasks, cards, recipient, onCardsSeen, onDecisionsCha
       };
     }),
   ];
+  items.sort((a, b) => a.priority - b.priority || a.since - b.since);
   return <WaitingQueue items={items} />;
 }
 
@@ -310,7 +327,7 @@ function PersonalWaitList({ shown, cards, personId, tasks, recipient, onCardsSee
 }
 
 function WaitingForYouBody({ decisions, personId, queue, kept, ...rest }: PersonalWaiting) {
-  const shown = shownDecisions(decisions, decisionsOfWho(personId));
+  const shown = shownDecisions(decisions, decisionsOfWho(personId, rest.viewerId));
   const cards = keptShown(kept, personId);
   if (queue && !personId) return <QueueDeck shown={shown} cards={cards} {...rest} />;
   return <PersonalWaitList shown={shown} cards={cards} personId={personId} {...rest} />;
@@ -745,6 +762,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
       personId={decisionsOf}
       viewerId={me.person.id}
       queue={section.kind === 'waits'}
+      allTasks={all}
       tasks={waitsOnWho}
       recipient={recipient}
       kept={kept}
@@ -790,7 +808,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
         tasks={all}
         onOpenAgent={onOpenAgent}
         counts={{
-          waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf)), waitsOnWho, keptShown(kept, decisionsOf)),
+          waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf, me.person.id)), waitsOnWho, keptShown(kept, decisionsOf)),
           people: peopleCount(decisions, waitsOnPeople, company),
           failures: failures.length + machinesAway.filter(machine => !machine.back).length + copySchemaFailures.length + copyGaveUp.length + machinesLow.length + githubLimits.length,
           mine: own.tasks.length,

@@ -49,7 +49,7 @@ describe('the simple task card', () => {
     expect(decl('.tp-heading', 'overflow-wrap')).toBe('anywhere');
   });
 
-  it('shows the path, kind, title, status, why and facts at the top, then the brief, body, subtasks and history', async () => {
+  it('shows the path, kind, title and brief at the top, then the status, facts, body, subtasks and history', async () => {
     const user = userEvent.setup();
     shell({ 'GET /api/tasks/t12': [200, { task: {
       ...TASK_DETAIL, why: 'Accept card payments.', responsible: { id: 'p1', name: 'Ivan' }, askedBy: { id: 'p2', name: 'Oleg' }, dueAt: '2099-11-20T00:00:00.000Z',
@@ -67,23 +67,40 @@ describe('the simple task card', () => {
     expect(pill).toHaveClass('review');
     const facts = card.getByRole('group', { name: 'Facts' });
     /* Whose request it is and who decides are two facts, in this order. */
-    expect(within(facts).getByRole('definition', { name: 'Asked by' })).toHaveTextContent('Oleg');
+    expect(within(facts).getByRole('definition', { name: 'Initiator' })).toHaveTextContent('Oleg');
     expect(within(facts).getByRole('definition', { name: 'Decides' })).toHaveTextContent('Ivan');
     expect(within(facts).queryByRole('definition', { name: 'Waits for' })).not.toBeInTheDocument();
     expect(within(facts).getByRole('definition', { name: 'Decides' }).querySelector('.tr-avatar')).toBeInTheDocument();
-    expect(within(facts).getByRole('definition', { name: 'Executor' })).toHaveTextContent('Bruno');
+    expect(within(facts).getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Bruno');
     expect(within(facts).getByRole('definition', { name: 'Due' })).toHaveTextContent(/^20 Nov · Review for/);
     const subtasks = card.getByRole('region', { name: 'Subtasks' });
     expect(within(subtasks).getByRole('heading', { name: 'Subtasks · 0 of 1' })).toBeInTheDocument();
     expect(within(subtasks).getByRole('link', { name: '#13 Refunds' })).toBeInTheDocument();
-    const content = [path, kind, card.getByRole('heading', { name: 'Checkout API' }), pill, card.getByText('Accept card payments.'), facts,
-      card.getByRole('button', { name: 'Graph from here' }), card.getByText('Take card payments.'), card.getByText('card token'), subtasks, card.getByRole('list', { name: 'Log' })];
+    const content = [path, kind, card.getByRole('heading', { name: 'Checkout API' }), card.getByText('Take card payments.'), pill, card.getByText('Accept card payments.'), facts,
+      card.getByRole('button', { name: 'Graph from here' }), card.getByText('card token'), subtasks, card.getByRole('list', { name: 'Log' })];
     for (const [index, element] of content.slice(1).entries()) {
       expect(content[index]!.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
     expect(card.getAllByRole('heading').map(heading => heading.textContent)).toEqual(['Checkout API', 'Subtasks · 0 of 1', 'History']);
     for (const [i, name] of ['Close', '#10 Payments', 'Task actions', 'Graph from here'].entries()) expect(card.getAllByRole('button')[i]).toHaveAccessibleName(name);
     expect(card.getAllByRole('button')).toHaveLength(4);
+  });
+
+  it('names the agent who started the task and the department head covering unassigned work', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: {
+      ...TASK_DETAIL, askedBy: null, createdBy: { kind: 'agent', id: 'b1', name: 'Bruno' }, executor: null, assignee: null,
+    } }] });
+    const facts = within(within(await openTask(user)).getByRole('group', { name: 'Facts' }));
+    expect(facts.getByRole('definition', { name: 'Initiator' })).toHaveTextContent('Bruno');
+    expect(facts.getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Dana');
+  });
+
+  it('names the orchestrator for unassigned work outside a department', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, department: null, executor: null, assignee: null } }] });
+    const facts = within(within(await openTask(user)).getByRole('group', { name: 'Facts' }));
+    expect(facts.getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Orchestrator');
   });
 
   it.each([

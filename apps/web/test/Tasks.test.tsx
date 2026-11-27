@@ -41,9 +41,9 @@ async function goTo(user: ReturnType<typeof userEvent.setup>, name: RegExp | str
 }
 
 describe('the tracker', () => {
-  it('counts what waits for people in the navigation', async () => {
-    shell();
-    expect(await screen.findByRole('button', { name: 'Tasks, 2 waiting for you' })).toBeInTheDocument();
+  it('counts only the decisions assigned to the viewer in the navigation', async () => {
+    shell({ 'GET /api/requests': [200, decisions([...REQUESTS, { ...REQUESTS[0]!, id: 'other', ownerPersonId: 'other-person' }])] });
+    expect(await screen.findByRole('button', { name: 'Tasks, decisions assigned to you: 2' })).toBeInTheDocument();
   });
 
   it('opens the orchestrator to write to him, for people who see the whole company', async () => {
@@ -94,7 +94,7 @@ describe('the tracker', () => {
     await user.click(within(question).getByRole('button', { name: 'Send answer' }));
     expect(calls.find(c => c.path === '/api/requests/r1')?.body).toEqual({ answer: 'Stripe' });
     await waitFor(() => expect(within(waiting).queryByRole('article', { name: /#9/ })).not.toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Tasks, 1 waiting for you' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tasks, decisions assigned to you: 1' })).toBeInTheDocument();
   });
 
   it('says the orchestrator is putting a question into plain words while it is on it', async () => {
@@ -303,7 +303,7 @@ describe('the decisions of one person', () => {
     await user.selectOptions(screen.getByRole('combobox', { name: 'View as' }), 'Me, Ivan');
     expect(screen.getByRole('heading', { level: 1, name: 'Waits for me' })).toBeInTheDocument();
     expect(within(waiting).getAllByRole('article')).toHaveLength(1);
-    expect(within(waiting).getByRole('button', { expanded: false })).toBeInTheDocument();
+    expect(within(waiting).queryByText('Stripe or Adyen?')).toBeNull();
   });
 
   it('say plainly when nothing waits for that person, and give way to all of them when Tasks is opened by hand', async () => {
@@ -322,7 +322,7 @@ describe('the decisions of one person', () => {
   it("shows the structure card and counts no machine access decision", async () => {
     const user = userEvent.setup();
     shell({ 'GET /api/requests': [200, decisions(REQUESTS, { proposals: [STRUCTURE] })] });
-    expect(await screen.findByRole('button', { name: 'Tasks, 3 waiting for you' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Tasks, decisions assigned to you: 3' })).toBeInTheDocument();
     await openTasks(user);
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     expect(within(waiting).getByRole('heading', { name: 'Company structure' })).toBeInTheDocument();
@@ -344,7 +344,7 @@ describe('the decisions of one person', () => {
         return [200, { settled: 1, here: 1, there: 0, refused: [], tasks: [] }];
       },
     });
-    expect(await screen.findByRole('button', { name: 'Tasks, 1 waiting for you' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Tasks, decisions assigned to you: 1' })).toBeInTheDocument();
     await openTasks(user);
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     const card = await within(waiting).findByRole('region', { name: /^What came after / });
@@ -397,10 +397,10 @@ describe('the decisions of one person', () => {
     const stream = fakeStream();
     let total = 1;
     shell({ 'GET /api/requests': () => [200, decisions(REQUESTS.slice(0, total))] });
-    expect(await screen.findByRole('button', { name: 'Tasks, 1 waiting for you' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Tasks, decisions assigned to you: 1' })).toBeInTheDocument();
     total = 2;
     stream.send({ type: 'org' });
-    expect(await screen.findByRole('button', { name: 'Tasks, 2 waiting for you' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Tasks, decisions assigned to you: 2' })).toBeInTheDocument();
     total = 0;
     stream.send({ type: 'computer' });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument());

@@ -59,6 +59,22 @@ it('lets a linked invited person write to the company bot and get their own answ
 });
 
 describe('two people who write to one head in Telegram', () => {
+  it.each([
+    { from: MAX, original: { text: 'Website copy for task #41' } },
+    { from: CLARA, original: { caption: 'Website copy for task #41' } },
+  ] as const)('keeps the message being answered in the agent prompt for $from.first_name', async ({ from, original }) => {
+    const { tg, builtin } = await company();
+    tg.send(TOKEN, from, {
+      text: 'Send this to the editor',
+      quote: { text: 'Website copy' },
+      reply_to_message: { message_id: 17, chat: { id: from.id, type: 'private' }, ...original },
+    });
+    const run = await nextOf(builtin, 'job.run');
+    expect(run.prompt).toContain('Send this to the editor');
+    expect(run.prompt).toContain('Website copy for task #41');
+    expect(run.prompt).toContain('[Reply to Telegram message 17]');
+  });
+
   it('each get their own turn and only the answers to their own words, while the same person still adds to their turn', async () => {
     const { tg, db, builtin, owner, clara } = await company();
     tg.write(TOKEN, MAX, 'Сколько лидов за неделю?');
@@ -81,6 +97,7 @@ describe('two people who write to one head in Telegram', () => {
     tg.write(TOKEN, MAX, 'И по каналам тоже.');
     const typed = await nextOf(builtin, 'agent.say');
     expect(typed.text).toContain('И по каналам тоже.');
+    expect(typed.text).toContain('Write task titles, briefs and questions for Ivan in Russian.');
     expect(typed.text).toContain('Use the language of their own words. Write it directly to them in Russian when their message does not establish a language.');
     builtin.send({ type: 'agent.said', ref: typed.ref, ok: true });
 

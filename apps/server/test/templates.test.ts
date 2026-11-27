@@ -59,6 +59,12 @@ describe('templates', () => {
     expect(body('dsn-brand-consistency')).toMatch(/generated pictures[\s\S]*approved references[\s\S]*character sheets/i);
   });
 
+  it('keeps a decision on the original task when the person answers an existing question', () => {
+    const lead = body('hh-lead-tasks');
+    expect(lead).toContain('record_answer on the original request');
+    expect(lead).toContain('Resume the existing task');
+  });
+
   it('keeps deterministic testing in the testing policy and out of role identities', () => {
     expect(body('dev-testing-policy')).toMatch(/we test our program, not the operating system and not other programs/);
     expect(body('dev-testing-policy')).toMatch(/time in a test is virtual only/);

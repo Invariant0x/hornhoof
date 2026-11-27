@@ -277,8 +277,8 @@ describe('what waits for people', () => {
   const requested = (d: { requests: WaitingRequest[] }) => d.requests.map(r => r.id);
 
   it("leaves a question asked of another person by name out of the viewer's own decisions, and keeps the rest as they were", () => {
-    const own = shownDecisions(DECISIONS, 'viewer');
-    expect(requested(own)).toEqual(['r2', 'r3']);
+    const own = shownDecisions(DECISIONS, { viewer: SAM.id });
+    expect(requested(own)).toEqual(['r2']);
     expect(own.proposals).toEqual([CARD]);
     expect(own.merges).toEqual([MERGE]);
   });
@@ -291,7 +291,7 @@ describe('what waits for people', () => {
 
   it("uses the server's answer permissions for the viewer's own list", () => {
     const maxView = { ...DECISIONS, requests: [{ ...FOR_MAX, canAnswer: true }, { ...FOR_SAM, canAnswer: false }, FOR_ANYONE] };
-    expect(requested(shownDecisions(maxView, 'viewer'))).toEqual(['r1', 'r3']);
+    expect(requested(shownDecisions(maxView, { viewer: MAX }))).toEqual(['r1']);
   });
 
   it('gives everything the viewer sees for the company', () => {
@@ -308,9 +308,9 @@ describe('what waits for people', () => {
   });
 
   it('counts a task with a question once, with the tasks that wait, the cards and the merges', () => {
-    const own = shownDecisions(DECISIONS, 'viewer');
-    expect(waitsCount(own, [], [])).toBe(4);
-    expect(waitsCount(own, [T319, LOOSE], [{ id: 'c1' }])).toBe(6);
+    const own = shownDecisions(DECISIONS, { viewer: SAM.id });
+    expect(waitsCount(own, [], [])).toBe(3);
+    expect(waitsCount(own, [T319, LOOSE], [{ id: 'c1' }])).toBe(5);
     expect(waitsCount(shownDecisions(DECISIONS, 'everyone'), [], [])).toBe(5);
   });
 

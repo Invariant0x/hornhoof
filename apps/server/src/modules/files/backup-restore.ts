@@ -1,3 +1,4 @@
+import { rowsOf } from '../../db/result-rows.js';
 import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -28,8 +29,6 @@ type Name = { attachment_id: string; sha256: string; row: Record<string, unknown
    those bytes is there to come back, live or in the backup, and whatever its row names is still there. */
 export type RestoreItem = { attachmentId: string; name: string; action: 'again' | 'back'; sha256: string; size: number; ready: boolean; reason?: string };
 type Planned = RestoreItem & { row: Record<string, unknown> };
-
-const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 
 /* The tables a row of attachments names, by its column: a row comes back only while each it names is there. */
 const NAMES = { company_id: 'companies', job_id: 'jobs', agent_id: 'agents', person_id: 'people', request_id: 'requests', operator_case_id: 'program_operator_cases', task_id: 'tasks', test_run_id: 'test_runs' } as const;

@@ -48,13 +48,13 @@ async function listed(region: Locator) {
   return new Set(tasks).size + await region.locator('.t-card').count();
 }
 
-test('lists what waits for people with whom each waits for, counts it, and leaves out of Waits for me what others alone answer', async ({ page }) => {
+test('lists what waits for people with whom each waits for, counts it, and keeps decisions assigned to others off Waits for me', async ({ page }) => {
   const t = DICTIONARIES.en;
   await open(page, 'en', 1440, '/tasks?show=waits');
   const side = page.getByRole('navigation', { name: t.tracker.side.label });
   const mine = page.getByRole('region', { name: t.tasks.waiting });
   await expect(mine).toContainText(QUESTION);
-  await expect(mine).toContainText(MARIA_QUESTION);
+  await expect(mine).not.toContainText(MARIA_QUESTION);
   await expect(mine).not.toContainText(MAX_QUESTION);
   await expect(mine.locator('article.req')).toHaveCount(1);
   expect(await countOn(side, t.tracker.side.waits)).toBe(1 + await mine.getByRole('button', { expanded: false }).count());
@@ -69,7 +69,8 @@ test('lists what waits for people with whom each waits for, counts it, and leave
   await expect(card(MARIA_QUESTION)).toContainText(t.tracker.peopleWaits.waitingFor('Maria'));
   await expect(people.getByRole('heading', { name: t.tracker.peopleWaits.tasks })).toBeVisible();
   expect(await countOn(side, t.tracker.peopleWaits.title)).toBe(await listed(people));
-  expect(await countOn(side, t.tracker.peopleWaits.title)).toBe(await countOn(side, t.tracker.side.waits) + 1);
+  /* The company also sees the decisions assigned to Maria and Max. */
+  expect(await countOn(side, t.tracker.peopleWaits.title)).toBe(await countOn(side, t.tracker.side.waits) + 2);
 });
 
 test('names what waits for people once, in the title of the page', async ({ page }) => {
