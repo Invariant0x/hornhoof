@@ -65,11 +65,6 @@ const seconds = (f: TelegramFile) => (f.duration ? `, ${f.duration} s` : '');
 export function whatCame(m: TelegramMessage): Came {
   const notes: string[] = [];
   const files: Incoming[] = [];
-  const original = m.reply_to_message;
-  if (original && original.chat.id === m.chat.id) {
-    const quote = m.quote?.text ?? original.text ?? original.caption;
-    notes.push(`[Reply to Telegram message ${original.message_id}]${quote ? ' ' + JSON.stringify(quote) : ''}`);
-  }
   if (m.forward_origin) notes.push('[This message is forwarded from someone else.]');
   if (m.document) files.push({ file: m.document, name: m.document.file_name ?? 'file' });
   const photo = m.photo?.at(-1);
@@ -183,10 +178,13 @@ export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | Tele
   const text = [...said, ...came.notes, ...brought.notes].join('\n\n');
   /* Nothing came but what the person already heard did not. */
   if (!said.length && !came.notes.length && !brought.ids.length) return false;
+  const source = messages.find(m => m.reply_to_message?.chat.id === chatId);
+  const original = source?.reply_to_message;
+  const reply = original && { id: original.message_id, text: source?.quote?.text ?? original.text ?? original.caption ?? '' };
   const before = await lastSeq(ctx, agent.id);
   let jobId: string;
   try {
-    jobId = await writeToAgent(ctx, me, agent, { text, pictures: brought.ids, telegram: { bot: bot.id, chat: chatId, update: update.update_id, lang } });
+    jobId = await writeToAgent(ctx, me, agent, { text, pictures: brought.ids, telegram: { bot: bot.id, chat: chatId, update: update.update_id, lang, ...(reply && { reply }) } });
   } catch (err) {
     const notReady = err instanceof ApiError && (err.reason === 'agent_not_ready' || err.reason === 'orchestrator_not_ready');
     if (!notReady) ctx.log.warn({ error: loggable(err), agentId: agent.id }, 'A message from Telegram did not reach its agent.');
