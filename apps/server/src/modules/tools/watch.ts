@@ -124,7 +124,7 @@ const seenBy = (rows: SeenRow[], reader: Reader | undefined) =>
 const turnEnd = (last: { result: string | null; tail: string } | undefined, open: boolean): string | null =>
   last ? shown(last.result?.trim() || last.tail, open).slice(-TAIL) : null;
 
-type ToolJob = { id: string; companyId: string; agentId: string; agentKind: string; roleKey?: string | null };
+type ToolJob = { id: string; companyId: string; agentId: string; agentKind: string; roleKey?: string | null; departmentId?: string | null };
 type Agent = typeof agents.$inferSelect;
 
 /* What one turn may send to others, so a round that goes wrong cannot flood the company. */
