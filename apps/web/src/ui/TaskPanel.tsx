@@ -342,6 +342,7 @@ function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: 
             <span aria-hidden="true">…</span>
           </button>
         </div>
+        {task.brief && <p className="tp-brief" dir="auto">{task.brief}</p>}
         <p className="tp-state"><StatusPill state={STATE_CLASS[status]}>{t.tracker.groups[status]}</StatusPill></p>
         {task.why && <p className="tp-why" dir="auto">{task.why}</p>}
         {task.subtasks.length > 0 && <CardBar done={done} total={task.subtasks.length} label={t.tracker.list.subtasks(done, task.subtasks.length)} />}
@@ -352,7 +353,6 @@ function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: 
       }} onClose={closeMenu} onOpen={onOpen} onChanged={onChanged} waiting={waiting} />
       <CardFacts task={task} status={status} />
       <GraphFromHere id={task.id} onGraph={leads.onGraph} />
-      {task.brief && <p className="tp-brief" dir="auto">{task.brief}</p>}
       {task.body && <FoldedMarkdown text={task.body} />}
       <Subtasks task={task} onOpen={onOpen} />
       <Relations task={task} onOpen={onOpen} />
