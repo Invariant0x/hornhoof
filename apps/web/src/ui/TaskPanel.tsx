@@ -5,7 +5,7 @@ import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useOrg } from '../org';
 import { routePath } from '../routes';
 import { knownLine, knownSubtasks, placeName, useGoals, usePipelines, useTask } from '../tasks';
-import { graphPath } from '../tracker';
+import { doerOf, graphPath } from '../tracker';
 import { humanStatus, isClosed } from '../task-tree';
 import type { GoalView, Org, TaskDetail, TaskLine, TaskStatus, WaitingRequest } from '../types';
 import { Field } from './Field';
@@ -163,6 +163,14 @@ function QueueFact({ task }: { task: TaskLine }) {
   return task.queue ? <Fact name={words.queue}>{words.queueText(task.queue.ahead, task.queue.openTurn)}</Fact> : null;
 }
 
+function responsibleAgent(task: TaskLine, org?: Org | null): string | undefined {
+  const assigned = doerOf(task);
+  if (assigned) return assigned.name;
+  const department = task.department?.id;
+  if (!department) return org?.orchestrator?.name;
+  return org?.departments.find(dept => dept.id === department)?.employees.find(employee => employee.kind === 'head')?.name;
+}
+
 /* Who answers for it and who does it, its pipeline and its due day with how long it is in its status, a name beside each. */
 function CardFacts({ task, status, org }: { task: TaskLine & Partial<Pick<TaskDetail, 'createdBy'>>; org?: Org | null; status: ReturnType<typeof humanStatus> }) {
   const t = useT();
@@ -170,9 +178,6 @@ function CardFacts({ task, status, org }: { task: TaskLine & Partial<Pick<TaskDe
   const { pipelines } = usePipelines(!!task.pipelineId);
   const pipeline = pipelines?.find(p => p.id === task.pipelineId);
   const stage = pipeline?.stages.find(s => s.id === task.pipelineStageId);
-  const lead = task.department
-    ? org?.departments.find(dept => dept.id === task.department?.id)?.employees.find(employee => employee.kind === 'head')
-    : org?.orchestrator;
   const words = t.tracker.card;
   const due = dueText(t, language, task);
   const inStatus = task.time ? words.inStatus(t.tracker.groups[status], spanText(t, sinceSeconds(task.time.inStatusSince))) : null;
@@ -182,7 +187,7 @@ function CardFacts({ task, status, org }: { task: TaskLine & Partial<Pick<TaskDe
         <Fact name={words.askedBy}><Answers person={task.askedBy ?? task.createdBy} /></Fact>
         <Fact name={words.decides}><Answers person={task.responsible} /></Fact>
         <QueueFact task={task} />
-        <Fact name={words.executor}><bdi>{task.executor?.name ?? task.assignee?.name ?? lead?.name ?? t.tracker.nobody}</bdi></Fact>
+        <Fact name={words.executor}><bdi>{responsibleAgent(task, org) ?? t.tracker.nobody}</bdi></Fact>
         {pipeline && <Fact name={words.pipeline}>{stage ? words.pipelineStage(pipeline.name, stage.name) : pipeline.name}</Fact>}
         {due ? <Fact name={words.due}><DueDay due={due} />{inStatus && ` · ${inStatus}`}</Fact> : inStatus && <Fact name={words.time}>{inStatus}</Fact>}
       </dl>

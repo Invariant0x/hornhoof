@@ -233,6 +233,13 @@ function NamedQuestionRow({ request, person, onOpenTask }: { request: WaitingReq
 
 const queueDone = (done: () => void, refresh: () => void) => () => { done(); refresh(); };
 
+function queueOrder(at?: string | null, task?: TaskLine) {
+  return {
+    priority: TASK_PRIORITIES.indexOf(task?.urgent ? 'urgent' : task?.priority ?? 'normal'),
+    since: at ? Date.parse(at) : Infinity,
+  };
+}
+
 function QueueDeck({ shown, allTasks, tasks, cards, recipient, onCardsSeen, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, viewerId, onFailure }: Omit<Listed, 'waitsFor'> & {
   allTasks: TaskLine[];
   tasks: TaskLine[];
@@ -243,33 +250,29 @@ function QueueDeck({ shown, allTasks, tasks, cards, recipient, onCardsSeen, onDe
   const t = useT();
   const deferButton = (defer: () => void) => <div className="entry-actions"><button className="btn ghost" type="button" onClick={defer}>{t.tasks.queue.defer}</button></div>;
   const byId = new Map(allTasks.map(task => [task.id, task]));
-  const order = (at?: string | null, task?: TaskLine) => ({
-    priority: TASK_PRIORITIES.indexOf(task?.urgent ? 'urgent' : task?.priority ?? 'normal'),
-    since: at ? Date.parse(at) : Infinity,
-  });
-  const items: (WaitQueueEntry & ReturnType<typeof order>)[] = [
+  const items: (WaitQueueEntry & ReturnType<typeof queueOrder>)[] = [
     ...shown.requests.map(request => ({
-      ...order(request.at, byId.get(request.task.id)),
+      ...queueOrder(request.at, byId.get(request.task.id)),
       id: `request:${request.id}`, title: taskTitle(request.task), icon: requestIcon[request.kind],
       text: request.kind === 'stuck' ? t.tasks.stuckText(request.agent.name, request.task.number) : request.text,
       meta: <><bdi>{request.agent.name}</bdi><span aria-hidden="true">·</span><bdi dir="ltr">#{request.task.number}</bdi><span aria-hidden="true">·</span><bdi>{age(t, request.at)}</bdi></>,
       show: (done: () => void, defer: () => void) => <Requests requests={[request]} onChanged={queueDone(done, onDecisionsChanged)} onDefer={defer} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} viewerId={viewerId} />,
     })),
     ...shown.proposals.map(card => ({
-      ...order(card.at),
+      ...queueOrder(card.at),
       id: `proposal:${card.id}`, title: card.department ? t.staff.title(card.department.name) : t.card.title, text: card.brief, icon: 'list' as const,
       meta: <><bdi>{card.agent.name}</bdi><span aria-hidden="true">·</span><bdi>{age(t, card.at)}</bdi></>,
       show: (done: () => void, defer: () => void) => <><ProposalCard card={card} org={org} onCorrect={onOpenOrchestrator} onDone={queueDone(done, onDecisionsChanged)} />{deferButton(defer)}</>,
     })),
     ...shown.merges.map(merge => ({
-      ...order(),
+      ...queueOrder(),
       id: `merge:${merge.id}`, title: merge.label, text: merge.label, meta: null, icon: 'branch' as const,
       show: (_done: () => void, defer: () => void) => <><MergeCard merge={merge} onChange={onDecisionsChanged} onFailure={onFailure} />{deferButton(defer)}</>,
     })),
     ...cards.map(card => {
       const { title, text } = cardWords(t, card);
       return {
-        ...order(card.at, card.taskId ? byId.get(card.taskId) : undefined),
+        ...queueOrder(card.at, card.taskId ? byId.get(card.taskId) : undefined),
         id: `card:${card.id}`, title, text, meta: age(t, card.at), icon: 'waits' as const,
         show: (done: () => void, defer: () => void) => <><WaitCards cards={[card]} onOpenTask={onOpenTask} onSeen={queueDone(done, onCardsSeen)} />{deferButton(defer)}</>,
       };
@@ -277,7 +280,7 @@ function QueueDeck({ shown, allTasks, tasks, cards, recipient, onCardsSeen, onDe
     ...tasks.map(task => {
       const wait = waitText(t, task, undefined, recipient);
       return {
-        ...order(task.time?.inStatusSince ?? task.createdAt, task),
+        ...queueOrder(task.time?.inStatusSince ?? task.createdAt, task),
         id: `task:${task.id}`, title: taskTitle(task), text: task.title, meta: wait, icon: 'waits' as const,
         show: (_done: () => void, defer: () => void) => <>
           <p className="wait-meta">{wait}</p>

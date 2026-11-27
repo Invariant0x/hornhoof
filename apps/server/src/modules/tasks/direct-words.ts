@@ -30,10 +30,11 @@ function pointsAt(q: Pointed, { refs, quoted }: Pointers): boolean {
 
 /* Of the open questions a person may answer, the one their words answer by themselves: the only one, or the only one they
    point at. None when it is not clear which. */
-export function clearlyAnswered<Q extends Pointed>(open: readonly Q[], said: string, task?: number | string): Q[] {
+export function clearlyAnswered<Q extends Pointed>(open: readonly Q[], said: string, task?: number | string, original?: string): Q[] {
+  const candidates = original === undefined ? open : open.filter(q => replyMatches(q, original));
   const pointers = pointersOf(said, task);
-  if (!pointers.refs.size && !pointers.quoted.length && open.length <= 1) return [...open];
-  const at = open.filter(q => pointsAt(q, pointers));
+  if (!pointers.refs.size && !pointers.quoted.length && candidates.length <= 1) return [...candidates];
+  const at = candidates.filter(q => pointsAt(q, pointers));
   return at.length === 1 ? at : [];
 }
 
@@ -42,6 +43,11 @@ export function replyMatches(q: Pointed, original: string): boolean {
   const { refs } = pointersOf(original, undefined);
   if (refs.size) return [...refs].every(ref => ref === String(q.number) || ref === q.taskId);
   return Boolean(q.text.trim()) && flat(original).includes(flat(q.text));
+}
+
+export function canCiteFor(data: unknown, question: Pointed): boolean {
+  const reply = (data as { telegram?: { reply?: { text: string } } } | null)?.telegram?.reply;
+  return !reply || replyMatches(question, reply.text);
 }
 
 /* Whether a message holds these words, spaces aside. */

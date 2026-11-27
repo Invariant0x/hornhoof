@@ -208,7 +208,7 @@ function ShellTabs({ tab, waiting, navigate, fit }: { tab: Route['kind']; waitin
     <nav ref={fit.nav} className="tabs glass" data-fit={fit.icons ? 'icons' : undefined} aria-label={t.shell.sections}>
       {TABS.map(id => {
         const count = id === 'tasks' ? waiting : 0;
-        const name = count ? t.tasks.navWaiting(count) : t.shell.tabs[id];
+        const name = count ? t.tasks.navWaiting(count) : fit.icons ? t.shell.tabs[id] : undefined;
         const Icon = TAB_ICONS[id];
         return (
           <button
@@ -216,8 +216,8 @@ function ShellTabs({ tab, waiting, navigate, fit }: { tab: Route['kind']; waitin
             type="button"
             className={tab === id ? 'on' : ''}
             aria-current={tab === id ? 'page' : undefined}
-            aria-label={count || fit.icons ? name : undefined}
-            title={fit.icons || count ? name : undefined}
+            aria-label={name}
+            title={name}
             onClick={() => {
               navigate({ kind: id });
             }}

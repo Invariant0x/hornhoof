@@ -30,6 +30,17 @@ export type TelegramMessage = {
   poll?: { question: string; options: { text: string }[] };
   forward_origin?: unknown;
 };
+export type TelegramReply = { id: number; text: string };
+
+export function replyTo(messages: readonly TelegramMessage[], chatId: number): TelegramReply | undefined {
+  for (const message of messages) {
+    const original = message.reply_to_message;
+    if (original && original.chat.id === chatId) {
+      return { id: original.message_id, text: original.text ?? original.caption ?? message.quote?.text ?? '' };
+    }
+  }
+}
+
 export type TelegramUpdate = { update_id: number; message?: TelegramMessage };
 
 /* code: Telegram's own, or none when it could not be reached. retryAfter: the seconds it asks to wait, when it asks. */
