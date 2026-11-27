@@ -632,12 +632,11 @@ it('fits the lists directly beside the main header with its breadcrumb, viewer a
   expect(screen.getByRole('group', { name: 'Filters' })).toContainElement(screen.getByRole('combobox', { name: 'Status' }));
 });
 
-/* The CEO sees on Waits for me what agents ask the people the CEO decides for too, as the assistant CEO's question, and the
-   cards Hornhoof kept: the count beside it is what the page shows. */
+/* Both assigned requests and kept cards count toward the personal queue. */
 it('counts on Waits for me everything the page shows under it', async () => {
   shell('/tasks?show=waits', {
     'GET /api/requests': [200, decisions([{
-      id: 'r2', text: 'Which header?', kind: 'question', task: { ...LOGIN, department: LOGIN.department }, ownerPersonId: 'p-assistant', canAnswer: true,
+      id: 'r2', text: 'Which header?', kind: 'question', task: { ...LOGIN, department: LOGIN.department }, ownerPersonId: IVAN.id, canAnswer: true,
       agent: BRUNO, commit: null, commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: LOGIN.createdAt,
     }])],
     'GET /api/wait-cards': [200, { cards: [{ id: 'c1', about: 'late', taskId: null, number: null, kind: null, level: null, at: LOGIN.createdAt, turn: null, tag: null }], next: null }],
@@ -690,16 +689,15 @@ describe('what waits for people', () => {
   const routes = { 'GET /api/org': [200, WITH_THEO], 'GET /api/requests': [200, decisions([FOR_THEO, FOR_IVAN, FOR_ANYONE])] };
   const articles = (region: HTMLElement) => within(region).getAllByRole('article').map(a => a.getAttribute('aria-label'));
 
-  it("leaves a question asked of another person by name out of the viewer's own list and count, and keeps the rest", async () => {
+  it("keeps shared decisions assigned to another person off the viewer's own list and count", async () => {
     shell('/tasks?show=waits', routes);
     const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
-    await within(waiting).findByText('Which header?');
+    await within(waiting).findByText('How much may a refund be?');
     expect(articles(waiting)).toEqual(['#23 Refund button']);
-    expect(within(waiting).getByRole('button', { name: /Which header/, expanded: false })).toBeInTheDocument();
+    expect(waiting).not.toHaveTextContent('Which header?');
     expect(waiting).not.toHaveTextContent('Which bank for the cards?');
-    /* The refund button's question and the login page, which waits for Ivan and asks a question too, once. */
     const side = screen.getByRole('navigation', { name: 'Task lists' });
-    expect(within(side).getByRole('button', { name: 'Waits for me 2' })).toBeInTheDocument();
+    expect(within(side).getByRole('button', { name: 'Waits for me 1' })).toBeInTheDocument();
   });
 
   it("does not show another person's named question as the CEO's own task wait, even with an older task summary", async () => {
@@ -742,7 +740,7 @@ describe('what waits for people', () => {
   it('opens one queue card, moves a deferred card to the end, and advances on an accepted answer', async () => {
     const user = userEvent.setup();
     const third = asked('r-third', PAY, 'Which currency?', {});
-    const received = [FOR_IVAN, FOR_ANYONE, third];
+    const received = [FOR_IVAN, { ...FOR_ANYONE, ownerPersonId: IVAN.id }, third];
     let finishRefresh!: () => void;
     const refresh = new Promise<void>(resolve => { finishRefresh = resolve; });
     let answered = false;
@@ -842,7 +840,7 @@ describe('what waits for people', () => {
     const external = { ...LOGIN, time: { ...LOGIN.time!, waitsOn: LOGIN.time!.waitsOn.map(wait => ({ ...wait, event: 'ceo' as const })) } };
     shell('/tasks?show=waits', { ...routes, 'GET /api/tasks?status=all': [200, { tasks: [external, REFUND, FORM, PAY] }] });
     const side = await screen.findByRole('navigation', { name: 'Task lists' });
-    await screen.findByText('Which header?');
+    await screen.findByText('How much may a refund be?');
     await user.click(within(side).getByRole('button', { name: 'Waiting for people 3' }));
     expect(screen.getByRole('heading', { level: 1, name: 'Waiting for people' })).toBeInTheDocument();
     const people = screen.getByRole('region', { name: 'Waiting for people' });

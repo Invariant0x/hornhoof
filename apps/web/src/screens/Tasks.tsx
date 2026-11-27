@@ -136,7 +136,7 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
 };
 
 /* What waits lists the decisions of the person picked, or with none the viewer's own. */
-const decisionsOfWho = (personId: string | null): DecisionsOf => personId ? { person: personId } : 'viewer';
+const decisionsOfWho = (personId: string | null, viewer: string): DecisionsOf => personId ? { person: personId } : { viewer };
 
 const shownNone = (s: ShownDecisions) => !s.requests.length && !s.proposals.length && !s.merges.length;
 
@@ -310,7 +310,7 @@ function PersonalWaitList({ shown, cards, personId, tasks, recipient, onCardsSee
 }
 
 function WaitingForYouBody({ decisions, personId, queue, kept, ...rest }: PersonalWaiting) {
-  const shown = shownDecisions(decisions, decisionsOfWho(personId));
+  const shown = shownDecisions(decisions, decisionsOfWho(personId, rest.viewerId));
   const cards = keptShown(kept, personId);
   if (queue && !personId) return <QueueDeck shown={shown} cards={cards} {...rest} />;
   return <PersonalWaitList shown={shown} cards={cards} personId={personId} {...rest} />;
@@ -790,7 +790,7 @@ export function Tasks({ me, place: asked, onPlace, decisions, decisionsFailure, 
         tasks={all}
         onOpenAgent={onOpenAgent}
         counts={{
-          waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf)), waitsOnWho, keptShown(kept, decisionsOf)),
+          waits: waitsCount(shownDecisions(decisions, decisionsOfWho(decisionsOf, me.person.id)), waitsOnWho, keptShown(kept, decisionsOf)),
           people: peopleCount(decisions, waitsOnPeople, company),
           failures: failures.length + machinesAway.filter(machine => !machine.back).length + copySchemaFailures.length + copyGaveUp.length + machinesLow.length + githubLimits.length,
           mine: own.tasks.length,
