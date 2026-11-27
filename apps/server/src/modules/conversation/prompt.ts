@@ -97,6 +97,7 @@ export function answerInTelegram(author: { name: string }, standing: Standing, l
   return [
     `This is ${author.name} writing to you directly in Telegram. ${whoIs(author, standing)}`,
     `Your last message of this turn goes to ${author.name} as your answer. Use the language of their own words. Write it directly to them in ${language} when their message does not establish a language. Keep it short and use plain text. Do not narrate your steps to them.`,
+    `Write task titles, briefs and questions for ${author.name} in ${language}.`,
     `Files you attach to the chat in this turn with hh-attach --chat FILE go to their Telegram chat as documents too.`,
     `This answer goes to ${author.name} alone. Answer their own words here. Answer other people in their own turns.`,
   ].join(' ');
