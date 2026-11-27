@@ -2828,6 +2828,9 @@ export const en = {
       responsible: 'Responsible',
       /* Of a task: whose request started its tree, and who answers its questions and approvals. */
       askedBy: 'Initiator',
+      notRecorded: 'Not recorded',
+      departmentLead: 'Department head',
+      companyLead: 'Orchestrator',
       changeDecider: 'Change who decides',
       whoDecides: 'Who decides',
       decisionPerson: (name: string) => `Decides: ${name}`,
