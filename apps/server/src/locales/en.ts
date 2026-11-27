@@ -69,6 +69,7 @@ export const en = {
 
   /* The short line a notice carries beside its source, for the person who reads it in the window of an employee. */
   notices: {
+    lowDisk: (machine: string) => `${machine}: low on disk space`,
     marked: { read: 'read', done: 'done' },
     machineNoName: 'a machine with no name',
     releaseCi: 'release CI',

@@ -279,7 +279,8 @@ describe('the keeper', () => {
     expect(page.status).toBe(503);
     expect(page.headers['retry-after']).toBe('10');
     expect(page.headers['content-type']).toBe('text/html; charset=utf-8');
-    expect(page.body).toContain('<p>Updating</p>');
+    expect(page.body).toContain('role="status"');
+    expect(page.body).toContain('<span class="boot-label">Updating…</span>');
     expect(page.body).not.toMatch(/[А-Яа-яЁё]/);
 
     statusSays(dir, 'done', 'finished');

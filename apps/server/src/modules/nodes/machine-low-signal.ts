@@ -1,3 +1,4 @@
+import { saying } from '../../locales/index.js';
 import type { DiskReport } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -105,7 +106,7 @@ async function signalOperationsLow(ctx: Ctx, companyId: string, cards: MachineLo
         message: {
           personId: null,
           text: prompt,
-          notification: { source: 'machine', tasks: [], detail: { en: `${target.label}: low on disk space`, ru: `${target.label}: мало места на диске` } },
+          notification: { source: 'machine', tasks: [], detail: saying(words => words.notices.lowDisk(target.label)) },
         },
       }),
     );
