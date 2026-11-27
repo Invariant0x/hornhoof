@@ -5,7 +5,7 @@ import { departments, notebookNotes } from '../../db/schema.js';
 /* A deletion changes a book too, even when its last remaining note is older. */
 const changedSince = (since: Date | null) => since ? or(gt(notebookNotes.updatedAt, since), gt(notebookNotes.removedAt, since)) : undefined;
 
-type Collector = { roleKey: string | null; companyId: string; departmentId: string | null };
+type Collector = { roleKey?: string | null; companyId: string; departmentId?: string | null };
 
 async function isCollector(db: Db, agent: Collector): Promise<boolean> {
   if (agent.roleKey !== 'OPS-BUGS' || !agent.departmentId) return false;
