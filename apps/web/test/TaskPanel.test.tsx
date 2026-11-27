@@ -86,6 +86,25 @@ describe('the simple task card', () => {
     expect(card.getAllByRole('button')).toHaveLength(4);
   });
 
+  it('changes the named recipient of one question without editing the accountable person or executor', async () => {
+    const user = userEvent.setup();
+    const request = { ...REQUESTS[0]!, task: TASK_DETAIL, canReaddress: true, namedRecipient: 'p1' };
+    const task = { ...TASK_DETAIL, responsible: { id: 'p2', name: 'Maria' }, mayAssignQuestions: true };
+    const calls = shell({
+      'GET /api/tasks/t12': [200, { task }],
+      'GET /api/requests': [200, decisions([request])],
+      'PUT /api/tasks/t12/question-recipient': [200, { ok: true }],
+    });
+    const panel = within(await openTask(user));
+    expect(panel.getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Maria');
+    expect(panel.getByRole('definition', { name: 'Does the work' })).toHaveTextContent('Bruno');
+    expect(panel.getByText('Decides: Ivan')).toBeVisible();
+    await user.click(panel.getByText('Change who decides'));
+    await user.selectOptions(panel.getByRole('combobox', { name: 'Who decides' }), 'p2');
+    await user.click(panel.getByRole('button', { name: 'Save' }));
+    expect(calls).toContainEqual({ method: 'PUT', path: '/api/tasks/t12/question-recipient', body: { request: request.id, expected: 'p1', to: 'p2' } });
+  });
+
   it('names the agent who started the task and the department head covering unassigned work', async () => {
     const user = userEvent.setup();
     shell({ 'GET /api/tasks/t12': [200, { task: {

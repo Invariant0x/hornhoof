@@ -1,3 +1,4 @@
+import { canReaddress, readdress } from './request-recipient.js';
 import { TASK_PRIORITIES } from '@hornhoof/protocol';
 import { idOnly, only } from '../../db/selections.js';
 import { turnCounts } from './turn-progress.js';
@@ -241,6 +242,8 @@ function requestViews(mine: Decisions['requests'], lines: Awaited<ReturnType<typ
     task: { id: lines[i]!.id, number: lines[i]!.number, title: lines[i]!.title, department: lines[i]!.department },
     ownerPersonId: r.ownerPersonId,
     canAnswer: r.canAnswer,
+    canReaddress: canReaddress(r.request),
+    namedRecipient: r.request.recipientPersonId,
     decidedBy: decidedByView(r.decidedBy, places),
   }));
 }
@@ -318,7 +321,8 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
      the revision an edit names. */
   const detail = async (me: Person, task: Task) => {
     const viewer = await viewerOf(db, me);
-    return { ...(await detailFor(ctx, viewer, task)), mayPause: await runsDepartment(db, me, task.departmentId), mayHideSecret: !me.via && !me.assistant && await runsDepartment(db, me, task.departmentId), mayEdit: actsOnTask(viewer, task), version: task.version, revision: task.trackerRevision };
+    const manages = await runsDepartment(db, me, task.departmentId);
+    return { ...(await detailFor(ctx, viewer, task)), mayPause: manages, mayAssignQuestions: manages && !me.via && !me.assistant, mayHideSecret: !me.via && !me.assistant && manages, mayEdit: actsOnTask(viewer, task), version: task.version, revision: task.trackerRevision };
   };
 
   /* The departments whose tasks this person reads, for the Tasks screen to choose from: every one of the company. mine: one
@@ -496,6 +500,14 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /* The CEO or the CEO delegate stops work that should wake nobody, and resumes it; the engine checks who may. */
+  app.put('/api/tasks/:id/question-recipient', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const change = z.strictObject({ request: z.uuid(), expected: z.uuid().nullable(), to: z.uuid() }).parse(req.body);
+    await readdress(ctx, me, await changed(me, id), change);
+    return { ok: true };
+  });
+
   app.put('/api/tasks/:id/paused', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);

@@ -16,7 +16,7 @@ import { Busy, Hold, LoadState, noneYet, useHeldRows, useLoad, type Load, type L
 import { CopyGaveUps, CopySchemaFailures, MachineAway } from '../ui/MachineAway';
 import { MachineLow } from '../ui/MachineLow';
 import { MergeCard } from '../ui/MergeCard';
-import { namedReadOnly, Requests, wordsAnswer } from '../ui/Requests';
+import { namedReadOnly, requestPreview, Requests, wordsAnswer } from '../ui/Requests';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { GoalForm, PipelineForm, TrackerNewTask } from '../ui/TrackerForms';
@@ -211,10 +211,11 @@ function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOp
 
 function NamedQuestionRow({ request, person, onOpenTask }: { request: WaitingRequest; person?: PersonRef | null; onOpenTask: (id: string) => void }) {
   const t = useT();
+  const { language } = useLanguage();
   return (
     <article className="entry wait-question" aria-label={taskTitle(request.task)}>
       <div className="wait-question-copy">
-        <p className="wait-question-text" dir="auto">{request.text}</p>
+        <p className="wait-question-text" dir="auto">{requestPreview(request, language)}</p>
         <div className="wait-meta">
           <bdi>{t.tasks.queue.asked}</bdi>
           {person && <PersonMark person={person} decorative />}
@@ -248,13 +249,14 @@ function QueueDeck({ shown, allTasks, tasks, cards, recipient, onCardsSeen, onDe
   onCardsSeen: () => void;
 }) {
   const t = useT();
+  const { language } = useLanguage();
   const deferButton = (defer: () => void) => <div className="entry-actions"><button className="btn ghost" type="button" onClick={defer}>{t.tasks.queue.defer}</button></div>;
   const byId = new Map(allTasks.map(task => [task.id, task]));
   const items: (WaitQueueEntry & ReturnType<typeof queueOrder>)[] = [
     ...shown.requests.map(request => ({
       ...queueOrder(request.at, byId.get(request.task.id)),
       id: `request:${request.id}`, title: taskTitle(request.task), icon: requestIcon[request.kind],
-      text: request.kind === 'stuck' ? t.tasks.stuckText(request.agent.name, request.task.number) : request.text,
+      text: request.kind === 'stuck' ? t.tasks.stuckText(request.agent.name, request.task.number) : requestPreview(request, language),
       meta: <><bdi>{request.agent.name}</bdi><span aria-hidden="true">·</span><bdi dir="ltr">#{request.task.number}</bdi><span aria-hidden="true">·</span><bdi>{age(t, request.at)}</bdi></>,
       show: (done: () => void, defer: () => void) => <Requests requests={[request]} onChanged={queueDone(done, onDecisionsChanged)} onDefer={defer} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} viewerId={viewerId} />,
     })),

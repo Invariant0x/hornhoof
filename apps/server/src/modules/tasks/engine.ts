@@ -1206,7 +1206,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     const [request] = await tx
       .update(requests)
       .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy, ...audit, ...(orchestrator ? { answeredByAgentId: orchestrator } : {}), ...recordedAudit(recorded), answeredByAssistantId: assistant ?? null, answeredAt: new Date() })
-      .where(and(eq(requests.id, requestId), eq(requests.status, 'open')))
+      .where(and(eq(requests.id, requestId), eq(requests.status, 'open'), found.recipientPersonId === null ? isNull(requests.recipientPersonId) : eq(requests.recipientPersonId, found.recipientPersonId)))
       .returning();
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
     await endRequest(tx, request, status, answerer(answeredBy, actor));

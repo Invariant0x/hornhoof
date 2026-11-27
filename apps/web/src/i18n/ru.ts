@@ -2807,6 +2807,8 @@ export const ru: Messages = {
       facts: 'Факты',
       responsible: 'Ответственный',
       askedBy: 'Инициатор',
+      changeDecider: 'Изменить того, кто решает',
+      whoDecides: 'Кто решает',
       decisionPerson: name => `Решает: ${name}`,
       queue: 'Ждет',
       queueText: (ahead, openTurn) => `${ahead === 1 ? 'Следующего хода' : ahead === 2 ? 'Хода после следующего' : `Хода через ${ahead} ${plural('ru', ahead, { one: 'ход', few: 'хода', many: 'ходов', other: 'хода' })}`}${openTurn === null ? '' : `, после хода ${openTurn}`}`,
@@ -2888,6 +2890,7 @@ export const ru: Messages = {
       passed: (from: string, to: string) => `${from} больше не имеет доступа сюда, поэтому теперь отвечает ${to}.`,
       goalCreated: (by: string) => `${by} поставил цель`,
       fields: {
+        decisionRecipient: 'того, кто отвечает на вопрос',
         priority: 'приоритет',
         title: 'название', brief: 'краткое описание', why: 'зачем', goal: 'цель', responsible: 'ответственного', due: 'срок', pipeline: 'конвейер',
         stage: 'этап', parent: 'большую цель', target: 'цель в числах', current: 'где цель сейчас', unit: 'в чем считаем',
