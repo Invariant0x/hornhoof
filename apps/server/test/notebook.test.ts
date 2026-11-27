@@ -238,6 +238,8 @@ describe("a department's notebook", () => {
     expect(now.text).toContain('## Department notebook');
     expect(now.text).toContain('[#1] Tests first.');
     const method = now.parts.find(p => p.id === 'hh-notebook')!.text;
+    expect(method).toContain('read it back before giving the person its note number');
+    expect(method).toContain('include the current rule in the task brief');
     expect(method).toMatch(/After compaction, read the relevant notebook with "notebook" rather than guessing/);
     expect(now.text).toContain(method);
     /* A note does not start its program again: it reads the notebook with its tool. */
