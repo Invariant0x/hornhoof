@@ -37,11 +37,11 @@ function WorkLabels({ task }: { task: TaskDetail }) {
   return labels.length > 0 && <p className="muted">{labels.join(', ')}</p>;
 }
 
-function QuestionRecipient({ request, org, refresh }: { request: WaitingRequest; org: Org | null; refresh: () => void }) {
+function QuestionRecipient({ request, org, refresh, current }: { request: WaitingRequest; org: Org | null; refresh: () => void; current: { id: string; name: string } }) {
   const t = useT();
   const [picked, setPicked] = useState(request.ownerPersonId);
   const { busy, failure, send } = useSend(refresh);
-  const people = responsibleChoices(org, request.task.department?.id ?? null);
+  const people = responsibleChoices(org, request.task.department?.id ?? null, current);
   const names = t.tracker.card;
   return <details className="req-more">
     <summary>{names.changeDecider}</summary>
@@ -60,12 +60,20 @@ function QuestionRecipient({ request, org, refresh }: { request: WaitingRequest;
   </details>;
 }
 
+function QuestionDestination({ request, org, refresh, editable }: { request: WaitingRequest; org: Org | null; refresh: () => void; editable?: boolean }) {
+  const t = useT();
+  const current = mapPeople(org).find(person => person.id === request.ownerPersonId) ?? { id: request.ownerPersonId, name: t.tasks.someone };
+  return <>
+    <small>{t.tracker.card.decisionPerson(current.name)}</small>
+    {editable && request.canReaddress && <QuestionRecipient key={current.id} current={current} request={request} org={org} refresh={refresh} />}
+  </>;
+}
+
 function TaskWaitingSection({ waiting, org, onOpen, onChanged, inline, canAssign }: { canAssign?: boolean; waiting: Waiting; org: Org | null; onOpen: (id: string) => void; onChanged: () => void; inline?: boolean }) {
   const t = useT();
   const requests = inline ? waiting.requests.filter(request => request.canAnswer || namedReadOnly(request)) : waiting.requests.map(request => ({ ...request, canAnswer: false }));
   if (requests.length === 0) return null;
   const heading = inline ? t.tasks.waitingHere : t.tasks.questions;
-  const people = mapPeople(org);
 
   return (
     <section className={inline ? 'tp-wait tp-question' : 'tp-wait'} aria-label={heading}>
@@ -74,8 +82,7 @@ function TaskWaitingSection({ waiting, org, onOpen, onChanged, inline, canAssign
         requests={requests}
         inline={inline}
         viewerId={waiting.viewerId}
-        recipientEditor={canAssign ? request => request.canReaddress && <QuestionRecipient key={request.ownerPersonId} request={request} org={org} refresh={waiting.onRequestsChanged} /> : undefined}
-        waitsFor={id => t.tracker.card.decisionPerson(people.find(person => person.id === id)?.name ?? t.tasks.someone)}
+        destination={request => <QuestionDestination request={request} org={org} refresh={waiting.onRequestsChanged} editable={canAssign} />}
         onChanged={() => {
           waiting.onRequestsChanged();
           onChanged();
@@ -195,8 +202,20 @@ function departmentLead(task: TaskLine, org?: Org | null): string | undefined {
   return org?.departments.find(dept => dept.id === department)?.employees.find(employee => employee.kind === 'head')?.name;
 }
 
+type TaskWithCreator = TaskLine & Partial<Pick<TaskDetail, 'createdBy'>>;
+
+function TaskPeople({ task, org }: { task: TaskWithCreator; org?: Org | null }) {
+  const t = useT();
+  const words = t.tracker.card;
+  return <>
+    <Fact name={words.askedBy}><Answers person={task.askedBy ?? task.createdBy} /></Fact>
+    <Fact name={words.responsible}>{task.responsible ? <Answers person={task.responsible} /> : <bdi>{departmentLead(task, org) ?? t.tracker.nobody}</bdi>}</Fact>
+    <Fact name={words.executor}><bdi>{doerOf(task)?.name ?? t.tracker.nobody}</bdi></Fact>
+  </>;
+}
+
 /* Who answers for it and who does it, its pipeline and its due day with how long it is in its status, a name beside each. */
-function CardFacts({ task, status, org }: { task: TaskLine & Partial<Pick<TaskDetail, 'createdBy'>>; org?: Org | null; status: ReturnType<typeof humanStatus> }) {
+function CardFacts({ task, status, org }: { task: TaskWithCreator; org?: Org | null; status: ReturnType<typeof humanStatus> }) {
   const t = useT();
   const { language } = useLanguage();
   const { pipelines } = usePipelines(!!task.pipelineId);
@@ -208,10 +227,8 @@ function CardFacts({ task, status, org }: { task: TaskLine & Partial<Pick<TaskDe
   return (
     <div role="group" aria-label={words.facts}>
       <dl className="tp-card-facts">
-        <Fact name={words.askedBy}><Answers person={task.askedBy ?? task.createdBy} /></Fact>
-        <Fact name={words.responsible}>{task.responsible ? <Answers person={task.responsible} /> : <bdi>{departmentLead(task, org) ?? t.tracker.nobody}</bdi>}</Fact>
+        <TaskPeople task={task} org={org} />
         <QueueFact task={task} />
-        <Fact name={words.executor}><bdi>{doerOf(task)?.name ?? t.tracker.nobody}</bdi></Fact>
         {pipeline && <Fact name={words.pipeline}>{stage ? words.pipelineStage(pipeline.name, stage.name) : pipeline.name}</Fact>}
         {due ? <Fact name={words.due}><DueDay due={due} />{inStatus && ` · ${inStatus}`}</Fact> : inStatus && <Fact name={words.time}>{inStatus}</Fact>}
       </dl>
