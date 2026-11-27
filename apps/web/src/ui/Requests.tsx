@@ -392,7 +392,7 @@ function RequestFeedback({ busy, failure }: { busy: boolean; failure: unknown })
    Its answers show only to a person the server lets take it; anyone else reads who takes it. */
 export const namedReadOnly = (request: WaitingRequest) => !request.canAnswer && request.decidedBy?.kind === 'named_person';
 
-function RequestItem({ request, onDone, inline, onDefer, viewerId, ...shared }: Shared & { request: WaitingRequest; onDone: () => void }) {
+function RequestItem({ request, onDone, destination, inline, onDefer, viewerId, ...shared }: Omit<Shared, 'destination'> & { destination?: ReactNode; request: WaitingRequest; onDone: () => void }) {
   const t = useT();
   const [text, setText] = useState(() => draftsByRequest.get(request.id) ?? '');
   const { busy, failure, send } = useRequestSend(request.id, onDone);
@@ -418,7 +418,7 @@ function RequestItem({ request, onDone, inline, onDefer, viewerId, ...shared }: 
     <article className={`req req-${request.kind}`} aria-label={`#${task.number} ${task.title}`} aria-busy={busy}>
       {inline ? <header><RequestAuthor who={who} request={request} /></header> : <RequestHeader who={who} request={request} onDefer={onDefer} {...shared} />}
       <RequestWords request={request} said={said} inline={inline} />
-      {shared.destination?.(request)}
+      {destination}
       <RequestMaterialsZone items={manifest.common} failure={manifestFailure} onOpen={openViewer} heading={onDefer ? t.tasks.queue.materials : undefined} />
       <RequestForm
         request={request}
@@ -492,11 +492,11 @@ function Commit({ request }: { request: WaitingRequest }) {
   );
 }
 
-export function Requests({ requests, onChanged, ...shared }: Shared & { requests: WaitingRequest[]; onChanged: () => void }) {
+export function Requests({ requests, onChanged, destination, ...shared }: Shared & { requests: WaitingRequest[]; onChanged: () => void }) {
   return (
     <div className="reqs">
       {requests.map(r => (
-        <RequestItem key={r.id} request={r} onDone={onChanged} {...shared} />
+        <RequestItem key={r.id} request={r} onDone={onChanged} destination={destination?.(r)} {...shared} />
       ))}
     </div>
   );

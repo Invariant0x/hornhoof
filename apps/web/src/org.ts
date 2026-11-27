@@ -64,6 +64,8 @@ export function mapPeople(org: Org | null): MapPerson[] {
   return all.filter(p => !seen.has(p.id) && !!seen.add(p.id));
 }
 
+export const departmentHead = (department?: Pick<Department, 'employees'>) => department?.employees.find(employee => employee.kind === 'head');
+
 function reachesDept(d: Department, p: Org['people'][number]): boolean {
   const hasId = (id: string) => d.id === id || d.products.some(pr => pr.id === id);
   return p.access.departments.some(a => hasId(a.id)) || p.access.teams.some(t => hasId(t.departmentId));

@@ -22,11 +22,11 @@ export async function hasNotebookChanges(db: Db, collector: Collector, since: Da
 }
 
 /* Only the revisions are shared. Existing notebook permissions determine who can read and edit their contents. */
-export async function notebookReviews(db: Db, collector: Collector, since: Date | null) {
+export async function notebookReviews(db: Db, collector: Collector, since: Date, baseline = false) {
   if (!await isCollector(db, collector)) return {};
   const revision = sql`max(greatest(${notebookNotes.updatedAt}, ${notebookNotes.removedAt}))`.mapWith(notebookNotes.updatedAt);
   const books = await db.select({ departmentId: notebookNotes.departmentId, revision }).from(notebookNotes)
-    .where(and(eq(notebookNotes.companyId, collector.companyId), changedSince(since)))
+    .where(and(eq(notebookNotes.companyId, collector.companyId), changedSince(baseline ? null : since)))
     .groupBy(notebookNotes.departmentId).orderBy(asc(notebookNotes.departmentId));
   return { notebookReviews: books };
 }

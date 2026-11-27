@@ -536,7 +536,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           installed: installed.map(({ value, example: _, ...i }) => ({ command: value, ...i })),
           stops,
           undelivered,
-          ...await notebookReviews(db, job, notebookBaseline ? null : since),
+          ...await notebookReviews(db, job, since, notebookBaseline),
         });
       },
     );

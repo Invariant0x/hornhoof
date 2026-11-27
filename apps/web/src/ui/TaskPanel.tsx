@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } fr
 import { api } from '../api';
 import { HIDDEN } from '@hornhoof/protocol/redaction';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
-import { mapPeople, useOrg } from '../org';
+import { departmentHead, mapPeople, useOrg } from '../org';
 import { routePath } from '../routes';
 import { knownLine, knownSubtasks, placeName, useGoals, usePipelines, useTask } from '../tasks';
 import { doerOf, graphPath } from '../tracker';
@@ -197,9 +197,9 @@ function QueueFact({ task }: { task: TaskLine }) {
 }
 
 function departmentLead(task: TaskLine, words: Messages['tracker']['card'], org?: Org | null): string {
-  const department = task.department?.id;
-  if (!department) return org?.orchestrator?.name ?? words.companyLead;
-  return org?.departments.find(dept => dept.id === department)?.employees.find(employee => employee.kind === 'head')?.name ?? words.departmentLead;
+  if (!task.department) return org?.orchestrator?.name ?? words.companyLead;
+  const id = task.department.id;
+  return departmentHead(org?.departments.find(dept => dept.id === id))?.name ?? words.departmentLead;
 }
 
 type TaskWithCreator = TaskLine & Partial<Pick<TaskDetail, 'createdBy'>>;
