@@ -1,3 +1,4 @@
+import type { TelegramReply } from '../telegram/api.js';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -35,7 +36,7 @@ const MessageBody = z
 
 /* Where a person's message came from when not from the agent's window: the bot it came through, the chat its answer goes
    back to and the update it was. */
-type TelegramOrigin = { bot: string; chat: number; update: number; lang: BotLang };
+type TelegramOrigin = { bot: string; chat: number; update: number; lang: BotLang; reply?: TelegramReply };
 /* The message of the person's assistant this is, by the id the assistant was given for it. own: to the assistant's own
    agent, which thinks for it. fresh: what that agent reads instead when its turn starts a new session. */
 type AssistantOrigin = { message: string; own?: boolean; fresh?: string };
@@ -53,6 +54,10 @@ function byAssistant(me: Person & { assistant: NonNullable<Person['assistant']> 
 /* from: the machine of the company the person sits at as they write in the window; none through Telegram or an assistant. */
 type Origins = { telegram?: TelegramOrigin; assistant?: AssistantOrigin; standing?: Standing; from?: WrittenFrom };
 
+function telegramQuote(reply?: TelegramReply): string {
+  return reply ? `\n\n[Reply to Telegram message ${reply.id}] ${JSON.stringify(reply.text)}` : '';
+}
+
 function writtenBy(me: Person, text: string, pictures: MessagePicture[], { telegram, assistant, standing, from }: Origins = {}) {
   if (me.via) return {
     actor: { agentId: me.via },
@@ -63,7 +68,7 @@ function writtenBy(me: Person, text: string, pictures: MessagePicture[], { teleg
     const { lang, ...origin } = telegram;
     return {
       actor: { personId: me.id },
-      turn: { prompt: `${turnPrompt(me, withPictures(text, pictures))}\n\n${answerInTelegram(me, standing, lang)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram: origin, ...(pictures.length ? { pictures } : {}) } },
+      turn: { prompt: `${turnPrompt(me, withPictures(text, pictures))}${telegramQuote(origin.reply)}\n\n${answerInTelegram(me, standing, lang)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram: origin, ...(pictures.length ? { pictures } : {}) } },
     };
   }
   /* An employee is told what the person is to it, as its company tool does not show everyone who runs its department. */
@@ -90,10 +95,11 @@ const NOT_READY = 'This employee cannot answer right now. See the window for wha
 async function requireTakes(ctx: Ctx, me: Person, agent: AgentRow, task: Written['task']): Promise<void> {
   const state = await agentState(ctx, agent.id);
   if (state.ready) return;
-  if (agent.kind === 'orchestrator') throw new ApiError(409, 'conflict', 'The orchestrator cannot answer right now. See the window for what to do.', 'orchestrator_not_ready');
-  if (!me.via) throw new ApiError(409, 'conflict', NOT_READY, 'agent_not_ready');
+  const details = { undelivered: state.reason ?? 'cannot_run' };
+  if (agent.kind === 'orchestrator') throw new ApiError(409, 'conflict', 'The orchestrator cannot answer right now. See the window for what to do.', 'orchestrator_not_ready', details);
+  if (!me.via) throw new ApiError(409, 'conflict', NOT_READY, 'agent_not_ready', details);
   if (state.reason === 'machine_offline' && (await reconnecting(ctx, agent.id))) return;
-  const refusal = new ApiError(409, 'conflict', NOT_READY, 'agent_not_ready', { undelivered: state.reason ?? 'cannot_run' });
+  const refusal = new ApiError(409, 'conflict', NOT_READY, 'agent_not_ready', details);
   throw await refusedMessage(ctx, { companyId: me.companyId, agentId: me.via }, { recipient: agent.id, task }, refusal);
 }
 
@@ -114,10 +120,17 @@ export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input:
     from: me.via ? { kind: 'orchestrator' } : { kind: 'person', id: me.id },
     to: agent.kind === 'orchestrator' ? { kind: 'orchestrator' } : { kind: 'department', id: agent.departmentId ?? '' },
   });
-  /* Once the words are on their way, a person's words answer the one question the agent waits on them for, when it is
-     clear which; the orchestrator answers requests with its own tool. */
-  if (!me.via) await wakeAll(ctx, await answerDirectly(ctx, me.id, agent.id, input.text, { assistant: me.assistant?.id, task: input.task }));
+  await answerFromPerson(ctx, me, agent.id, input);
   return jobId;
+}
+
+/* Only a person's own words can settle an open question. */
+async function answerFromPerson(ctx: Ctx, me: Person, agentId: string, input: Written): Promise<void> {
+  if (me.via) return;
+  const wakes = await answerDirectly(ctx, me.id, agentId, input.text, {
+    assistant: me.assistant?.id, task: input.task, reply: input.telegram?.reply?.text,
+  });
+  await wakeAll(ctx, wakes);
 }
 
 /* Every agent's window: its conversation, what it is doing, writing to it and stopping it. The orchestrator is for people

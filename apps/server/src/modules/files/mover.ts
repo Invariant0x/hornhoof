@@ -1,3 +1,4 @@
+import { rowsOf } from '../../db/result-rows.js';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { open, rm } from 'node:fs/promises';
@@ -29,8 +30,6 @@ const CLEAR_BATCH = 20;
 const MAX_WAITING = 200;
 /* How long one round moves files at most, so the minute round goes on. */
 export const MOVE_BUDGET_MS = 20_000;
-
-const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 
 /* moved: rows named by their stored files; cleared: rows that gave up their bytes; ready: the reconciliation made now, for
    the CEO's yes; roomBack: the size of the database before and after the column went. stays says, once for an app, that the

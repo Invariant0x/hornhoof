@@ -1,3 +1,4 @@
+import { rowsOf } from '../../db/result-rows.js';
 import { sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -11,7 +12,6 @@ import { plainOf } from './seal.js';
 
 /* The company's setting for how many machines keep each file, and how the store stands under it: the CEO's alone. */
 
-const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 type Tx = Pick<Db, 'execute'>;
 
 /* What the machines' areas hold of files at most, each kept on wanted machines, one copy to a machine: the largest

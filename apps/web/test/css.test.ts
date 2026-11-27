@@ -11,11 +11,11 @@ it('reserves a footer row for the version outside the screen and its fixed panel
 /* The footer's row is taken from the screen above it, so a footer that comes and goes moves every window and panel fixed
    there: it hides only for a whole screen, never because a form or a panel opened in one (#1384). The map shows the version
    over its own corner instead (#1590). */
-it('hides the version footer only for a whole screen, the map or a phone', () => {
+it('hides the version footer only for a whole screen, startup, the map or a phone', () => {
   const hiding = RULES.filter(rule => rule.decls.display === 'none').flatMap(rule =>
     rule.selectors.filter(selector => selector.endsWith('.version-mark')).map(selector => `${rule.media ?? 'any width'}: ${selector}`));
   expect(hiding).toEqual([
-    'any width: .app-layout:has(.map-version) > .version-mark',
+    'any width: .app-layout:has(.map-version, > .boot-screen) > .version-mark',
     'any width: body:has(.dview) .version-mark',
     '(max-width: 760px): .version-mark',
   ]);

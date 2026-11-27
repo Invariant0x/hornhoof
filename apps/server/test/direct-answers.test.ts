@@ -112,6 +112,21 @@ describe("a person's words to an agent directly", () => {
     expect(await c.open(site, deck, legal)).toEqual([true, true, false]);
   });
 
+  it('keeps a Telegram reply on the quoted task and records only the new words', async () => {
+    const c = await company();
+    const site = await c.asked('Site', 'Approve the website copy?');
+    const me = await c.person(c.ids.ivan);
+    const send = (update: number, text: string, quote: string) => writeToAgent(c.ctx, me, c.bruno, {
+      text, pictures: [], telegram: { bot: c.bruno.id, chat: 1, update, lang: 'en', reply: { id: 17, text: quote } },
+    });
+    await send(1, 'Yes to the deck.', 'Deck for #999');
+    expect(await c.open(site)).toEqual([true]);
+    const { client } = await c.client(c.bruno);
+    expect((await call(client, 'record_answer', { request: site.request.id, words: 'Yes to the deck.' })).isError).toBe(true);
+    await send(2, 'Use the new copy.', `Website copy for #${site.task.number}`);
+    expect(await c.saved(site.request.id)).toMatchObject({ status: 'answered', answer: 'Use the new copy.' });
+  });
+
   it('typed in the terminal close none of several open questions either', async () => {
     const c = await company();
     const { site, deck } = await c.three();

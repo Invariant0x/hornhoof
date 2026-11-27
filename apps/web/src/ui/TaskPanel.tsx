@@ -5,7 +5,7 @@ import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useOrg } from '../org';
 import { routePath } from '../routes';
 import { knownLine, knownSubtasks, placeName, useGoals, usePipelines, useTask } from '../tasks';
-import { graphPath } from '../tracker';
+import { doerOf, graphPath } from '../tracker';
 import { humanStatus, isClosed } from '../task-tree';
 import type { GoalView, Org, TaskDetail, TaskLine, TaskStatus, WaitingRequest } from '../types';
 import { Field } from './Field';
@@ -163,8 +163,16 @@ function QueueFact({ task }: { task: TaskLine }) {
   return task.queue ? <Fact name={words.queue}>{words.queueText(task.queue.ahead, task.queue.openTurn)}</Fact> : null;
 }
 
+function responsibleAgent(task: TaskLine, org?: Org | null): string | undefined {
+  const assigned = doerOf(task);
+  if (assigned) return assigned.name;
+  const department = task.department?.id;
+  if (!department) return org?.orchestrator?.name;
+  return org?.departments.find(dept => dept.id === department)?.employees.find(employee => employee.kind === 'head')?.name;
+}
+
 /* Who answers for it and who does it, its pipeline and its due day with how long it is in its status, a name beside each. */
-function CardFacts({ task, status }: { task: TaskLine; status: ReturnType<typeof humanStatus> }) {
+function CardFacts({ task, status, org }: { task: TaskLine & Partial<Pick<TaskDetail, 'createdBy'>>; org?: Org | null; status: ReturnType<typeof humanStatus> }) {
   const t = useT();
   const { language } = useLanguage();
   const { pipelines } = usePipelines(!!task.pipelineId);
@@ -176,10 +184,10 @@ function CardFacts({ task, status }: { task: TaskLine; status: ReturnType<typeof
   return (
     <div role="group" aria-label={words.facts}>
       <dl className="tp-card-facts">
-        <Fact name={words.askedBy}><Answers person={task.askedBy} /></Fact>
+        <Fact name={words.askedBy}><Answers person={task.askedBy ?? task.createdBy} /></Fact>
         <Fact name={words.decides}><Answers person={task.responsible} /></Fact>
         <QueueFact task={task} />
-        <Fact name={words.executor}><bdi>{task.executor?.name ?? task.assignee?.name ?? t.tracker.nobody}</bdi></Fact>
+        <Fact name={words.executor}><bdi>{responsibleAgent(task, org) ?? t.tracker.nobody}</bdi></Fact>
         {pipeline && <Fact name={words.pipeline}>{stage ? words.pipelineStage(pipeline.name, stage.name) : pipeline.name}</Fact>}
         {due ? <Fact name={words.due}><DueDay due={due} />{inStatus && ` · ${inStatus}`}</Fact> : inStatus && <Fact name={words.time}>{inStatus}</Fact>}
       </dl>
@@ -342,6 +350,7 @@ function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: 
             <span aria-hidden="true">…</span>
           </button>
         </div>
+        {task.brief && <p className="tp-brief" dir="auto">{task.brief}</p>}
         <p className="tp-state"><StatusPill state={STATE_CLASS[status]}>{t.tracker.groups[status]}</StatusPill></p>
         {task.why && <p className="tp-why" dir="auto">{task.why}</p>}
         {task.subtasks.length > 0 && <CardBar done={done} total={task.subtasks.length} label={t.tracker.list.subtasks(done, task.subtasks.length)} />}
@@ -350,9 +359,8 @@ function TaskBody({ task, onOpen, onClose, active, onChanged, waiting, leads }: 
         if (next !== 'secret') selection.current = '';
         setView(next);
       }} onClose={closeMenu} onOpen={onOpen} onChanged={onChanged} waiting={waiting} />
-      <CardFacts task={task} status={status} />
+      <CardFacts task={task} status={status} org={org} />
       <GraphFromHere id={task.id} onGraph={leads.onGraph} />
-      {task.brief && <p className="tp-brief" dir="auto">{task.brief}</p>}
       {task.body && <FoldedMarkdown text={task.body} />}
       <Subtasks task={task} onOpen={onOpen} />
       <Relations task={task} onOpen={onOpen} />

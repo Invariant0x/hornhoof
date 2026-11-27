@@ -1,3 +1,4 @@
+import { rowsOf } from '../../db/result-rows.js';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, statfsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,7 +21,6 @@ export const WANT_WAIT_MS = 30_000;
 export const SETTLE_MS = 10_000;
 const WANT_LOOK_MS = 250;
 
-const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 type Tx = Pick<Db, 'execute'>;
 /* The database, or a transaction of it. */
 export type FilesDb = Tx;
