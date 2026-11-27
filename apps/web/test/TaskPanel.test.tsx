@@ -67,11 +67,11 @@ describe('the simple task card', () => {
     expect(pill).toHaveClass('review');
     const facts = card.getByRole('group', { name: 'Facts' });
     /* Whose request it is and who decides are two facts, in this order. */
-    expect(within(facts).getByRole('definition', { name: 'Asked by' })).toHaveTextContent('Oleg');
+    expect(within(facts).getByRole('definition', { name: 'Initiator' })).toHaveTextContent('Oleg');
     expect(within(facts).getByRole('definition', { name: 'Decides' })).toHaveTextContent('Ivan');
     expect(within(facts).queryByRole('definition', { name: 'Waits for' })).not.toBeInTheDocument();
     expect(within(facts).getByRole('definition', { name: 'Decides' }).querySelector('.tr-avatar')).toBeInTheDocument();
-    expect(within(facts).getByRole('definition', { name: 'Executor' })).toHaveTextContent('Bruno');
+    expect(within(facts).getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Bruno');
     expect(within(facts).getByRole('definition', { name: 'Due' })).toHaveTextContent(/^20 Nov · Review for/);
     const subtasks = card.getByRole('region', { name: 'Subtasks' });
     expect(within(subtasks).getByRole('heading', { name: 'Subtasks · 0 of 1' })).toBeInTheDocument();
@@ -84,6 +84,16 @@ describe('the simple task card', () => {
     expect(card.getAllByRole('heading').map(heading => heading.textContent)).toEqual(['Checkout API', 'Subtasks · 0 of 1', 'History']);
     for (const [i, name] of ['Close', '#10 Payments', 'Task actions', 'Graph from here'].entries()) expect(card.getAllByRole('button')[i]).toHaveAccessibleName(name);
     expect(card.getAllByRole('button')).toHaveLength(4);
+  });
+
+  it('names the agent who started the task and the department head covering unassigned work', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: {
+      ...TASK_DETAIL, askedBy: null, createdBy: { kind: 'agent', id: 'b1', name: 'Bruno' }, executor: null, assignee: null,
+    } }] });
+    const facts = within(within(await openTask(user)).getByRole('group', { name: 'Facts' }));
+    expect(facts.getByRole('definition', { name: 'Initiator' })).toHaveTextContent('Bruno');
+    expect(facts.getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Dana');
   });
 
   it.each([
