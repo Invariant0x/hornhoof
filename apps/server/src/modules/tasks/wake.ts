@@ -1,3 +1,4 @@
+import { explanationLanguage } from '../../locales/recipient.js';
 import { isStaged } from '@hornhoof/protocol/echelons';
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -270,7 +271,7 @@ async function explanationText(ctx: Ctx, w: Wake, request: typeof requests.$infe
       ? `Hornhoof stopped waking ${asker} on ${ref} and waits for people to say how it goes on (request ${request.id}). Hornhoof noted: ${request.text}`
       : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${quote(request.text)}${uncheckedNote(request.unchecked)}`;
     text = `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
-      `Resolve ordinary work you can handle using your standing authority. If the question still needs the person's own answer, use explain_request with request ${request.id} in the recipient's language. ` +
+      `Resolve ordinary work you can handle using your standing authority. If the question still needs the person's own answer, use explain_request with request ${request.id}. ${await explanationLanguage(ctx.db, task.companyId, request.recipientPersonId)} ` +
       'Say what the work is for, what they need to supply and what each choice changes. Preserve any required human decision, including the CEO\'s yes for an irreversible deletion.';
   }
   return text;
