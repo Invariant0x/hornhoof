@@ -115,6 +115,16 @@ describe('the simple task card', () => {
     expect(facts.getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Dana');
   });
 
+  it('shows the responsible role and identifies missing provenance on a legacy task', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: {
+      ...TASK_DETAIL, responsible: null, askedBy: null, createdBy: null, department: { id: 'old-dept', name: 'Former team' },
+    } }] });
+    const facts = within(within(await openTask(user)).getByRole('group', { name: 'Facts' }));
+    expect(facts.getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Department head');
+    expect(facts.getByRole('definition', { name: 'Initiator' })).toHaveTextContent('Not recorded');
+  });
+
   it('names the orchestrator for unassigned work outside a department', async () => {
     const user = userEvent.setup();
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, department: null, executor: null, assignee: null } }] });

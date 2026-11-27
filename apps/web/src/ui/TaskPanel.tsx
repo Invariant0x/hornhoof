@@ -169,9 +169,9 @@ export function CardBar({ done, total, label }: { done: number; total: number; l
 }
 
 /* The person who answers for a task or a goal: their mark and their name. */
-export function Answers({ person }: { person: { id: string; name: string } | null | undefined }) {
+export function Answers({ person, empty }: { person: { id: string; name: string } | null | undefined; empty?: string }) {
   const t = useT();
-  return person ? <><PersonMark person={person} decorative /><bdi>{person.name}</bdi></> : <>{t.tracker.nobody}</>;
+  return person ? <><PersonMark person={person} decorative /><bdi>{person.name}</bdi></> : <bdi>{empty ?? t.tracker.nobody}</bdi>;
 }
 
 /* A fact under its name, the name labelling it for screen readers. */
@@ -196,10 +196,10 @@ function QueueFact({ task }: { task: TaskLine }) {
   return task.queue ? <Fact name={words.queue}>{words.queueText(task.queue.ahead, task.queue.openTurn)}</Fact> : null;
 }
 
-function departmentLead(task: TaskLine, org?: Org | null): string | undefined {
+function departmentLead(task: TaskLine, words: Messages['tracker']['card'], org?: Org | null): string {
   const department = task.department?.id;
-  if (!department) return org?.orchestrator?.name;
-  return org?.departments.find(dept => dept.id === department)?.employees.find(employee => employee.kind === 'head')?.name;
+  if (!department) return org?.orchestrator?.name ?? words.companyLead;
+  return org?.departments.find(dept => dept.id === department)?.employees.find(employee => employee.kind === 'head')?.name ?? words.departmentLead;
 }
 
 type TaskWithCreator = TaskLine & Partial<Pick<TaskDetail, 'createdBy'>>;
@@ -208,8 +208,8 @@ function TaskPeople({ task, org }: { task: TaskWithCreator; org?: Org | null }) 
   const t = useT();
   const words = t.tracker.card;
   return <>
-    <Fact name={words.askedBy}><Answers person={task.askedBy ?? task.createdBy} /></Fact>
-    <Fact name={words.responsible}>{task.responsible ? <Answers person={task.responsible} /> : <bdi>{departmentLead(task, org) ?? t.tracker.nobody}</bdi>}</Fact>
+    <Fact name={words.askedBy}><Answers person={task.askedBy ?? task.createdBy} empty={words.notRecorded} /></Fact>
+    <Fact name={words.responsible}><Answers person={task.responsible} empty={departmentLead(task, words, org)} /></Fact>
     <Fact name={words.executor}><bdi>{doerOf(task)?.name ?? t.tracker.nobody}</bdi></Fact>
   </>;
 }
