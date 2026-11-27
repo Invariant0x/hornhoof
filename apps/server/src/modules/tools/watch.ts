@@ -32,6 +32,7 @@ import { OPERATIONS_ROLES } from '../program-operator/staff.js';
 import { registerOperatorTools, registerProgramAccessTools, registerStopTool } from '../program-operator/tools.js';
 import { registerReleaseTool } from '../program-operator/release.js';
 import { nextSection } from './next-section.js';
+import { notebookReviews } from '../notebook/reviews.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 import { watchedTasks } from './watch-tasks.js';
 import { HANG_AFTER_MS, suspectedHangs } from '../tasks/suspected-hangs.js';
@@ -451,9 +452,9 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           'Turns people or Hornhoof stopped on purpose are left out. Also where agents stumbled, each with when and on which task it was seen last: commands and modules ' +
           'a shell or a program said were not installed (the same words read in a file count for nothing), the tools they installed by hand, ' +
           'and the questions and stuck tasks they stopped on for people, with the answer and how their last turn on the task ended.',
-        inputSchema: { hours: z.number().int().min(1).max(72).default(6).describe('How many hours back to read, 1 to 72.') },
+        inputSchema: { hours: z.number().int().min(1).max(72).default(6).describe('How many hours back to read, 1 to 72.'), notebookBaseline: z.boolean().optional().describe('On the first notebook review, include existing books outside the time window.') },
       },
-      async ({ hours }) => {
+      async ({ hours, notebookBaseline }) => {
         const names = await deptNames();
         const reader = await readerOf(ctx, job.agentId);
         const failed = await db
@@ -535,6 +536,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           installed: installed.map(({ value, example: _, ...i }) => ({ command: value, ...i })),
           stops,
           undelivered,
+          ...await notebookReviews(db, job, notebookBaseline ? null : since),
         });
       },
     );

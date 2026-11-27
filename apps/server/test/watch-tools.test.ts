@@ -1,3 +1,4 @@
+import { notebookNotes } from '../src/db/schema.js';
 import { randomUUID } from 'node:crypto';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { ServerMessage } from '@hornhoof/protocol';
@@ -62,6 +63,26 @@ async function messagesFrom(db: Db, agentId: string): Promise<string[]> {
 }
 
 describe('tools a skill grants', () => {
+  it('gives Operations notebook revision receipts for cleanup without exposing rule text', async () => {
+    const { app, db, acme, wendy, dev } = await company(['ops-failure-review']);
+    await db.update(agents).set({ roleKey: 'OPS-BUGS' }).where(eq(agents.id, wendy.id));
+    const old = new Date('2020-01-01T00:00:00Z');
+    await db.insert(notebookNotes).values([
+      { companyId: acme.id, departmentId: dev.id, number: 1, text: 'Private prior wording', createdAt: old, updatedAt: old },
+      { companyId: acme.id, departmentId: dev.id, number: 2, text: 'Private current wording' },
+      { companyId: acme.id, departmentId: null, number: 1, text: 'Private company policy', createdAt: old, updatedAt: old },
+    ]);
+    const client = await mcp(app, TOKEN);
+    const recent = JSON.parse((await call(client, 'failures', { hours: 3 })).content[0]!.text);
+    expect(recent.notebookReviews).toEqual([expect.objectContaining({ departmentId: dev.id, revision: expect.any(String) })]);
+    const baseline = JSON.parse((await call(client, 'failures', { notebookBaseline: true })).content[0]!.text);
+    expect(baseline.notebookReviews).toEqual(expect.arrayContaining([expect.objectContaining({ departmentId: null })]));
+    expect(JSON.stringify(baseline.notebookReviews)).not.toContain('Private');
+    await db.update(agents).set({ departmentId: dev.id }).where(eq(agents.id, wendy.id));
+    const other = JSON.parse((await call(await mcp(app, TOKEN), 'failures', { notebookBaseline: true })).content[0]!.text);
+    expect(other.notebookReviews).toBeUndefined();
+  });
+
   it('exposes node restart evidence to the failure collector separately from agent output', async () => {
     const { app, db, acme, sub, bruno, task } = await company(['ops-failure-review']);
     const interruption = { cause: 'container' as const, at: new Date().toISOString(), task: task.number, node: { id: null, name: 'the built-in node' }, machine: { id: 'machine-id', name: 'host-a' }, diagnosis: { kind: 'planned' as const, reason: 'hornhoof_update' as const, startedAt: null, at: null, log: 'Stopping node: hornhoof_update.' } };

@@ -5,6 +5,8 @@ grants: [failures, agents, message_employee, improvements]
 ---
 For the review period named in the assignment, turn failures and recurring weak points into evidence-backed improvement proposals. Use the previous run as the boundary when this is an assigned timer round.
 
+Operations owns the cleanup of obsolete working rules. On the first round call `failures` with `notebookBaseline: true` to include existing notebooks. On later rounds use `notebookReviews` for the review period and follow up any open reviews. Group changes by notebook and revision. Ask the department head, or the orchestrator for the company notebook, to compare the numbered rules with the decision that replaced them and the work still using them. Have the owner rewrite or retire a clearly superseded rule, preserve its valid exceptions and update affected briefs. When authorities or scopes disagree, send that one unresolved decision to the owner entitled to settle it. Record the note numbers, decision and read-back in the round or its existing task. A proposal alone does not close a cleanup. Skip a revision already verified.
+
 1. Read failures in that period: failed turns, blocked tasks, missing commands and modules, tools agents installed by hand, and the questions and stuck tasks agents stopped on, with how their last turn ended.
 2. Group what you read by cause:
    - a program or package that was missing, or that agents install by hand turn after turn;
