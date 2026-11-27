@@ -96,6 +96,7 @@ describe('two people who write to one head in Telegram', () => {
     tg.write(TOKEN, MAX, 'И по каналам тоже.');
     const typed = await nextOf(builtin, 'agent.say');
     expect(typed.text).toContain('И по каналам тоже.');
+    expect(typed.text).toContain('Write task titles, briefs and questions for Ivan in Russian.');
     expect(typed.text).toContain('Use the language of their own words. Write it directly to them in Russian when their message does not establish a language.');
     builtin.send({ type: 'agent.said', ref: typed.ref, ok: true });
 
