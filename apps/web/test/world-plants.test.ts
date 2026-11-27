@@ -130,6 +130,10 @@ describe('procedural plant placement', () => {
     const passport = parsePlantPassport({ root_point: [128, 250], crown_center: [128, 70], crown_hub: [128, 120], height: 240, crown_width: 190 });
     expect(passport).toEqual({ rootPoint: [128, 250], crownCenter: [128, 70], crownHub: [128, 120], heightPx: 240, crownWidthPx: 190 });
     expect(parsePlantPassport({ root_point: [1, 2] })).toBeNull();
+    const pixels = { root_point: [1, 2], crown_center: [3, 4], height_px: 5, crown_width_px: 6 };
+    expect(parsePlantPassport(pixels)).toMatchObject({ crownHub: [3, 4], heightPx: 5, crownWidthPx: 6 });
+    expect(parsePlantPassport({ ...pixels, height_px: 0 })).toBeNull();
+    expect(parsePlantPassport({ ...pixels, crown_width_px: '6' })).toBeNull();
     expect(parsePlantPassport(null)).toBeNull();
   });
 });
