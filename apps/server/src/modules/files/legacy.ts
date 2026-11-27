@@ -1,4 +1,4 @@
-import { rowsOf } from '../../db/selections.js';
+import { rowsOf } from '../../db/result-rows.js';
 import type { Dirent } from 'node:fs';
 import { open, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';

@@ -1,4 +1,4 @@
-import { rowsOf } from '../../db/selections.js';
+import { rowsOf } from '../../db/result-rows.js';
 import { sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { sameHome } from '../backups/holders.js';
