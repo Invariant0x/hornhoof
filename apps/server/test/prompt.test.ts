@@ -285,6 +285,7 @@ it('checks actual staffing and execution before declaring the company ready', ()
 
 describe('a person who wrote through Telegram', () => {
   it('is named with what they are in the company, so the agent weighs their words by it', () => {
+    expect(answerInTelegram({ name: 'Alex' }, { owner: true, delegate: false, department: null }, 'en')).toContain("Include each task's #number beside its question or result");
     expect(answerInTelegram({ name: 'Alex' }, { owner: true, delegate: false, department: null }, 'en')).toContain("This is Alex writing to you directly in Telegram. Alex is the company's owner (the CEO).");
     expect(answerInTelegram({ name: 'Rita' }, { owner: false, delegate: false, department: true }, 'ru')).toContain('Rita is responsible for your department.');
     expect(answerInTelegram({ name: 'Alex' }, { owner: true, delegate: false, department: null }, 'en')).toContain('Use the language of their own words');
