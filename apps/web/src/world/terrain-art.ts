@@ -4,7 +4,7 @@
 
 import { worldArtFiles } from './art-files';
 import type { PlantPassport, TerrainArtSpec, WorldPackManifest } from './manifest';
-import { parsePlantPassport } from './plants';
+import { parsePlantPassport } from './plant-passport';
 
 /* Straight (not premultiplied) RGBA pixels. */
 export type ArtPixels = Readonly<{ data: Uint8ClampedArray; width: number; height: number }>;

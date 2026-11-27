@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fileURLToPath, URL } from 'node:url';
-import { cyclicGroups, serverGraph, valueGraph } from '../server-imports.mjs';
+import { cyclicGroups, directoryGraph, serverGraph, valueGraph } from '../server-imports.mjs';
 
 test('counts runtime imports and reexports without type-only edges', () => {
   const graph = valueGraph(new Map([
@@ -11,6 +11,15 @@ test('counts runtime imports and reexports without type-only edges', () => {
   ]));
   assert.deepEqual([...graph], [['a.ts', ['b.ts']], ['b.ts', ['c.ts']], ['c.ts', ['a.ts']]]);
   assert.deepEqual(cyclicGroups(graph), [['a.ts', 'b.ts', 'c.ts']]);
+});
+
+test('resolves browser imports of components and directory indexes', () => {
+  const graph = valueGraph(new Map([
+    ['view.tsx', "import Panel from './Panel'; import { lang } from './locale';"],
+    ['Panel.tsx', "import { lang } from './locale';"],
+    ['locale/index.ts', "export const lang = 'en';"],
+  ]));
+  assert.deepEqual(graph.get('view.tsx'), ['Panel.tsx', 'locale/index.ts']);
 });
 
 test('separates cycles, self imports and acyclic consumers in a stable order', () => {
@@ -31,4 +40,9 @@ test('resolves nested relative paths and ignores dynamic and external imports', 
 
 test('server runtime imports have no cycles', () => {
   assert.deepEqual(cyclicGroups(serverGraph(fileURLToPath(new URL('../..', import.meta.url)))), []);
+});
+
+test('web runtime imports have no cycles', () => {
+  const directory = fileURLToPath(new URL('../../apps/web/src/', import.meta.url));
+  assert.deepEqual(cyclicGroups(directoryGraph(directory)), []);
 });

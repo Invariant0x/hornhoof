@@ -4,12 +4,12 @@
    Contains zero theme-specific words. */
 
 import type { CityBuilding, CityState } from './city-layout';
-import {
-  resolveConstructionStages,
-  type BuildingLoopKind,
-  type ConstructionStageSpec,
-  type WorkSlotAction,
-  type WorldPackManifest,
+import { resolveConstructionStages } from './construction-stages';
+import type {
+  BuildingLoopKind,
+  ConstructionStageSpec,
+  WorkSlotAction,
+  WorldPackManifest,
 } from './manifest';
 
 export type BuildingConstructionPhase = 'building' | 'complete' | 'demolishing' | 'cleared';
