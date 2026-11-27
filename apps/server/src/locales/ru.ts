@@ -59,6 +59,7 @@ export const ru: ServerWords = {
   },
 
   notices: {
+    lowDisk: machine => `${machine}: мало места на диске`,
     marked: { read: 'прочитано', done: 'разобрано' },
     machineNoName: 'машина без имени',
     releaseCi: 'CI выпуска',

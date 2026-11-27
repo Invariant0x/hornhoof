@@ -282,9 +282,10 @@ describe('the task engine', () => {
       await db.update(tasks).set({ status: 'cancelled', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, task.id));
       return begin(fn, config);
     });
-    const answered = await answer(ctx, CEO, asked.request.id, { answer: 'EUR' });
+    await expect(answer(ctx, CEO, asked.request.id, { answer: 'EUR' })).rejects.toMatchObject({ status: 409, reason: 'request_closed' });
     expect((await read(task.id)).status).toBe('cancelled');
-    expect(answered.wakes).toEqual([]);
+    const [unchanged] = await db.select().from(requests).where(eq(requests.id, asked.request.id));
+    expect(unchanged!.answer).toBeNull();
   });
 
   it('gives no subtask under a task cancelled while it was being made', async () => {
