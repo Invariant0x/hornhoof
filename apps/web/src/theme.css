@@ -2255,6 +2255,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; margin: 0; padding: 3px 10px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); font: inherit; font-size: 12.5px; color: var(--ink); text-align: start; overflow-wrap: break-word; cursor: pointer; }
 .tr-chip:hover { border-color: var(--cyan); }
 .tr-chip.on { border-color: var(--tracker-working-ring); color: var(--cyan-ink); }
+.tr-chip select { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; font: inherit; }
 /* In the light skin a cyan line on white is too faint for a border: a chosen card or node, a goal's node and a node under
    the pointer draw their border in the ink of the accent, as chips and views do through --tracker-working-ring. */
 :root[data-scheme="light"] :is(.tr-node.goal, .tr-node.on, button.tr-node:hover) { border-color: var(--cyan-ink); }
@@ -2641,6 +2642,7 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
    layout's sizes, none under 24 by 24 px (WCAG 2.5.8; the subtask caret is that floor). Both sizes are tokens of the
    tracker's own, --tracker-target-touch and --tracker-target-fine. */
 @media (max-width: 760px), (pointer: coarse) {
+  .tr-views label, .tr-chip, .tr-group-toggle, .tr-new { min-block-size: var(--tracker-target-touch); }
   .tr-new { inline-size: var(--tracker-target-touch); }
   .tr-card-title .linkish { min-block-size: var(--tracker-target-touch); }
   .tr-card-body > .entry-actions > .act { min-block-size: var(--tracker-target-touch); }

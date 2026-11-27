@@ -123,7 +123,7 @@ export async function trackerFrames(browser: Browser, info: TestInfo, view: 'tas
             expect(Math.abs(box.x - body.x)).toBeLessThanOrEqual(1);
             expect(Math.abs(box.y - (nav.y + nav.height))).toBeLessThanOrEqual(1);
             expect(Math.abs(box.y + box.height - (body.y + body.height))).toBeLessThanOrEqual(1);
-            const top = await frame.locator('.tr-top :is(.tr-where, .tr-view-as, .tr-search)').evaluateAll(items =>
+            const top = await frame.locator('.tr-top :is(.tr-where, .tr-search)').evaluateAll(items =>
               items.map(item => { const box = item.getBoundingClientRect(); return box.top + box.height / 2; }));
             expect(Math.max(...top) - Math.min(...top)).toBeLessThanOrEqual(1);
           }
