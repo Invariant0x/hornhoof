@@ -96,6 +96,13 @@ describe('the simple task card', () => {
     expect(facts.getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Dana');
   });
 
+  it('names the orchestrator for unassigned work outside a department', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, department: null, executor: null, assignee: null } }] });
+    const facts = within(within(await openTask(user)).getByRole('group', { name: 'Facts' }));
+    expect(facts.getByRole('definition', { name: 'Responsible' })).toHaveTextContent('Orchestrator');
+  });
+
   it.each([
     [1, 'The next turn, after turn 44'],
     [2, 'The turn after next, after turn 44'],
