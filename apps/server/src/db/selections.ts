@@ -13,3 +13,6 @@ export const only = <T, K extends keyof T>(table: T, key: K): Pick<T, K> => ({ [
 
 /* How many rows the query finds. */
 export const countOnly = () => ({ n: count() });
+
+/* Raw SQL returns an array in some drivers and a result with rows in others. */
+export const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);

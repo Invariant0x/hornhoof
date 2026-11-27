@@ -1,3 +1,4 @@
+import { rowsOf } from '../../db/selections.js';
 import { sql } from 'drizzle-orm';
 import type { FilesDb } from './files.js';
 
@@ -5,8 +6,6 @@ import type { FilesDb } from './files.js';
    module, so placement reads which machine keeps the backup without importing the backup, which places by it. */
 
 export const KEEP_DAYS = 30;
-
-const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 
 /* The days the backup keeps a content no row names, and the machine other than the leading one picked to keep it. */
 export async function backupSettings(db: FilesDb): Promise<{ keepDays: number; machineId: string | null }> {

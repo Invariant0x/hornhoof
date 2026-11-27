@@ -1,3 +1,4 @@
+import { rowsOf } from '../../db/selections.js';
 import { sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { sameHome } from '../backups/holders.js';
@@ -24,7 +25,6 @@ export const LOST_MS = 24 * 3_600_000;
 /* At most this many files are placed, and as many looked at again, in one round. */
 export const PLACE_BATCH = 200;
 
-const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 type Tx = Pick<Db, 'execute'>;
 const listOf = (values: (string | number)[]): string => `{${values.join(',')}}`;
 const arrayOf = (value: string[] | string | null): string[] =>
