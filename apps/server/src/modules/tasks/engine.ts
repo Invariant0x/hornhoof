@@ -34,7 +34,7 @@ import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, attachments, companies, jobs, people, requests, taskEvents, tasks, type DecisionTopic, type RequestOption, type SubtaskReason } from '../../db/schema.js';
-import { clearlyAnswered, flat, holds, replyMatches } from './direct-words.js';
+import { canCiteFor, clearlyAnswered, flat, holds } from './direct-words.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
@@ -1273,8 +1273,7 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
   /* Only what this person may take: someone else's question stays open. */
   const theirs = (await openForPeople(ctx.db, agentId)).filter(r => takes({ ...taking.person, assistant }, taking.access, r));
   const wakes: Wake[] = [];
-  const addressed = reply === undefined ? theirs : theirs.filter(r => replyMatches(r, reply));
-  for (const r of clearlyAnswered(addressed, said, task)) {
+  for (const r of clearlyAnswered(theirs, said, task, reply)) {
     try {
       /* The window already delivered these words; its complete mirror must not introduce a later file-quota failure. */
       wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said }, undefined, { inlineText: true, assistant })).wakes);
@@ -1312,10 +1311,7 @@ const sameMessage = (m: Words): string => JSON.stringify([m.personId, assistantO
 /* The one message holding these words that a person who may take the request wrote to the agent since it was asked: of a
    message and its copies, the first. */
 async function citedMessage(db: Live['db'], agentId: string, r: OpenForPeople, quote: string): Promise<Words> {
-  const holding = (await wordsOfPeople(db, agentId, r.createdAt)).filter(m => {
-    const reply = (m.data as { telegram?: { reply?: { text: string } } } | null)?.telegram?.reply;
-    return (!reply || replyMatches(r, reply.text)) && holds(textOf(m.data), quote);
-  });
+  const holding = (await wordsOfPeople(db, agentId, r.createdAt)).filter(m => canCiteFor(m.data, r) && holds(textOf(m.data), quote));
   if (!holding.length) throw refuse(400, 'task_invalid', 'No person wrote these words to you since you asked this. Quote their message exactly as they wrote it.');
   const theirs: Words[] = [];
   for (const m of holding) if (await writerTakes(db, r, m)) theirs.push(m);

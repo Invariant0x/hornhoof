@@ -1,3 +1,4 @@
+import type { TelegramReply } from '../telegram/api.js';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -35,7 +36,7 @@ const MessageBody = z
 
 /* Where a person's message came from when not from the agent's window: the bot it came through, the chat its answer goes
    back to and the update it was. */
-type TelegramOrigin = { bot: string; chat: number; update: number; lang: BotLang; reply?: { id: number; text: string } };
+type TelegramOrigin = { bot: string; chat: number; update: number; lang: BotLang; reply?: TelegramReply };
 /* The message of the person's assistant this is, by the id the assistant was given for it. own: to the assistant's own
    agent, which thinks for it. fresh: what that agent reads instead when its turn starts a new session. */
 type AssistantOrigin = { message: string; own?: boolean; fresh?: string };
@@ -53,6 +54,10 @@ function byAssistant(me: Person & { assistant: NonNullable<Person['assistant']> 
 /* from: the machine of the company the person sits at as they write in the window; none through Telegram or an assistant. */
 type Origins = { telegram?: TelegramOrigin; assistant?: AssistantOrigin; standing?: Standing; from?: WrittenFrom };
 
+function telegramQuote(reply?: TelegramReply): string {
+  return reply ? `\n\n[Reply to Telegram message ${reply.id}] ${JSON.stringify(reply.text)}` : '';
+}
+
 function writtenBy(me: Person, text: string, pictures: MessagePicture[], { telegram, assistant, standing, from }: Origins = {}) {
   if (me.via) return {
     actor: { agentId: me.via },
@@ -61,10 +66,9 @@ function writtenBy(me: Person, text: string, pictures: MessagePicture[], { teleg
   if (me.assistant && assistant && standing) return byAssistant({ ...me, assistant: me.assistant }, text, pictures, assistant, standing);
   if (telegram && standing) {
     const { lang, ...origin } = telegram;
-    const reply = origin.reply ? `\n\n[Reply to Telegram message ${origin.reply.id}] ${JSON.stringify(origin.reply.text)}` : '';
     return {
       actor: { personId: me.id },
-      turn: { prompt: `${turnPrompt(me, withPictures(text, pictures))}${reply}\n\n${answerInTelegram(me, standing, lang)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram: origin, ...(pictures.length ? { pictures } : {}) } },
+      turn: { prompt: `${turnPrompt(me, withPictures(text, pictures))}${telegramQuote(origin.reply)}\n\n${answerInTelegram(me, standing, lang)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram: origin, ...(pictures.length ? { pictures } : {}) } },
     };
   }
   /* An employee is told what the person is to it, as its company tool does not show everyone who runs its department. */
@@ -116,10 +120,17 @@ export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input:
     from: me.via ? { kind: 'orchestrator' } : { kind: 'person', id: me.id },
     to: agent.kind === 'orchestrator' ? { kind: 'orchestrator' } : { kind: 'department', id: agent.departmentId ?? '' },
   });
-  /* Once the words are on their way, a person's words answer the one question the agent waits on them for, when it is
-     clear which; the orchestrator answers requests with its own tool. */
-  if (!me.via) await wakeAll(ctx, await answerDirectly(ctx, me.id, agent.id, input.text, { assistant: me.assistant?.id, task: input.task, reply: input.telegram?.reply?.text }));
+  await answerFromPerson(ctx, me, agent.id, input);
   return jobId;
+}
+
+/* Only a person's own words can settle an open question. */
+async function answerFromPerson(ctx: Ctx, me: Person, agentId: string, input: Written): Promise<void> {
+  if (me.via) return;
+  const wakes = await answerDirectly(ctx, me.id, agentId, input.text, {
+    assistant: me.assistant?.id, task: input.task, reply: input.telegram?.reply?.text,
+  });
+  await wakeAll(ctx, wakes);
 }
 
 /* Every agent's window: its conversation, what it is doing, writing to it and stopping it. The orchestrator is for people
