@@ -2,10 +2,10 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { WHOLE, type Access, type Spot } from '../src/auth/access.js';
 import { orchestratorHeaders } from '../src/auth/internal.js';
-import { agents, departments, people, proposals, requests } from '../src/db/schema.js';
+import { agents, departments, people, proposals, requests, tasks } from '../src/db/schema.js';
 import { decisionOwner as ownerFromAuth } from '../src/auth/decision-owner.js';
 import { decisionOwner, type Candidate } from '../src/modules/tasks/decisions.js';
-import { ask, cancel, createTask, report } from '../src/modules/tasks/engine.js';
+import { ask, cancel, createTask, move, report } from '../src/modules/tasks/engine.js';
 import { as, invitePerson, listen, openStream, until, ownPlan } from './helpers.js';
 import { company, everyKind, ownersOf } from './decisions-company.js';
 
@@ -202,6 +202,23 @@ describe('decisions waiting for people', () => {
     expect(sarasForDan.requests.map(r => r.id).sort()).toEqual([c.devApproval, c.devPeople, c.devPlain].map(x => x.request.id).sort());
     expect((await c.view(c.tokens.dan, '?person=00000000-0000-4000-8000-000000000999')).requests).toEqual([]);
     for (const bad of ['?person=me', '?person=', '?owner=x']) expect((await c.app.inject({ url: `/api/requests${bad}`, ...as(c.tokens.ceo) })).statusCode, bad).toBe(400);
+  });
+
+  it('takes unanswered choices off a completed task, including a legacy open row', async () => {
+    const c = await company();
+    const choice = () => c.asking('dev', { kind: 'choice', text: 'Which wording?', options: [{ label: 'A' }, { label: 'B' }], topic: 'task' });
+    const first = await choice();
+    const old = await choice();
+    const [active] = await c.db.select().from(tasks).where(eq(tasks.id, first.task.id));
+    await move(c.ctx, active!, { status: 'done', closedAt: new Date() }, { kind: 'report', text: 'Completed.', actor: { agentId: c.heads.dev.id } });
+    const [closed] = await c.db.select().from(requests).where(eq(requests.id, first.request.id));
+    expect(closed!.status).toBe('withdrawn');
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, old.task.id));
+    const list = await c.view(c.tokens.dan);
+    expect(list.requests.map(r => r.id)).not.toContain(old.request.id);
+    expect(list.counts.total).toBe(0);
+    const res = await c.app.inject({ method: 'POST', url: `/api/requests/${old.request.id}`, payload: { pick: 0 }, ...as(c.tokens.dan) });
+    expect(res.statusCode).toBe(409);
   });
 
   it('change their counts as decisions come, get answered, withdrawn or cancelled', async () => {
