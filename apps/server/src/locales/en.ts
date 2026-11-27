@@ -49,6 +49,9 @@ export const en = {
     machineOffline: (agent: string) => `The machine running ${agent} is offline. Try again when it reconnects.`,
     notReady: (agent: string) => `${agent} cannot answer right now. Open Hornhoof to see why, or write again later.`,
     failed: 'Your message did not go through. Please write it again in a little while.',
+    planLimit: (agent: string) => `${agent} has reached the usage limit for its plan. Try again when the limit resets.`,
+    tooMany: (agent: string) => `${agent} is receiving too many requests. Try again later.`,
+    toolsUnavailable: (agent: string) => `${agent} could not connect to the tools it needs in Hornhoof. Ask the machine owner to check the connection.`,
     noAnswer: (agent: string) => `${agent} could not answer this time. Open Hornhoof to see why, or write again.`,
   },
 
