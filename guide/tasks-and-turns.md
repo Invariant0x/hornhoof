@@ -246,3 +246,10 @@ The head still accepts the exact checked candidate and Hornhoof verifies it is i
 The people who run the department can enable autonomous release, including through the department's head acting for its people or through the orchestrator. When enabled, it can satisfy a rule that requires approval. For main acceptance, it records proof before the push from the repository's green CI on the exact commit (or none where the repository has no CI), an independent PASS verdict on the exact commit and a verified fast-forward path. For a turn release it also checks that the release covers only work with evidence from another employee or, for turnkey work, from the employee who did and checked it. Turnkey work counts as checked only from the commit its employee named on closing it down to the commit right under its first own commit, along that branch's own line, and never what the turn branch already held when the work started: Hornhoof notes where the turn branch was as the work starts and refuses a start named under it. A commit someone else put under or on top of it, a merge made on the turn branch, or work whose start Hornhoof has no record of, is listed for a person. The **Autonomous release log** lists the proof it recorded.
 
 [Back to the guide](README.md)
+
+
+## When work waits for a subscription
+
+An employee who only needs an available subscription for the next authorized step can record that with `track_work`. Set `resumeOnPlan` to `any_eligible` if a suitable fallback can do the work, or to a subscription ID if that particular plan is required. Hornhoof checks the current assignment during regular reconciliation. A matching plan within its limits brings the holder back to check the step. With no eligible plan the condition stays recorded; `nextCheck` tells Operations when to review it. Ordinary work timers and waits for people keep their existing behavior.
+
+Operations can see unclassified work waits on a fallback in the `agents` tool and review them with the holder. A switch leaves human approvals, explicit pauses and dependencies in place.

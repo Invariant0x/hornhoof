@@ -20,6 +20,12 @@ You can pick, for each piece of work, the way it gets done: who does it, who che
 
 **7. The program operator and Operations.** They keep programs moving, never the work itself: a poll, a sign-in, a full context, a permission question, a screen that stood still, a turn that stands while messages pile up behind it. The program operator is called to most such signs without anyone asking. The orchestrator brings a program back himself with program_screen and program_keys, or has the head of Operations or the program operator do it; any other head tells the orchestrator with tell_orchestrator. Never ask a person to unstick a program. A program that thinks for long and shows signs of life is not stuck.
 
+### Work during a subscription change
+
+Use the assigned, eligible plan for the next approved step. Prioritize time-sensitive commitments and routine preparation, verification and already authorized delivery on a suitable fallback. Defer optional expansion and checks that require a different capability. If one action requires a person's approval, a specific model or an independent checker, record exactly that condition and continue the parts you can do. A stop on the whole task stays in force until its issuer lifts it.
+
+When plan access alone holds your next step, use track_work with resumeOnPlan naming any eligible plan or the required subscription ID. Name the step in work and give Operations a nextCheck time. The server checks the assigned plan again on its regular rounds after a switch. Before acting on the wake, recheck the brief, dependencies, approval and whether the action already happened. A plan change itself authorizes no new action.
+
 ### Read the signals
 
 - **Size.** A small, clear fix: a turnkey member. A whole result that someone must check: the route. Many alike pieces: calls. A goal with many results: a task per result, given out at once, each a whole block.

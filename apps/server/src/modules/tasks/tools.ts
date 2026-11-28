@@ -1,3 +1,4 @@
+import { WorkPlanRequirement } from '@hornhoof/protocol/waits';
 import { REVIEW_SKIP_ENABLED, requestAuthorCheck } from './author-check.js';
 import { idOnly } from '../../db/selections.js';
 import { earlierWork } from '../departments/branches.js';
@@ -447,14 +448,18 @@ class TaskTools {
     this.server.registerTool(
       'track_work',
       {
-        description: 'Records an operation already in progress on a task you hold, such as tests or delegated work. Name the operation and the next time to check it. Name the employee doing the work so they get a notice. The head of Design named so, to check the final look of a screen, reads this task and comments on it until the wait ends, and you can write to that head about it with message_employee naming the task; its comment ends the wait and wakes you. You will be woken to check progress or if that employee becomes unavailable. Diagnose and repair a failed operation.',
-        inputSchema: { task: Ref, work: z.string().trim().min(1), nextCheck: z.iso.datetime({ offset: true }), employee: z.uuid().optional() },
+        description: 'Records an operation already in progress on a task you hold, such as tests or delegated work. Name the operation and the next time to check it. Name the employee doing the work so they get a notice. The head of Design named so, to check the final look of a screen, reads this task and comments on it until the wait ends, and you can write to that head about it with message_employee naming the task; its comment ends the wait and wakes you. You will be woken to check progress or if that employee becomes unavailable. Continue authorized steps on a suitable fallback. Use resumeOnPlan only when plan access alone holds the next step. Diagnose and repair a failed operation.',
+        inputSchema: { task: Ref, work: z.string().trim().min(1), nextCheck: z.iso.datetime({ offset: true }), employee: z.uuid().optional(),
+          resumeOnPlan: WorkPlanRequirement.optional().describe('Only when subscription access is the sole remaining condition for the next authorized step: any_eligible, or the required subscription ID. Operations can review it at nextCheck; it resumes only on an eligible matching plan. Omit for approvals, dependencies or a stop order.') },
       },
-      async ({ task: ref, work, nextCheck, employee }) => this.run(async () => {
+      async ({ task: ref, work, nextCheck, employee, resumeOnPlan }) => this.run(async () => {
         const { task } = await this.find(ref);
         this.plain(task, work);
-        const moved = await trackWork(this.ctx, this.job.agentId, task.id, work, nextCheck, employee);
-        return { text: `Work is in progress on #${task.number}. Next check at ${moved.task.externalWait!.until}.`, moved };
+        const moved = await trackWork(this.ctx, this.job.agentId, task.id, work, nextCheck, employee, resumeOnPlan);
+        const until = moved.task.externalWait!.until;
+        const text = resumeOnPlan ? `Subscription wait recorded on #${task.number}. The holder resumes on a matching eligible plan. Operations review at ${until} if still waiting.`
+          : `Work is in progress on #${task.number}. Next check at ${until}.`;
+        return { text, moved };
       }),
     );
   }
