@@ -30,6 +30,10 @@ export function namedUnrecorded(which: SQL): SQL {
 
 export { SET_ASIDE } from './named.js';
 
+/* Retained history may still need its first backup after the last attachment stops naming the file. */
+const pendingBackup = sql`EXISTS (SELECT 1 FROM net.file_backup_names n WHERE n.sha256 = f.sha256 AND NOT EXISTS
+  (SELECT 1 FROM net.file_backups b WHERE b.sha256 = n.sha256 AND b.kept_at IS NOT NULL AND b.drop_at IS NULL))`;
+
 /* Marks the contents no row names since now, and those named again as in use, and gives the ones unused for a day their
    time to go, unless a database set aside is there. Says how many are to go now. */
 export async function markUnused(db: Pick<Db, 'execute'>, now: Date): Promise<number> {
@@ -37,7 +41,8 @@ export async function markUnused(db: Pick<Db, 'execute'>, now: Date): Promise<nu
   await db.execute(sql`UPDATE net.files f SET unused_since = NULL WHERE f.unused_since IS NOT NULL AND f.drop_at IS NULL AND ${NAMED}`);
   await db.execute(sql`UPDATE net.files f SET unused_since = ${at}::timestamptz WHERE f.unused_since IS NULL AND f.drop_at IS NULL AND NOT ${NAMED}`);
   const going = await db.execute(sql`UPDATE net.files f SET drop_at = ${at}::timestamptz WHERE f.drop_at IS NULL
-    AND f.unused_since <= ${new Date(now.getTime() - UNUSED_MS).toISOString()}::timestamptz AND NOT ${NAMED} AND NOT ${SET_ASIDE} RETURNING f.sha256`);
+    AND f.unused_since <= ${new Date(now.getTime() - UNUSED_MS).toISOString()}::timestamptz AND NOT ${NAMED} AND NOT ${SET_ASIDE}
+    AND NOT ${pendingBackup} RETURNING f.sha256`);
   return rowsOf(going).length;
 }
 
@@ -56,7 +61,7 @@ export async function dropDue(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Promis
   for (const { sha256 } of due) {
     await db.transaction(async tx => {
       const [still] = rowsOf<{ sha256: string; named: boolean }>(
-        await tx.execute(sql`SELECT f.sha256, ${NAMED} AS named FROM net.files f WHERE f.sha256 = ${sha256} AND f.drop_at <= ${now.toISOString()}::timestamptz FOR UPDATE OF f`),
+        await tx.execute(sql`SELECT f.sha256, (${NAMED} OR ${pendingBackup} OR ${SET_ASIDE}) AS named FROM net.files f WHERE f.sha256 = ${sha256} AND f.drop_at <= ${now.toISOString()}::timestamptz FOR UPDATE OF f`),
       );
       if (!still) return;
       if (still.named) {
@@ -69,7 +74,7 @@ export async function dropDue(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Promis
     });
   }
   await db.execute(sql`DELETE FROM net.file_copies c WHERE NOT EXISTS (SELECT 1 FROM machines m WHERE m.id = c.machine_id AND m.revoked_at IS NULL)`);
-  await db.execute(sql`DELETE FROM net.files f WHERE f.drop_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256)`);
+  await db.execute(sql`DELETE FROM net.files f WHERE f.drop_at IS NOT NULL AND NOT ${pendingBackup} AND NOT ${SET_ASIDE} AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256)`);
   return dropped;
 }
 

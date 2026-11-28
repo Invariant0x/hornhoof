@@ -55,10 +55,9 @@ export async function pickBackupMachine(db: FilesDb, mine: string | null, now: D
    content since when, takes into the backup each content a row names, keeps it here while no other machine is picked
    for it and lets go of what another keeps now, and lets go of the contents no row named for longer than the days kept. */
 export async function backupRound(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Promise<void> {
-  await recordNames(ctx.db, now);
   await ctx.db.execute(sql`INSERT INTO net.file_backups (sha256, size, sealed_sha256, sealed_size, salt, at)
     SELECT f.sha256, f.size, f.sealed_sha256, f.sealed_size, f.salt, ${now.toISOString()}::timestamptz FROM net.files f
-    WHERE EXISTS (SELECT 1 FROM net.file_backup_names n WHERE n.sha256 = f.sha256 AND n.until IS NULL)
+    WHERE EXISTS (SELECT 1 FROM net.file_backup_names n WHERE n.sha256 = f.sha256)
     ON CONFLICT (sha256) DO UPDATE SET drop_at = NULL WHERE net.file_backups.drop_at IS NOT NULL`);
   const { keepDays, machineId } = await backupSettings(ctx.db);
   const mine = await ctx.files.machineId(ctx.db);
@@ -66,16 +65,6 @@ export async function backupRound(ctx: Pick<Ctx, 'db' | 'files'>, now: Date): Pr
   else await releaseHere(ctx, mine);
   await prune(ctx, mine, now, keepDays);
   await ctx.files.backupStore().tidy(now);
-}
-
-/* A row deleted or given other bytes closes the name it had; a row with bytes and no open name opens one. */
-async function recordNames(db: FilesDb, now: Date): Promise<void> {
-  const at = now.toISOString();
-  await db.execute(sql`UPDATE net.file_backup_names n SET until = greatest(n.since, ${at}::timestamptz) WHERE n.until IS NULL
-    AND NOT EXISTS (SELECT 1 FROM public.attachments a WHERE a.id = n.attachment_id AND a.sha256 = n.sha256)`);
-  await db.execute(sql`INSERT INTO net.file_backup_names (attachment_id, company_id, sha256, "row", since)
-    SELECT a.id, a.company_id, a.sha256, to_jsonb(a) - 'bytes', ${at}::timestamptz FROM public.attachments a
-    WHERE a.sha256 IS NOT NULL AND NOT EXISTS (SELECT 1 FROM net.file_backup_names n WHERE n.attachment_id = a.id AND n.until IS NULL)`);
 }
 
 /* Copies into the backup folder here the contents it does not keep yet, from the live store; one the live store lacks
@@ -111,7 +100,7 @@ async function keepHere(ctx: Pick<Ctx, 'db' | 'files'>, mine: string | null, now
 async function releaseHere(ctx: Pick<Ctx, 'db' | 'files'>, mine: string | null): Promise<void> {
   const backup = ctx.files.backupStore();
   const here = (await backup.list()).map(file => file.sha256);
-  if (here.length === 0) return;
+  if (here.length === 0 || await hasSetAside(ctx.db)) return;
   const kept = new Set(
     rowsOf<{ sha256: string }>(
       await ctx.db.execute(sql`SELECT sha256 FROM net.file_backups WHERE sha256 = ANY(${listOf(here)}::text[]) AND machine_id IS NOT DISTINCT FROM ${mine} AND drop_at IS NULL`),
@@ -120,13 +109,17 @@ async function releaseHere(ctx: Pick<Ctx, 'db' | 'files'>, mine: string | null):
   for (const sha256 of here) if (!kept.has(sha256)) await backup.remove(sha256);
 }
 
+async function hasSetAside(db: FilesDb): Promise<boolean> {
+  return rowsOf<{ aside: boolean }>(await db.execute(sql`SELECT ${SET_ASIDE} AS aside`))[0]?.aside === true;
+}
+
 /* Lets go of the names closed longer ago than the days kept, then of the contents no name is left of and no row names,
    unless a database set aside, which may be merged back, is there: a content kept here goes at once, one another machine
    keeps once it let it go. */
 async function prune(ctx: Pick<Ctx, 'db' | 'files'>, mine: string | null, now: Date, keepDays: number): Promise<void> {
   const { db, files } = ctx;
   const before = new Date(now.getTime() - keepDays * DAY_MS).toISOString();
-  if (rowsOf<{ aside: boolean }>(await db.execute(sql`SELECT ${SET_ASIDE} AS aside`))[0]?.aside) return;
+  if (await hasSetAside(db)) return;
   await db.execute(sql`DELETE FROM net.file_backup_names WHERE until IS NOT NULL AND until <= ${before}::timestamptz`);
   const going = rowsOf<{ sha256: string; elsewhere: boolean }>(
     await db.execute(sql`SELECT f.sha256, (f.kept_at IS NOT NULL AND f.machine_id IS DISTINCT FROM ${mine}) AS elsewhere FROM net.file_backups f
@@ -164,7 +157,8 @@ export async function backupView(db: FilesDb, machineId: string, leader: string 
           ORDER BY at, sha256 LIMIT ${BATCH}`),
       ).map(row => ({ sha256: row.sha256, sealedSha256: row.sealed_sha256, sealedSize: Number(row.sealed_size) }))
     : [];
-  const drop = rowsOf<{ sha256: string }>(
+  const aside = await hasSetAside(db);
+  const drop = aside ? [] : rowsOf<{ sha256: string }>(
     await db.execute(sql`SELECT sha256 FROM net.file_backups WHERE machine_id = ${machineId} AND drop_at IS NOT NULL ORDER BY sha256 LIMIT ${BATCH}`),
   ).map(row => row.sha256);
   /* What the leading machine keeps a live copy of, the machine picked fetches from it; the rest it is given back. The
@@ -178,7 +172,7 @@ export async function backupView(db: FilesDb, machineId: string, leader: string 
         await db.execute(sql`SELECT b.sha256 FROM net.file_backups b WHERE b.machine_id = ${machineId} AND b.kept_at IS NOT NULL AND b.drop_at IS NULL
           AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = b.sha256 AND c.machine_id IS NOT DISTINCT FROM ${leader}) ORDER BY b.sha256 LIMIT ${BATCH}`),
       ).map(row => row.sha256);
-  const clear = !keep && rowsOf(await db.execute(sql`SELECT 1 FROM net.file_backups WHERE machine_id = ${machineId} LIMIT 1`)).length === 0;
+  const clear = !aside && !keep && rowsOf(await db.execute(sql`SELECT 1 FROM net.file_backups WHERE machine_id = ${machineId} LIMIT 1`)).length === 0;
   return { keep, hold, drop, give, clear, keepDays };
 }
 
@@ -201,7 +195,7 @@ export async function takeBackupReport(db: FilesDb, machineId: string, report: {
     await db.execute(sql`DELETE FROM net.file_backups WHERE sha256 = ANY(${listOf(report.dropped)}::text[]) AND machine_id = ${machineId} AND drop_at IS NOT NULL`);
     await db.execute(sql`UPDATE net.file_backups SET machine_id = NULL, kept_at = NULL WHERE sha256 = ANY(${listOf(report.dropped)}::text[]) AND machine_id = ${machineId}`);
   }
-  if (!report.held.length) return [];
+  if (!report.held.length || await hasSetAside(db)) return [];
   const known = new Set(rowsOf<{ sha256: string }>(await db.execute(sql`SELECT sha256 FROM net.file_backups WHERE sha256 = ANY(${listOf(report.held)}::text[])`)).map(row => row.sha256));
   return report.held.filter(sha256 => !known.has(sha256));
 }

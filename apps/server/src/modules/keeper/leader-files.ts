@@ -3,7 +3,7 @@ import { pipeline, Transform, type Readable } from 'node:stream';
 import { sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { backsUpStore } from '../files/backup.js';
-import { recordFile } from '../files/files.js';
+import { recordFile, sealedAsRecorded } from '../files/files.js';
 import { keepsFiles, pickedFor } from '../files/network.js';
 import { placeFiles } from '../files/place.js';
 import { challengeOf, macOf } from '../files/proof.js';
@@ -142,14 +142,16 @@ export class LeaderFiles {
       body.destroy();
       return 403;
     }
+    const key = await this.key();
     try {
-      await this.store.takeOpened(sha256, body, await this.key(), Number(row.sealed_size));
+      await this.store.takeOpened(sha256, body, key, Number(row.sealed_size), true);
     } catch (err) {
       if (err instanceof StoreRefused) return 400;
       throw err;
     }
     const own = await this.ownRow();
-    await recordFile(this.db, { sha256, size: Number(row.size), ...(await this.store.sealedFacts(sha256)) }, own);
+    const restored = { sha256, size: Number(row.size), ...(await this.store.sealedFacts(sha256)) };
+    await recordFile(this.db, await sealedAsRecorded(this.db, this.store, restored, key), own);
     await placeFiles(this.db, own, { only: [sha256] });
     await this.db.execute(sql`UPDATE net.file_backups SET restore_at = NULL WHERE sha256 = ${sha256}`);
     return 201;
@@ -158,15 +160,15 @@ export class LeaderFiles {
   async take(machine: string, sha256: string, body: Readable, backup = false): Promise<number> {
     if (backup) return this.takeBackup(machine, sha256, body);
     const restores = await backsUpStore(this.db, machine, sha256);
-    const [asked] = rowsOf<{ sealed_sha256: string; sealed_size: string; salt: string }>(
-      await this.db.execute(sql`SELECT f.sealed_sha256, f.sealed_size, f.salt FROM net.files f WHERE f.sha256 = ${sha256} AND (${restores} OR (f.wanted_at IS NOT NULL
+    const [asked] = rowsOf<{ sealed_sha256: string; sealed_size: string; salt: string; wanted: boolean }>(
+      await this.db.execute(sql`SELECT f.sealed_sha256, f.sealed_size, f.salt, f.wanted_at IS NOT NULL AS wanted FROM net.files f WHERE f.sha256 = ${sha256} AND (${restores} OR (f.wanted_at IS NOT NULL
         AND EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256 AND c.machine_id = ${machine})))`),
     );
     if (!asked) return this.takeUnrecorded(machine, sha256, body);
     try {
       /* A copy a holder kept as it was sealed before is sealed again as the record says, where this machine has the key. */
       const again = this.key ? { key: await this.key(), salt: asked.salt } : undefined;
-      await this.store.take(sha256, body, { sealedSha256: asked.sealed_sha256, sealedSize: Number(asked.sealed_size) }, again);
+      await this.store.take(sha256, body, { sealedSha256: asked.sealed_sha256, sealedSize: Number(asked.sealed_size) }, again, asked.wanted);
     } catch (err) {
       if (err instanceof StoreRefused) return 400;
       throw err;

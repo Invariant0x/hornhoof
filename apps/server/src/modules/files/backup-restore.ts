@@ -7,7 +7,7 @@ import type { Ctx } from '../../app.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
 import type { FilesDb } from './files.js';
-import { recordFile } from './files.js';
+import { recordFile, sealedAsRecorded } from './files.js';
 import { placeFiles } from './place.js';
 import { StoreRefused } from './store.js';
 
@@ -28,7 +28,7 @@ type Name = { attachment_id: string; sha256: string; row: Record<string, unknown
 /* What a restore does for one file. again: its row comes back; back: its row gets back the bytes it had. ready: a copy of
    those bytes is there to come back, live or in the backup, and whatever its row names is still there. */
 export type RestoreItem = { attachmentId: string; name: string; action: 'again' | 'back'; sha256: string; size: number; ready: boolean; reason?: string };
-type Planned = RestoreItem & { row: Record<string, unknown> };
+type Planned = RestoreItem & { row: Record<string, unknown>; previousSha: string | null; previousSize: number | null };
 
 /* The tables a row of attachments names, by its column: a row comes back only while each it names is there. */
 const NAMES = { company_id: 'companies', job_id: 'jobs', agent_id: 'agents', person_id: 'people', request_id: 'requests', operator_case_id: 'program_operator_cases', task_id: 'tasks', test_run_id: 'test_runs' } as const;
@@ -38,7 +38,7 @@ const NAMES = { company_id: 'companies', job_id: 'jobs', agent_id: 'agents', per
 async function namesOf(db: FilesDb, companyId: string, ask: Ask): Promise<Name[]> {
   const one = ask.attachmentId ? sql`AND n.attachment_id = ${ask.attachmentId}` : sql``;
   if (ask.at) {
-    const at = new Date(ask.at).toISOString();
+    const at = ask.at;
     return rowsOf<Name>(
       await db.execute(sql`SELECT n.attachment_id, n.sha256, n."row" FROM net.file_backup_names n WHERE n.company_id = ${companyId} ${one}
         AND n.since <= ${at}::timestamptz AND (n.until IS NULL OR n.until > ${at}::timestamptz) ORDER BY n.attachment_id`),
@@ -74,7 +74,7 @@ export async function restorePlan(db: FilesDb, companyId: string, ask: Ask): Pro
   if (!ask.attachmentId && !ask.at) throw new ApiError(400, 'validation', 'A restore of every file names the moment to go back to.');
   const items: Planned[] = [];
   for (const name of await namesOf(db, companyId, ask)) {
-    const [now] = rowsOf<{ sha256: string | null }>(await db.execute(sql`SELECT sha256 FROM attachments WHERE id = ${name.attachment_id} AND company_id = ${companyId}`));
+    const [now] = rowsOf<{ sha256: string | null; size: number }>(await db.execute(sql`SELECT sha256, size FROM attachments WHERE id = ${name.attachment_id} AND company_id = ${companyId}`));
     if (now && now.sha256 === name.sha256) continue;
     const action = now ? 'back' : 'again';
     const gone = action === 'again' ? await goneOf(db, name.row) : null;
@@ -89,11 +89,13 @@ export async function restorePlan(db: FilesDb, companyId: string, ask: Ask): Pro
       ready: reason === null,
       ...(reason ? { reason } : {}),
       row: name.row,
+      previousSha: now?.sha256 ?? null,
+      previousSize: now ? Number(now.size) : null,
     });
   }
-  const at = ask.at ? new Date(ask.at).toISOString() : null;
+  const at = ask.at ?? null;
   const hash = createHash('sha256').update(`${at ?? ''}\n`);
-  for (const item of [...items].sort((a, b) => a.attachmentId.localeCompare(b.attachmentId))) hash.update(`${item.attachmentId} ${item.action} ${item.sha256}\n`);
+  for (const item of [...items].sort((a, b) => a.attachmentId.localeCompare(b.attachmentId))) hash.update(JSON.stringify(item));
   return { at, digest: hash.digest('hex'), items };
 }
 
@@ -101,26 +103,35 @@ export async function restorePlan(db: FilesDb, companyId: string, ask: Ask): Pro
    its name; a content kept by another machine is asked of it, and comes back once it sent it. */
 export async function bringBack(ctx: Pick<Ctx, 'db' | 'files'>, sha256: string): Promise<'live' | 'waiting' | 'refused' | 'gone'> {
   const { db, files } = ctx;
-  if (rowsOf(await db.execute(sql`SELECT 1 FROM net.files WHERE sha256 = ${sha256} AND drop_at IS NULL`)).length) return 'live';
+  const live = files.store();
+  const key = await files.key(db);
+  const [record] = rowsOf<{ size: string }>(await db.execute(sql`SELECT size FROM net.files WHERE sha256 = ${sha256} AND drop_at IS NULL`));
+  if (record && await live.matches(sha256, key, Number(record.size))) return 'live';
   const [kept] = rowsOf<{ size: string; sealed_size: string }>(
     await db.execute(sql`SELECT size, sealed_size FROM net.file_backups WHERE sha256 = ${sha256} AND kept_at IS NOT NULL AND drop_at IS NULL`),
   );
-  if (!kept) return 'gone';
+  if (!kept) {
+    if (!record) return 'gone';
+    const mine = await files.machineId(db);
+    const remote = rowsOf(await db.execute(sql`SELECT 1 FROM net.file_copies WHERE sha256 = ${sha256} AND machine_id IS DISTINCT FROM ${mine} AND verified LIMIT 1`));
+    if (!remote.length) return 'gone';
+    await db.execute(sql`UPDATE net.files SET wanted_at = now() WHERE sha256 = ${sha256}`);
+    return 'waiting';
+  }
   const here = files.backupStore().sealed(sha256);
   if (!here) {
     await db.execute(sql`UPDATE net.file_backups SET restore_at = now() WHERE sha256 = ${sha256}`);
     return 'waiting';
   }
-  const live = files.store();
-  await live.remove(sha256);
   try {
-    await live.takeOpened(sha256, here.stream(), await files.key(db), Number(kept.sealed_size));
+    await live.takeOpened(sha256, here.stream(), key, Number(kept.sealed_size), true);
   } catch (err) {
     if (err instanceof StoreRefused) return 'refused';
     throw err;
   }
   const mine = await files.machineId(db);
-  await recordFile(db, { sha256, size: Number(kept.size), ...(await live.sealedFacts(sha256)) }, mine);
+  const restored = { sha256, size: Number(kept.size), ...(await live.sealedFacts(sha256)) };
+  await recordFile(db, await sealedAsRecorded(db, live, restored, key), mine);
   await placeFiles(db, mine, { only: [sha256] });
   return 'live';
 }
@@ -128,8 +139,12 @@ export async function bringBack(ctx: Pick<Ctx, 'db' | 'files'>, sha256: string):
 /* Puts one row back as the plan says: again as it was, or back to the bytes it had. A row whose names went meanwhile
    stays as it is. */
 async function putBack(db: FilesDb, companyId: string, item: Planned): Promise<boolean> {
+  const retained = await db.execute(sql`SELECT 1 FROM net.file_backup_names WHERE company_id = ${companyId} AND attachment_id = ${item.attachmentId}
+    AND sha256 = ${item.sha256} AND "row" = ${JSON.stringify(item.row)}::jsonb LIMIT 1 FOR SHARE`);
+  if (!rowsOf(retained).length) return false;
   if (item.action === 'back') {
-    const changed = await db.execute(sql`UPDATE attachments SET sha256 = ${item.sha256}, size = ${item.size} WHERE id = ${item.attachmentId} AND company_id = ${companyId} RETURNING id`);
+    const changed = await db.execute(sql`UPDATE attachments SET sha256 = ${item.sha256}, size = ${item.size} WHERE id = ${item.attachmentId} AND company_id = ${companyId}
+      AND sha256 IS NOT DISTINCT FROM ${item.previousSha} AND size = ${item.previousSize} RETURNING id`);
     return rowsOf(changed).length === 1;
   }
   if (item.row.company_id !== companyId) return false;

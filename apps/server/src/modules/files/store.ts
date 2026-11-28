@@ -210,6 +210,21 @@ export class FileStore {
     return file.pipe(out);
   }
 
+  async matches(sha256: string, key: Buffer, size: number): Promise<boolean> {
+    const hash = createHash('sha256');
+    let bytes = 0;
+    try {
+      for await (const chunk of this.open(sha256, key)) {
+        bytes += chunk.length;
+        hash.update(chunk);
+      }
+    } catch (err) {
+      if (err instanceof StoreRefused || err instanceof SealRefused) return false;
+      throw err;
+    }
+    return bytes === size && hash.digest('hex') === sha256;
+  }
+
   /* The hash and size of the sealed bytes of a file here, and the salt its head carries. */
   async sealedFacts(sha256: string): Promise<{ sealedSha256: string; sealedSize: number; salt: string }> {
     const count = counter();
@@ -286,9 +301,9 @@ export class FileStore {
      The plain hash is its name, which a holder cannot check without the key; the machine that opens it does. With the
      key and the salt of its record, as the leading machine has them, a copy as long that hashes otherwise, sealed in the
      format before or under another salt, is kept when it opens to its name, sealed again as the record says. */
-  async take(sha256: string, input: Readable, expect: { sealedSha256: string; sealedSize: number }, again?: { key: Buffer; salt: string }): Promise<boolean> {
+  async take(sha256: string, input: Readable, expect: { sealedSha256: string; sealedSize: number }, again?: { key: Buffer; salt: string }, replace = false): Promise<boolean> {
     checkName(sha256);
-    if (this.has(sha256)) {
+    if (!replace && this.has(sha256)) {
       input.destroy();
       return false;
     }
@@ -301,7 +316,7 @@ export class FileStore {
       if (!again) throw new StoreRefused('hash');
       await this.sealAgain(part, sha256, again, expect.sealedSha256);
       return sha256;
-    });
+    }, replace ? () => false : undefined);
     return fresh;
   }
 
@@ -326,9 +341,9 @@ export class FileStore {
 
   /* Takes a sealed file no record describes, as a merge brings a row that names it: it is kept only when it opens with
      the store key to bytes of its name, and is at most maxBytes long. */
-  async takeOpened(sha256: string, input: Readable, key: Buffer, maxBytes: number): Promise<boolean> {
+  async takeOpened(sha256: string, input: Readable, key: Buffer, maxBytes: number, replace = false): Promise<boolean> {
     checkName(sha256);
-    if (this.has(sha256)) {
+    if (!replace && this.has(sha256)) {
       input.destroy();
       return false;
     }
@@ -341,7 +356,7 @@ export class FileStore {
       });
       if (plain.digest() !== sha256) throw new StoreRefused('hash');
       return sha256;
-    });
+    }, replace ? () => false : undefined);
     return fresh;
   }
 

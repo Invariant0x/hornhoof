@@ -237,7 +237,7 @@ export async function maskCompanyRows(q: Query, facts: Facts, company: string, m
   /* The store's backup keeps neither: a row of a file as it was, which may name the secret, is no name to put back, and
      with no name left of the text as it was, the backup's next round lets it go at once. A file's row as it is now is
      named again. */
-  if (filesChanged.size) await q('DELETE FROM net.file_backup_names WHERE company_id = $1::uuid AND attachment_id = ANY($2::uuid[])', [company, `{${[...filesChanged].join(',')}}`]);
+  if (filesChanged.size) await q('DELETE FROM net.file_backup_names WHERE company_id = $1::uuid AND attachment_id = ANY($2::uuid[]) AND until IS NOT NULL', [company, `{${[...filesChanged].join(',')}}`]);
   return changed;
 }
 

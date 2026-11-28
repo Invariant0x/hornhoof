@@ -7,9 +7,10 @@ import { Readable } from 'node:stream';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { agents, attachments, departments, machines } from '../src/db/schema.js';
+import { backupView, takeBackupReport } from '../src/modules/files/backup.js';
 import { fileStoreState } from '../src/modules/files/copies.js';
 import { machineSeats } from '../src/modules/files/place.js';
-import { storeRound } from '../src/modules/files/sweep.js';
+import { dropDue, storeRound } from '../src/modules/files/sweep.js';
 import { BACKUP_FILE_PATH, FILE_PATH, FileHolder, type FileLink } from '../src/modules/keeper/file-holder.js';
 import { LeaderFiles } from '../src/modules/keeper/leader-files.js';
 import { orchestratorHeaders } from '../src/auth/internal.js';
@@ -38,6 +39,13 @@ async function stand() {
   };
   /* The CEO's restore, a dry run first: the answer names its digest, which the restore itself repeats. */
   const restore = (payload: object, who: object = as(c.ceo)) => c.app.inject({ method: 'POST', url: '/api/company/file-store/backup/restore', payload, ...who });
+  // Sample a point between mutations even on the millisecond-resolution test database.
+  const databaseTime = async () => {
+    const read = async () => rowsOf<{ at: string }>(await c.db.execute(sql`SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at`))[0]!.at;
+    const at = await read();
+    while (await read() <= at) await new Promise(resolve => setTimeout(resolve, 1));
+    return at;
+  };
   const rowOf = async (id: string) => (await c.db.select().from(attachments).where(eq(attachments.id, id)))[0];
   const round = (at: Date) => storeRound(c.app.ctx, at);
   const backedUp = (sha256: string) => existsSync(join(dir, 'store-backup', sha256.slice(0, 2), sha256));
@@ -68,7 +76,7 @@ async function stand() {
   };
   const targetsOf = async (sha256: string) =>
     rowsOf<{ machine_id: string }>(await c.db.execute(sql`SELECT machine_id FROM net.file_targets WHERE sha256 = ${sha256}`)).map(row => row.machine_id).sort();
-  return { ...c, dir, server: server!, orchestrator: orchestrator!, sent, restore, rowOf, round, backedUp, live, recorded, leader, holderOn, targetsOf };
+  return { ...c, dir, server: server!, orchestrator: orchestrator!, sent, restore, rowOf, databaseTime, round, backedUp, live, recorded, leader, holderOn, targetsOf };
 }
 
 describe("the store's own backup", () => {
@@ -92,7 +100,7 @@ describe("the store's own backup", () => {
       bytes: Number(sealed),
       waiting: 0,
       keptAt: t0.toISOString(),
-      oldestAt: t0.toISOString(),
+      oldestAt: new Date(rowsOf<{ since: string }>(await s.db.execute(sql`SELECT since FROM net.file_backup_names WHERE attachment_id = ${one.id}`))[0]!.since).toISOString(),
       keepDays: 30,
     });
   });
@@ -127,10 +135,11 @@ describe("the store's own backup", () => {
     const names = rowsOf<{ sha256: string; since: Date | string; until: Date | string | null }>(
       await s.db.execute(sql`SELECT sha256, since, until FROM net.file_backup_names WHERE attachment_id = ${row.id} ORDER BY since`),
     ).map(name => ({ sha256: name.sha256, since: new Date(name.since).toISOString(), until: name.until === null ? null : new Date(name.until).toISOString() }));
-    expect(names).toEqual([
-      { sha256: row.sha256, since: t0.toISOString(), until: changed.toISOString() },
-      { sha256: after.sha256, since: changed.toISOString(), until: null },
-    ]);
+    expect(names.map(name => name.sha256)).toEqual([row.sha256, after.sha256]);
+    expect(names[0]!.until).toBe(names[1]!.since);
+    expect(names[1]!.until).toBeNull();
+    expect(Date.parse(names[0]!.since)).toBeGreaterThanOrEqual(t0.getTime());
+    expect(Date.parse(names[1]!.since)).toBeLessThan(changed.getTime());
     await s.round(new Date(changed.getTime() + 29 * DAY));
     expect([s.live(row.sha256!), s.backedUp(row.sha256!), s.backedUp(after.sha256)]).toEqual([false, true, true]);
     await s.round(new Date(changed.getTime() + 31 * DAY));
@@ -351,11 +360,11 @@ describe('a restore from the store\'s backup', () => {
     const before = randomBytes(4000);
     const row = await s.sent(before);
     await s.round(t0);
+    const at = await s.databaseTime();
     const after = await s.app.ctx.files.putBytes(s.db, randomBytes(4100));
     await s.db.update(attachments).set({ sha256: after.sha256, size: after.size }).where(eq(attachments.id, row.id));
     await s.round(new Date(t0.getTime() + 60_000));
     await s.round(new Date(t0.getTime() + 2 * DAY));
-    const at = new Date(t0.getTime() + 30_000).toISOString();
     const plan = (await s.restore({ attachmentId: row.id, at, dryRun: true })).json() as { digest: string; items: { action: string; sha256: string }[] };
     expect(plan.items).toEqual([expect.objectContaining({ action: 'back', sha256: row.sha256 })]);
     expect((await s.restore({ attachmentId: row.id, at, dryRun: false, digest: plan.digest })).statusCode).toBe(200);
@@ -368,6 +377,7 @@ describe('a restore from the store\'s backup', () => {
     const t0 = new Date();
     const [one, two] = [await s.sent(randomBytes(3000)), await s.sent(randomBytes(3000))];
     await s.round(t0);
+    const at = await s.databaseTime();
     await s.db.delete(attachments).where(eq(attachments.id, one.id));
     await s.db.delete(attachments).where(eq(attachments.id, two.id));
     const later = await s.sent(randomBytes(3000));
@@ -379,7 +389,6 @@ describe('a restore from the store\'s backup', () => {
     const other = '00000000-0000-4000-8000-0000000000bb';
     await s.db.execute(sql`INSERT INTO net.file_backup_names (attachment_id, company_id, sha256, "row", since, until)
       VALUES (gen_random_uuid(), ${other}, ${one.sha256}, ${JSON.stringify({ company_id: other, name: 'theirs.bin' })}::jsonb, ${t0.toISOString()}::timestamptz, ${new Date(t0.getTime() + 40_000).toISOString()}::timestamptz)`);
-    const at = new Date(t0.getTime() + 30_000).toISOString();
     const plan = (await s.restore({ at, dryRun: true })).json() as { digest: string; items: { attachmentId: string; action: string }[] };
     expect(plan.items.map(item => [item.attachmentId, item.action]).sort()).toEqual([[one.id, 'again'], [two.id, 'again']].sort());
     expect((await s.restore({ at, dryRun: false, digest: plan.digest })).json()).toMatchObject({ applied: 2, waiting: 0 });
@@ -476,5 +485,114 @@ describe('a restore from the store\'s backup', () => {
     expect(names.map(name => name.sha256)).toEqual([hidden.sha256]);
     expect(JSON.stringify(names)).not.toContain(secret);
     expect((await s.restore({ attachmentId: row.id, at: new Date(t0.getTime() + 1).toISOString(), dryRun: true })).json()).toMatchObject({ items: [] });
+  });
+});
+
+describe('turn 45 independent review', () => {
+  it('restores readable bytes when a live record has lost its file', async () => {
+    const s = await stand();
+    const at = new Date();
+    const bytes = Buffer.from('retained attachment');
+    const row = await s.sent(bytes);
+    const sha = row.sha256!;
+    await s.round(at);
+    expect(s.backedUp(sha)).toBe(true);
+    await s.db.delete(attachments).where(eq(attachments.id, row.id));
+    await s.round(new Date(at.getTime() + 60_000));
+    await s.app.ctx.files.store().remove(sha);
+    const plan = (await s.restore({ attachmentId: row.id, dryRun: true })).json();
+    const result = (await s.restore({ attachmentId: row.id, dryRun: false, digest: plan.digest })).json();
+    expect(result.applied).toBe(1);
+    expect(s.live(sha)).toBe(true);
+    expect(await s.app.ctx.files.bytes(s.db, sha)).toEqual(bytes);
+  });
+
+  it('repairs a damaged live file from another live holder when its backup is unavailable', async () => {
+    const s = await stand();
+    const bytes = Buffer.from('another verified holder');
+    const row = await s.sent(bytes);
+    const sha = row.sha256!;
+    await s.round(new Date());
+    const remote = await s.worker('two');
+    const path = s.app.ctx.files.store().path(sha);
+    const good = readFileSync(path);
+    await s.db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id, verified) VALUES (${sha}, ${remote}, true) ON CONFLICT DO NOTHING`);
+    await s.db.delete(attachments).where(eq(attachments.id, row.id));
+    await s.round(new Date());
+    await s.db.execute(sql`DELETE FROM net.file_backups WHERE sha256 = ${sha}`);
+    writeFileSync(path, 'damaged');
+    const plan = (await s.restore({ attachmentId: row.id, dryRun: true })).json();
+    const run = () => s.restore({ attachmentId: row.id, dryRun: false, digest: plan.digest });
+    expect((await run()).json()).toMatchObject({ applied: 0, waiting: 1 });
+    expect(await s.leader.take(remote, sha, Readable.from([good]))).toBe(201);
+    expect((await run()).json()).toMatchObject({ applied: 1 });
+    expect(await s.app.ctx.files.bytes(s.db, sha)).toEqual(bytes);
+  });
+
+  it('keeps live bytes already marked for removal while a retained version is waiting for its backup', async () => {
+    const s = await stand();
+    const row = await s.sent(Buffer.from('last readable copy'));
+    await s.db.delete(attachments).where(eq(attachments.id, row.id));
+    await s.db.execute(sql`UPDATE net.files SET drop_at = now() WHERE sha256 = ${row.sha256}`);
+    await dropDue(s.app.ctx, new Date(Date.now() + 60_000));
+    expect(s.live(row.sha256!)).toBe(true);
+    await s.round(new Date());
+    expect(s.backedUp(row.sha256!)).toBe(true);
+  });
+
+  it('retains an overwritten version that lived entirely between two sweeps', async () => {
+    const s = await stand();
+    const start = new Date();
+    const row = await s.sent(Buffer.from('first'));
+    await s.round(start);
+    const middle = await s.app.ctx.files.putBytes(s.db, Buffer.from('second'));
+    const last = await s.app.ctx.files.putBytes(s.db, Buffer.from('third'));
+    for (const version of [middle, last]) {
+      await s.db.update(attachments).set({ sha256: version.sha256, size: version.size }).where(eq(attachments.id, row.id));
+    }
+    await s.round(new Date(start.getTime() + 60_000));
+    const versions = rowsOf<{sha256: string}>(await s.db.execute(sql`select sha256 from net.file_backup_names where attachment_id = ${row.id}`)).map(v => v.sha256);
+    expect(versions).toContain(middle.sha256);
+  });
+});
+
+describe('restore preview on the turn 45 candidate', () => {
+  it('keeps a newer edit made after the owner approved the preview', async () => {
+    const s = await stand();
+    const start = new Date();
+    const original = await s.sent(Buffer.from('original'));
+    await s.round(start);
+    const at = await s.databaseTime();
+    const previous = await s.app.ctx.files.putBytes(s.db, Buffer.from('previewed'));
+    const latest = await s.app.ctx.files.putBytes(s.db, Buffer.from('new edit'));
+    const set = (version: typeof latest) => s.db.update(attachments).set({ sha256: version.sha256, size: version.size }).where(eq(attachments.id, original.id));
+    await set(previous);
+    await s.round(new Date(start.getTime() + 60_000));
+    const request = { attachmentId: original.id, at };
+    const preview = (await s.restore({ ...request, dryRun: true })).json();
+    expect(preview.items).toHaveLength(1);
+    await set(latest);
+    const result = await s.restore({ ...request, dryRun: false, digest: preview.digest });
+    expect({ status: result.statusCode, keptLatest: (await s.rowOf(original.id))?.sha256 === latest.sha256 }).toEqual({ status: 409, keptLatest: true });
+  });
+});
+
+describe('backup cleanup with a set-aside database', () => {
+  it('preserves local and remote historical files missing from the restored catalog', async () => {
+    const s = await stand();
+    const row = await s.sent(Buffer.from('old historical file'));
+    await s.round(new Date());
+    expect(s.backedUp(row.sha256!)).toBe(true);
+    const remote = await s.worker('one');
+    const former = await s.worker('two');
+    await s.db.execute(sql.raw('CREATE DATABASE hornhoof_before_restore_review'));
+    onTestFinished(() => s.db.execute(sql.raw('DROP DATABASE IF EXISTS hornhoof_before_restore_review')).then(() => undefined));
+    await s.db.delete(attachments).where(eq(attachments.id, row.id));
+    await s.db.execute(sql`DELETE FROM net.file_backup_names WHERE sha256 = ${row.sha256}`);
+    await s.db.execute(sql`DELETE FROM net.file_backups WHERE sha256 = ${row.sha256}`);
+    await s.round(new Date());
+    expect.soft(s.backedUp(row.sha256!)).toBe(true);
+    expect.soft((await backupView(s.db, former, s.server.id)).clear).toBe(false);
+    expect.soft(await takeBackupReport(s.db, remote, { held: [row.sha256!], dropped: [] })).toEqual([]);
   });
 });
