@@ -149,10 +149,22 @@ function PlanMachines({ sub: s, now }: { sub: SubView; now: number }) {
   return <>{s.machines.length ? <ul className="plist" aria-label={t.subs.machinesOf(subName(t, s))}>{s.machines.map(m => <li key={m.id}><MachineMark /><span className="nm"><b>{m.hostname}</b><small>{s.owner.name}, {planStateOnMachine(t, language, m, s.limits, now, s.limitsUpdatedAt)}</small></span></li>)}</ul> : <p className="part-note" dir="auto">{t.subs.noMachine}</p>}{line && <p className="part-note" dir="auto">{line}</p>}</>;
 }
 
+function hostContactLine(t: Messages, language: Language, machines: SubView['machines']): string {
+  const connected = machines.find(m => m.hostOnline);
+  if (connected) return t.cards.notes.hostConnected(connected.hostname);
+  const host = machines.length === 1 ? machines[0] : undefined;
+  if (host?.hostLastSeenAt) {
+    const at = new Intl.DateTimeFormat(language, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(host.hostLastSeenAt));
+    return t.cards.notes.hostLastContact(host.hostname, at);
+  }
+  if (host?.hostOnline === false) return t.cards.notes.hostContactUnknown(host.hostname);
+  return t.cards.notes.offline(host?.hostname ?? '');
+}
+
 /* What the head of the card says under the state: until when a plan at its limit waits, or where an offline plan waits. */
 function stateLine(t: Messages, language: Language, s: SubView, now: number): string | null {
   const state = stateOf(s, now);
-  if (state === 'offline' && s.status === 'ready') return t.cards.notes.offline(s.machines.length === 1 ? s.machines[0]!.hostname : '');
+  if (state === 'offline') return hostContactLine(t, language, s.machines);
   if (state !== 'limit') return null;
   const limit = limitState(s.limits, now);
   const at = clock(language, limit.resetsAt);

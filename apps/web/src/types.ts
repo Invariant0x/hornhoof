@@ -102,7 +102,7 @@ export type SubView = {
   owner: { id: string; name: string };
   place: { kind: 'company' | 'department' | 'listed'; id: string | null; name: string };
   /* The machines the plan runs on, oldest first, with its state on each. */
-  machines: { id: string; hostname: string; status: PlanStatus; online: boolean }[];
+  machines: { id: string; hostname: string; status: PlanStatus; online: boolean; hostOnline?: boolean; hostLastSeenAt?: string | null }[];
   limits: Limits | null;
   /* When the last snapshot arrived. Undefined on an older server, null when an old row never recorded it. */
   limitsUpdatedAt?: string | null;
@@ -936,6 +936,7 @@ export type MachineView = {
   arch: string;
   owner: { id: string; name: string };
   online: boolean;
+  programsOnline?: boolean;
   lastSeenAt: string | null;
   /* The plans that run on it, with their state there; none: it only lends itself to test runs. */
   plans: { id: string; provider: ProviderId; status: PlanStatus; online: boolean }[];

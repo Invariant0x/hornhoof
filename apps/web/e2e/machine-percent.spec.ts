@@ -402,3 +402,34 @@ for (const skin of SKINS) for (const language of LANGS) for (const [width, heigh
     }
   });
 }
+
+/* The same host stays connected on Machines while its subscription waits for a socket. */
+const rankedContactLocales = LANGUAGES.map(({ id }) => {
+  const t = WORDS[id];
+  const text = [t.subs.states.offline, t.cards.notes.hostConnected('build-a'), t.cards.notes.loginOffline('build-a'), t.machines.online, t.machines.noConnection, t.machines.notSeen];
+  return { id, length: text.join('').length };
+}).sort((a, b) => a.length - b.length);
+const contactLocales = new Set([rankedContactLocales[0]!.id, rankedContactLocales.at(-1)!.id, ...LANGS.filter(id => READS[id] === 'right')]);
+for (const language of contactLocales) for (const skin of SKINS) for (const [width, height] of WIDTHS) {
+  test(`host and subscription connection in ${language}, ${skin}, at ${width}px`, async ({ page }, info) => {
+    const t = WORDS[language];
+    const plan: SubView = { ...PLAN, online: false, status: 'needs_login', machines: [
+      { id: 'm1', hostname: 'build-a', online: false, status: 'needs_login', hostOnline: true, hostLastSeenAt: new Date(NOW).toISOString() },
+    ] };
+    await openScreen(page, language, skin, width, height, 'subscriptions', [plan]);
+    const row = page.locator('tr.rm').first();
+    await expect(row).toContainText(t.subs.states.offline);
+    await row.locator('button.rowbtn').click();
+    await expect(page.getByText(t.cards.notes.hostConnected('build-a'), { exact: true })).toBeVisible();
+    await expect(page.getByText(t.cards.notes.loginOffline('build-a'), { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await page.screenshot({ path: info.outputPath('subscription.png') });
+    await page.getByRole('navigation').getByRole('button', { name: t.shell.tabs.machines, exact: true }).click();
+    const host = page.getByRole('row').filter({ hasText: 'build-a' }).first();
+    await expect(host).toContainText(t.machines.online);
+    await host.locator('button.rowbtn').click();
+    await expect(page.getByRole('article', { name: 'build-a', exact: true })).toBeVisible({ timeout: 5000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await page.screenshot({ path: info.outputPath('machine.png') });
+  });
+}

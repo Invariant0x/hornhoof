@@ -4,10 +4,9 @@ import { idOnly } from '../../db/selections.js';
 import { nodeHeld } from '../updates/drain.js';
 import { availableMemory } from './capacity.js';
 import { and, asc, eq, isNull } from 'drizzle-orm';
-import type { Db } from '../../db/client.js';
 import { nodes, subscriptions, testRuns } from '../../db/schema.js';
-import { nodeIdentity, type NodeHub, type NodeIdentity, type SaidLoad } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
+import { nodeIdentity, type NodeHub, type NodeIdentity, type SaidLoad } from '../nodes/hub.js';
 import { latestReport } from '../nodes/host-load.js';
 import { machineDisk } from '../nodes/machine-disk.js';
 
@@ -29,17 +28,7 @@ export function forRun(own: SaidLoad | null, combined: NodeLoad | null): NodeLoa
   return own && combined ? { ...combined, cpus: own.cpus, load: own.load, memFree: own.memFree, memTotal: own.memTotal } : null;
 }
 
-/* The nodes that stand for the company's machines: each machine's own and its plans'. A removed plan's node is gone from
-   its machine, though it keeps its key until it hears so. Plans that joined with one command came at the same moment, so
-   they go by name. */
-export async function machineNodes(db: Db, companyId: string) {
-  return db
-    .select({ id: nodes.id, machineId: nodes.machineId, subscriptionId: nodes.subscriptionId, provider: subscriptions.provider, status: nodes.status, lastSeenAt: nodes.lastSeenAt })
-    .from(nodes)
-    .leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId))
-    .where(and(eq(nodes.companyId, companyId), liveNode, isNull(subscriptions.removedAt)))
-    .orderBy(asc(nodes.createdAt), asc(subscriptions.provider), asc(nodes.id));
-}
+export { machineNodes } from '../nodes/machine-contact.js';
 
 /* A machine as these nodes of it say: online while one of them is, and how busy it is. The machines screen and the pool
    both show it from here, so they never disagree. */
