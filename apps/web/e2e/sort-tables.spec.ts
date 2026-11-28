@@ -104,7 +104,7 @@ async function checkMachineFilters(page: Page, section: Locator, t: Messages, di
   const rows = section.locator('tr.rm');
   const groups: [string, string, number][] = [
     [t.tables.provider, 'Codex', 1],
-    [t.tables.status, t.cards.offline, 1],
+    [t.tables.status, t.machines.noConnection, 1],
     [t.tables.testFilters, t.tables.lentFilter, 2],
   ];
   for (const [label, option, shown] of groups) {

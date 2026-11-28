@@ -41,7 +41,7 @@ function tunnel({ program = process.execPath, first = null as Answer } = {}) {
     answer = next;
   };
   const write = (token: string) => answers(settingsWith(token));
-  const started = () => (existsSync(out) ? readFileSync(out, 'utf8').trim().split('\n').map(l => l.split(' ')) : []);
+  const started = () => (existsSync(out) ? readFileSync(out, 'utf8').split('\n').slice(0, -1).map(l => l.split(' ')) : []);
   const alive = (pid: string) => {
     try {
       process.kill(Number(pid), 0);

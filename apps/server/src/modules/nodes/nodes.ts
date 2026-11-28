@@ -78,7 +78,7 @@ export const shownMachine = (config: { machineId: string | null }) =>
 /* Whether a row is one a company's install made for its own machine, and no computer someone joined. */
 export const isServerInstall = (machineKey: string): boolean => machineKey.startsWith(SERVER_KEY);
 
-function isBuiltinHost(
+export function isBuiltinHost(
   m: { key: string; networkId: string | null },
   hostId: string | null,
   networkId: string | null,

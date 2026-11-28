@@ -33,6 +33,7 @@ import { connectionRoutes } from './connection-routes.js';
 import { disconnectMachines, refuseLeader } from './disconnect.js';
 import { builtinOf, nodeIdentity, ownBuiltin, ownMachine as machineOfServer, type NodeHub, type NodeIdentity } from './hub.js';
 import { nodeImageOfBuild } from './image.js';
+import { machineContact } from './machine-contact.js';
 import { machineFolders } from './machine-disk.js';
 import { builtinMachine, isServerInstall, liveNode, otherBuild, settlePlans, shownMachine } from './nodes.js';
 import { machineProgramNodes, machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
@@ -271,14 +272,13 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const live = and(eq(machines.companyId, me.companyId), isNull(machines.revokedAt), shownMachine(config));
     const rows = await db
-      .select({ ...STORE_COLUMNS, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups, role: machines.role, uploadState: machines.uploadState })
+      .select({ ...STORE_COLUMNS, reportAt: machines.reportAt, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups, role: machines.role, uploadState: machines.uploadState })
       .from(machines)
       .innerJoin(people, eq(people.id, machines.personId))
       .where(me.scopeKind === 'company' ? live : and(live, eq(machines.personId, me.id)))
       .orderBy(machines.createdAt);
     const served = await machineNodes(db, me.companyId);
     const on = (machineId: string) => served.filter(n => n.machineId === machineId);
-    const latest = (seen: (Date | null)[]) => seen.reduce<Date | null>((a, b) => (b && (!a || b > a) ? b : a), null);
     /* What runs on each machine now: the employees whose program lives there, busy while a turn of theirs runs, and the
        parts of test and work runs it takes. A company key's employees are on the built-in node. */
     const placed = await runningAgents(ctx, me);
@@ -374,6 +374,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
           : null,
       machines: rows.map(m => {
         const state = statesByMachine.get(m.id)!;
+        const programs = machineProgramState(hub, on(m.id).map(n => n.id), m.id, programHost, own, m.networkId);
         return {
           id: m.id,
           hostname: m.hostname,
@@ -385,9 +386,10 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
           serverInstall: isServerInstall(m.machineKey),
           ...state,
           ...copyNamesOf(state.load?.disk?.copies),
-          ...machineProgramState(hub, on(m.id).map(n => n.id), m.id, programHost, own, m.networkId),
+          ...programs,
+          programsOnline: programs.online,
+          ...machineContact(m, on(m.id), programs.online || state.online),
           otherBuild: otherBuild(hub, on(m.id).map(n => n.id), config.nodeBuild),
-          lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
           plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
           folders: machineFolders(hub, on(m.id), cardBuiltin(held !== null, m, serverMachine, own)),
           lendsTests: m.lendsTests,

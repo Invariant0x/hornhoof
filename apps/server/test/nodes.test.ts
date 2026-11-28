@@ -231,6 +231,61 @@ describe('a machine without a plan', () => {
     expect(await db.select().from(subscriptions).where(eq(subscriptions.kind, 'personal'))).toEqual([]);
   });
 
+  it('shows keeper contact on both screens independently of the subscription socket', async () => {
+    const { app, db, ceo, code, ids } = await connected(['antigravity']);
+    const { machine } = (await join(app, code)).json();
+    const now = new Date();
+    const stale = new Date(now.getTime() - 600_000);
+    await db.update(nodes).set({ lastSeenAt: stale }).where(eq(nodes.machineId, machine.id));
+    const check = async (reportAt: Date | null, online: boolean, last: Date) => {
+      await db.update(machines).set({ networkId: hashToken('synthetic-keeper'), role: 'worker', reportAt }).where(eq(machines.id, machine.id));
+      const card = (await machinesOf(app, ceo)).find((m: { id: string }) => m.id === machine.id);
+      const views = (await app.inject({ url: '/api/subscriptions', ...as(ceo) })).json().subscriptions;
+      const sub = views.find((p: { id: string }) => p.id === ids[0]);
+      expect(card).toMatchObject({ online, lastSeenAt: last.toISOString() });
+      expect(sub).toMatchObject({ online: false, machines: [expect.objectContaining({ id: machine.id, online: false, hostOnline: online, hostLastSeenAt: last.toISOString() })] });
+    };
+    await check(now, true, now);
+    await check(new Date(stale.getTime() - 1000), false, stale);
+    await check(null, false, stale);
+    await db.update(nodes).set({ lastSeenAt: null }).where(eq(nodes.machineId, machine.id));
+    const unknown = (await machinesOf(app, ceo)).find((m: { id: string }) => m.id === machine.id);
+    expect(unknown).toMatchObject({ online: false, lastSeenAt: null });
+  });
+
+  it('recognizes the local built-in socket on a legacy host with no keeper id', async () => {
+    const key = 'k'.repeat(40);
+    const { app, ceo, code, ids } = await connected(['codex'], { NODE_KEY: key, HORNHOOF_HOST_ID: hashToken(`hornhoof-host:${MACHINE.machineId}`) });
+    const { machine } = (await join(app, code)).json();
+    const builtin = await connectNode(await listen(app), key);
+    builtin.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    await until(async () => (await machinesOf(app, ceo)).find((m: { id: string }) => m.id === machine.id)?.online);
+    const views = (await app.inject({ url: '/api/subscriptions', ...as(ceo) })).json().subscriptions;
+    expect(views.find((s: { id: string }) => s.id === ids[0])).toMatchObject({ online: false, machines: [expect.objectContaining({ hostOnline: true })] });
+    builtin.close();
+    await builtin.closed;
+  });
+
+  it('counts a connected sibling as host contact without making another plan ready', async () => {
+    const { app, ceo, code, ids } = await connected(['codex', 'claude']);
+    const { machine, nodes: joined } = (await join(app, code)).json();
+    const key = joined.find((n: { subscriptionId: string }) => n.subscriptionId === ids[0]).key;
+    const url = await listen(app);
+    const first = await connectNode(url, key);
+    first.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    const plans = async () => (await app.inject({ url: '/api/subscriptions', ...as(ceo) })).json().subscriptions;
+    const plan = async (id: string) => (await plans()).find((s: { id: string }) => s.id === id);
+    await until(async () => (await plan(ids[0]!)).status === 'ready');
+    const replacement = await connectNode(url, key);
+    replacement.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    await first.closed;
+    await until(async () => (await plan(ids[0]!)).status === 'ready');
+    expect(await plan(ids[0]!)).toMatchObject({ online: true, status: 'ready' });
+    expect(await plan(ids[1]!)).toMatchObject({ online: false, machines: [expect.objectContaining({ id: machine.id, online: false, hostOnline: true })] });
+    replacement.close();
+    await replacement.closed;
+  });
+
   it('shows the machine online while its node is connected, and disconnects it as any other', async () => {
     const { app, db } = await testApp();
     const url = await listen(app);
@@ -348,8 +403,8 @@ describe('one plan on several machines', () => {
     const sub = async () => (await app.inject({ url: '/api/subscriptions', ...as(ceo) })).json().subscriptions.find((s: { id: string }) => s.id === plan);
     await until(async () => (await sub()).status === 'ready');
     expect((await sub()).machines).toEqual([
-      { id: mac.machine.id, hostname: 'dev-mac', status: 'needs_login', online: false },
-      { id: laptop.machine.id, hostname: 'dev-laptop', status: 'ready', online: true },
+      { id: mac.machine.id, hostname: 'dev-mac', status: 'needs_login', online: false, hostOnline: false, hostLastSeenAt: null },
+      { id: laptop.machine.id, hostname: 'dev-laptop', status: 'ready', online: true, hostOnline: true, hostLastSeenAt: expect.any(String) },
     ]);
     const tower = (await join(app, await machineCode(app, ceo), { machineId: 'tower-0003-abcd', hostname: 'dev-tower' })).json();
     expect(await machinesOf(app, ceo)).toMatchObject([
