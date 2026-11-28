@@ -428,7 +428,7 @@ for (const language of contactLocales) for (const skin of SKINS) for (const [wid
     const host = page.getByRole('row').filter({ hasText: 'build-a' }).first();
     await expect(host).toContainText(t.machines.online);
     await host.locator('button.rowbtn').click();
-    await expect(page.getByRole('article', { name: 'build-a', exact: true })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole('article', { name: 'build-a', exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await page.screenshot({ path: info.outputPath('machine.png') });
   });
