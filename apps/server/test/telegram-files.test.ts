@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { eq } from 'drizzle-orm';
+import { telegramIncoming } from '../src/db/schema.js';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentEvents, agents, assistants, attachments, jobs, people, telegramReplies } from '../src/db/schema.js';
@@ -56,10 +57,21 @@ async function company(env: NodeJS.ProcessEnv = {}) {
   await app.inject({ method: 'PATCH', url: `/api/people/${owner!.id}`, payload: { telegram: '@Ivan_K' }, ...as(ceo) });
   expect((await app.inject({ method: 'PUT', url: '/api/agents/orchestrator/telegram', payload: { token: TOKEN }, ...as(ceo) })).statusCode).toBe(200);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-  return { tg, app, db, builtin, orchestrator: orchestrator! };
+  return { tg, app, db, builtin, ceo, orchestrator: orchestrator! };
 }
 
 describe('a file sent to a head through its Telegram bot', () => {
+  it('keeps one attachment while an offline agent waits across delivery retries', async () => {
+    const { tg, app, db, builtin, ceo } = await company();
+    builtin.close();
+    await until(async () => (await state(app, ceo)).reason === 'machine_offline');
+    tg.files.set('zip-pending', ZIP);
+    const update = tg.send(TOKEN, IVAN, { document: { file_id: 'zip-pending', file_name: 'queued.zip', file_size: ZIP.length } });
+    await expect.poll(async () => (await db.select().from(telegramIncoming).where(eq(telegramIncoming.updateId, update)))[0]?.attempts ?? 0,
+      { timeout: 15_000 }).toBeGreaterThanOrEqual(3);
+    expect(await db.select().from(attachments).where(eq(attachments.name, 'queued.zip'))).toHaveLength(1);
+  });
+
   it('reaches the agent as a file it downloads and keeps in its repository, with the words under it', async () => {
     const { tg, app, db, builtin, orchestrator } = await company();
     tg.files.set('zip-1', ZIP);

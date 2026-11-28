@@ -4,7 +4,10 @@ import type { Db } from '../../db/client.js';
 import { telegramBots, telegramIncoming } from '../../db/schema.js';
 import type { TelegramUpdate } from './api.js';
 
-type Delivery = (group: TelegramUpdate[]) => Promise<void>;
+export type PreparedFiles = { ids: string[]; notes: string[] };
+export type FileCheckpoint = { saved?: PreparedFiles; keep(files: PreparedFiles): Promise<void> };
+type Input = { updates: TelegramUpdate[]; files?: PreparedFiles };
+type Delivery = (group: TelegramUpdate[], checkpoint: FileCheckpoint) => Promise<void>;
 type Row = typeof telegramIncoming.$inferSelect;
 const RETRY_MAX = 60_000;
 
@@ -16,7 +19,7 @@ export async function keepUpdates(db: Db, key: Buffer, botId: string, group: Tel
       .where(and(eq(telegramBots.id, botId), lte(telegramBots.updateOffset, first.update_id))).returning({ id: telegramBots.id });
     if (!advanced.length || !first.message?.from || first.message.from.is_bot || first.message.chat.type !== 'private') return;
     await tx.insert(telegramIncoming).values({
-      botId, updateId: first.update_id, chatId: first.message.chat.id, payloadEnc: encryptSecret(JSON.stringify(group), key),
+      botId, updateId: first.update_id, chatId: first.message.chat.id, payloadEnc: encryptSecret(JSON.stringify({ updates: group }), key),
     });
   });
 }
@@ -80,8 +83,14 @@ export class IncomingQueue {
     if (!held) return;
     const ours = and(eq(telegramIncoming.id, row.id), eq(telegramIncoming.attempts, row.attempts + 1));
     try {
-      const group: TelegramUpdate[] = JSON.parse(decryptSecret(row.payloadEnc, this.key));
-      await this.deliver(group);
+      const input: Input = JSON.parse(decryptSecret(row.payloadEnc, this.key));
+      await this.deliver(input.updates, {
+        ...(input.files && { saved: input.files }),
+        keep: async files => {
+          const payloadEnc = encryptSecret(JSON.stringify({ updates: input.updates, files }), this.key);
+          await this.db.update(telegramIncoming).set({ payloadEnc }).where(ours);
+        },
+      });
       await this.db.delete(telegramIncoming).where(ours);
     } catch (err) {
       this.warn(err);

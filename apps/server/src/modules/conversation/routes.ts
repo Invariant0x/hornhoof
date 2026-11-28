@@ -1,6 +1,6 @@
 import type { TelegramReply } from '../telegram/api.js';
 import { createHash } from 'node:crypto';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { idOnly, only } from '../../db/selections.js';
@@ -8,13 +8,13 @@ import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import { maskEvent, viewerOf } from '../../auth/agent-view.js';
-import { agentEvents, agents, companies, departments, jobs } from '../../db/schema.js';
+import { agents, companies, departments, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import type { Person } from '../../auth/session.js';
 import { agentFor, type AgentRow } from '../agents/find.js';
 import { answerDirectly } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
-import { lastEvents, listEvents } from '../events/store.js';
+import { deliveredMessage, lastEvents, listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
 import { answerBy, answerForAssistant, answerInTelegram, FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, turnPrompt, whoIs, type Standing, type WrittenFrom } from './prompt.js';
@@ -159,11 +159,9 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
   async function replyToRepeat(req: FastifyRequest, base: string, reply: FastifyReply): Promise<boolean> {
     const { me, agent } = await agentFor(ctx, req);
     const receipt = messageReceipt(base, me, agent.id, MessageBody.parse(req.body));
-    const [event] = await db.select({ jobId: agentEvents.jobId }).from(agentEvents).where(and(
-      eq(agentEvents.companyId, me.companyId), eq(agentEvents.agentId, agent.id), sql`${agentEvents.data}->>'chatReceipt' = ${receipt}`,
-    )).limit(1);
-    if (!event?.jobId) return false;
-    reply.code(202).send({ jobId: event.jobId });
+    const jobId = await deliveredMessage(db, me.companyId, agent.id, receipt);
+    if (!jobId) return false;
+    reply.code(202).send({ jobId });
     return true;
   }
 

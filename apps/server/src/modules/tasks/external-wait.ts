@@ -1,3 +1,4 @@
+import { deliveredMessage } from '../events/store.js';
 import { expireWait, markRecord } from './wait-expiry.js';
 import { randomUUID } from 'node:crypto';
 import { WaitOnInput, WaitPlan, type WaitOwnerBinding } from '@hornhoof/protocol/waits';
@@ -221,12 +222,8 @@ export async function sendTaskMessage(ctx: Ctx, input: TaskMessage, turn: Messag
 /* The turn an employee's words went into before, from the same turn of the same sender, on the same task or on none: the
    input lock holds the recipient's words in line, so a repeat comes after them. Words whose turn never went out, failed or
    dropped as stale before it started, did not reach the recipient, and go again. */
-async function sentBefore(ctx: Ctx, agentId: string, message: TurnMessage, taskId: string | null): Promise<string | null> {
-  if (message.chatReceipt) {
-    const [kept] = await ctx.db.select(only(agentEvents, 'jobId')).from(agentEvents)
-      .where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'chatReceipt' = ${message.chatReceipt}`)).limit(1);
-    return kept?.jobId ?? null;
-  }
+async function sentBefore(ctx: Ctx, { agentId, companyId }: Pick<TaskMessage, 'agentId' | 'companyId'>, message: TurnMessage, taskId: string | null): Promise<string | null> {
+  if (message.chatReceipt) return deliveredMessage(ctx.db, companyId, agentId, message.chatReceipt);
   if (!message.by || !message.byTurn) return null;
   const [sender] = await ctx.db.select(only(jobs, 'startedAt')).from(jobs).where(eq(jobs.id, message.byTurn));
   if (!sender?.startedAt) return null;
@@ -245,7 +242,7 @@ async function queueMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Pr
   const required = !!input.actor.agentId;
   const queued: QueuedMessage = await onAgent(ctx, input.agentId, async () => {
     if (input.task !== undefined) return queueBoundMessage(ctx, { ...input, task: input.task }, turn);
-    const before = await sentBefore(ctx, input.agentId, turn.message, null);
+    const before = await sentBefore(ctx, input, turn.message, null);
     return before ? { id: before, repeated: true } : { id: await insertOrDeliverTurn(ctx, turn) };
   });
   if (queued.repeated) return { id: queued.id, repeated: true };
@@ -336,7 +333,7 @@ async function queueBoundMessage(ctx: Ctx, input: TaskMessage & { task: number |
   const [sender] = input.actor.agentId ? await party(input.actor.agentId) : [];
   const [recipient] = await party(input.agentId);
   requireMessageTask(task, recipient, sender);
-  const before = await sentBefore(ctx, input.agentId, turn.message, task.id);
+  const before = await sentBefore(ctx, input, turn.message, task.id);
   if (before) return { id: before, repeated: true };
   /* A word about a closed task, such as that it is done, goes as a message naming it: no work is left on it to wake. */
   if (!OPEN.has(task.status)) return { id: await insertOrDeliverTurn(ctx, { ...turn, message: { ...turn.message, task: { id: task.id, number: task.number } } }) };

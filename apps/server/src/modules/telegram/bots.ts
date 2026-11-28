@@ -96,8 +96,8 @@ class Listener {
     this.unsubscribe = ctx.bus.subscribe(bot.companyId, m => {
       if (m.type === 'working' || (m.type === 'agent_event' && m.agentId === bot.agentId)) this.answer();
     });
-    this.incoming = new IncomingQueue(ctx.db, ctx.config.secret, bot.id, async group => {
-      if (await receive(this.ctx, this.bot, group, this.say, this.fetchFile, this.transcribe)) this.answer();
+    this.incoming = new IncomingQueue(ctx.db, ctx.config.secret, bot.id, async (group, checkpoint) => {
+      if (await receive(this.ctx, this.bot, group, this.say, this.fetchFile, this.transcribe, checkpoint)) this.answer();
     }, err => this.warn(err, 'Telegram input remains queued.'));
     this.incoming.wake();
     this.loop = this.listen();
