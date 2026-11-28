@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { builtinModules } from 'node:module';
+import { builtinModules, createRequire } from 'node:module';
 import { matchesGlob, posix } from 'node:path';
 import { PREPARATION_UNIT, runtimeClass, type EnvironmentDescription, type RepositoryScope, type TestEnvironmentV1, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
 import { checkCacheContext, type CacheContext } from './test-cache.js';
@@ -45,7 +45,8 @@ const COMPUTED_CALLS = new RegExp(COMPUTED.source, 'g');
 /* A computed import whose text starts with a fixed relative folder, as import(`./${id}.js`): it can only load what that folder holds. */
 const FOLDER_TEMPLATE = /^(?:import|require|import\.meta\.resolve)\s*\(\s*`(\.{1,2}\/(?:[^`$]*\/)?)\$\{/;
 const STRING = /(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g;
-const GLOB_IMPORT = /\bimport\.meta\.glob\s*\(\s*\[?\s*(['"`])([^'"`\n]+)\1/g;
+const GLOB_IMPORT = /\bimport\s*\.\s*meta\s*\.\s*glob\b/;
+const require = createRequire(import.meta.url);
 /* A type alone is gone before anything runs, as Vitest's graph knows too. */
 const TYPE_ONLY = /^[ \t]*(?:import|export)\s+type\s*(?:\{[^}]*\}|\*(?:\s+as\s+[\w$]+)?|[\w$]+(?=\s+from\b))\s*from\s*(['"])[^'"\n]+\1;?/gm;
 const LONGEST_PATH = 300;
@@ -218,8 +219,46 @@ function namedBy(tree: Tree, from: string, literal: string): Named {
   return manyFiles(tree.builtFrom(inPackage) ?? namedFolder(tree, text, inPackage));
 }
 
-function globImports(tree: Tree, from: string, text: string): string[] {
-  return [...text.matchAll(GLOB_IMPORT)].flatMap(([, , literal]) => namedPattern(tree, literal!, posix.join(tree.rootOf(from), literal!)));
+/* Vite resolves relative patterns from the importer and leading slashes from its root. */
+function globImports(tree: Tree, from: string, text: string, many: Set<string>): boolean {
+  if (!GLOB_IMPORT.test(text)) return false;
+  const ts = require('typescript') as typeof import('typescript');
+  const source = ts.createSourceFile(from, text, ts.ScriptTarget.Latest);
+  let opaque = false;
+
+  function addPatterns(argument: import('typescript').Expression | undefined): void {
+    const patterns = argument && ts.isArrayLiteralExpression(argument) ? argument.elements : [argument];
+    const included: string[] = [];
+    const excluded: string[] = [];
+    for (const pattern of patterns) {
+      if (!pattern || !ts.isStringLiteralLike(pattern)) {
+        opaque = true;
+        continue;
+      }
+      const negative = pattern.text.startsWith('!');
+      const literal = negative ? pattern.text.slice(1) : pattern.text;
+      const root = relativeLike(literal) ? posix.dirname(from) : literal.startsWith('/') ? tree.rootOf(from) : null;
+      if (root === null) {
+        opaque = true;
+        continue;
+      }
+      (negative ? excluded : included).push(posix.join(root, literal));
+    }
+    for (const path of tree.paths) {
+      if (included.some(pattern => matchesGlob(path, pattern)) && !excluded.some(pattern => matchesGlob(path, pattern))) many.add(path);
+    }
+  }
+
+  function visit(node: import('typescript').Node): void {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const { expression, name } = node.expression;
+      if (name.text === 'glob' && ts.isMetaProperty(expression) && expression.keywordToken === ts.SyntaxKind.ImportKeyword) addPatterns(node.arguments[0]);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(source);
+  return opaque;
 }
 /* What computed imports load: the files of a fixed folder their text starts with. True where one names no folder that holds a file,
    as that tells nothing about what it loads, so it stays unreadable. */
@@ -235,7 +274,8 @@ function computedImports(tree: Tree, from: string, text: string, many: Set<strin
 }
 function scanCode(tree: Tree, from: string, source: string): Scan {
   const runs = new Set<string>(), many = new Set<string>(), text = source.replace(TYPE_ONLY, '');
-  let opaque = computedImports(tree, from, text, many);
+  const unresolvedGlobs = globImports(tree, from, text, many);
+  let opaque = computedImports(tree, from, text, many) || unresolvedGlobs;
   for (const pattern of [STATEMENT, BARE_IMPORT, CALLED]) for (const [, , literal] of text.matchAll(pattern)) {
     const found = importedBy(tree, from, literal!);
     if (found) for (const path of found) runs.add(path);
@@ -246,7 +286,6 @@ function scanCode(tree: Tree, from: string, source: string): Scan {
     for (const path of named.file) runs.add(path);
     for (const path of named.many) many.add(path);
   }
-  for (const path of globImports(tree, from, text)) many.add(path);
   runs.delete(from); many.delete(from);
   return { edges: [...new Set([...runs, ...many])], runs: [...runs], opaque };
 }
