@@ -78,8 +78,7 @@ async function keepHere(ctx: Pick<Ctx, 'db' | 'files'>, mine: string | null, now
       ORDER BY at, sha256 LIMIT ${BATCH}`),
   );
   for (const row of waiting) {
-    const saved = backup.has(row.sha256) ? await backup.sealedFacts(row.sha256) : null;
-    if (saved?.sealedSha256 !== row.sealed_sha256 || saved.sealedSize !== Number(row.sealed_size)) {
+    if (!(await backup.matchesSealed(row.sha256, row.sealed_sha256, Number(row.sealed_size)))) {
       const sealed = live.sealed(row.sha256);
       if (!sealed) {
         await db.execute(sql`UPDATE net.files SET wanted_at = ${now.toISOString()}::timestamptz WHERE sha256 = ${row.sha256} AND wanted_at IS NULL`);

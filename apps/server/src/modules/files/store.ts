@@ -225,6 +225,12 @@ export class FileStore {
     return bytes === size && hash.digest('hex') === sha256;
   }
 
+  async matchesSealed(sha256: string, hash: string, size: number): Promise<boolean> {
+    if (!this.has(sha256)) return false;
+    const saved = await this.sealedFacts(sha256);
+    return saved.sealedSha256 === hash && saved.sealedSize === size;
+  }
+
   /* The hash and size of the sealed bytes of a file here, and the salt its head carries. */
   async sealedFacts(sha256: string): Promise<{ sealedSha256: string; sealedSize: number; salt: string }> {
     const count = counter();

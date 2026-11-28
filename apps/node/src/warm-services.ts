@@ -92,7 +92,11 @@ export class WarmServices {
   private timer: NodeJS.Timeout | undefined;
   private closed = false;
 
-  constructor(readonly options: WarmOptions) {}
+  private readonly serviceUser: JobUser | null;
+
+  constructor(readonly options: WarmOptions) {
+    this.serviceUser = options.user?.uid === process.getuid?.() ? null : options.user;
+  }
 
   async start(): Promise<void> {
     await this.sweep().catch(error => this.log(`warm services: sweep failed: ${String(error)}`));
@@ -189,7 +193,7 @@ export class WarmServices {
     mkdirSync(join(home, 'owners'), { recursive: true, mode: 0o700 });
     if (!existsSync(state)) {
       mkdirSync(state, { mode: 0o700 });
-      if (user && user.uid !== process.getuid?.()) chownSync(state, user.uid, user.gid);
+      if (this.serviceUser) chownSync(state, this.serviceUser.uid, this.serviceUser.gid);
     }
     const record = join(home, `service.${process.pid}.json`);
     writeFileSync(record, JSON.stringify({ service, repository }), { mode: 0o600 });
@@ -199,13 +203,12 @@ export class WarmServices {
   }
 
   private allowStateAccess(home: string): void {
-    const user = this.options.user;
-    const owner = process.getuid?.();
-    if (!user || owner === undefined || user.uid === owner) return;
+    const user = this.serviceUser;
+    if (!user) return;
     // Older nodes created the record with the default file mode.
     chmodSync(join(home, 'service.json'), 0o600);
     for (const dir of [this.options.root, home]) {
-      chownSync(dir, owner, user.gid);
+      chownSync(dir, -1, user.gid);
       chmodSync(dir, 0o710);
     }
   }
@@ -335,8 +338,7 @@ export class WarmServices {
   private spawnOptions(kept: Kept, command: Command) {
     const cwd = resolve(kept.repository, command.cwd);
     if (relative(kept.repository, cwd).startsWith('..')) throw new Error(`A command of ${kept.service.id} runs outside its repository.`);
-    const user = this.options.user;
-    const as = user && user.uid !== process.getuid?.() ? { uid: user.uid, gid: user.gid } : {};
+    const as = this.serviceUser ?? {};
     return { cwd, env: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' }, ...as };
   }
 

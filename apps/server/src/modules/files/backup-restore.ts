@@ -28,7 +28,7 @@ type Name = { attachment_id: string; sha256: string; row: Record<string, unknown
 /* What a restore does for one file. again: its row comes back; back: its row gets back the bytes it had. ready: a copy of
    those bytes is there to come back, live or in the backup, and whatever its row names is still there. */
 export type RestoreItem = { attachmentId: string; name: string; action: 'again' | 'back'; sha256: string; size: number; ready: boolean; reason?: string };
-type Planned = RestoreItem & { row: Record<string, unknown>; previousSha: string | null; previousSize: number | null };
+type Planned = RestoreItem & { row: Record<string, unknown>; previous: { sha256: string | null; size: number } | undefined };
 
 /* The tables a row of attachments names, by its column: a row comes back only while each it names is there. */
 const NAMES = { company_id: 'companies', job_id: 'jobs', agent_id: 'agents', person_id: 'people', request_id: 'requests', operator_case_id: 'program_operator_cases', task_id: 'tasks', test_run_id: 'test_runs' } as const;
@@ -89,8 +89,7 @@ export async function restorePlan(db: FilesDb, companyId: string, ask: Ask): Pro
       ready: reason === null,
       ...(reason ? { reason } : {}),
       row: name.row,
-      previousSha: now?.sha256 ?? null,
-      previousSize: now ? Number(now.size) : null,
+      previous: now,
     });
   }
   const at = ask.at ?? null;
@@ -123,17 +122,23 @@ export async function bringBack(ctx: Pick<Ctx, 'db' | 'files'>, sha256: string):
       if (!(err instanceof StoreRefused)) throw err;
     }
   }
+  if (await requestRecoveryCopies(db, sha256, mine, kept)) return 'waiting';
+  return here ? 'refused' : 'gone';
+}
+
+/* The live holders and the backup holder get their requests in the same round. A stale local backup is queued for repair. */
+async function requestRecoveryCopies(db: FilesDb, sha256: string, mine: string | null, kept: { machine_id: string | null } | undefined): Promise<boolean> {
   const peers = await db.execute(sql`UPDATE net.files f SET wanted_at = now() WHERE f.sha256 = ${sha256} AND f.drop_at IS NULL
     AND EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256 AND c.machine_id IS DISTINCT FROM ${mine} AND c.verified) RETURNING f.sha256`);
   if (kept && kept.machine_id !== mine) {
     await db.execute(sql`UPDATE net.file_backups SET restore_at = now() WHERE sha256 = ${sha256}`);
-    return 'waiting';
+    return true;
   }
   if (rowsOf(peers).length) {
     if (kept) await db.execute(sql`UPDATE net.file_backups SET kept_at = NULL WHERE sha256 = ${sha256} AND machine_id IS NOT DISTINCT FROM ${mine}`);
-    return 'waiting';
+    return true;
   }
-  return here ? 'refused' : 'gone';
+  return false;
 }
 
 /* Puts one row back as the plan says: again as it was, or back to the bytes it had. A row whose names went meanwhile
@@ -142,9 +147,9 @@ async function putBack(db: FilesDb, companyId: string, item: Planned): Promise<b
   const retained = await db.execute(sql`SELECT 1 FROM net.file_backup_names WHERE company_id = ${companyId} AND attachment_id = ${item.attachmentId}
     AND sha256 = ${item.sha256} AND "row" = ${JSON.stringify(item.row)}::jsonb LIMIT 1 FOR SHARE`);
   if (!rowsOf(retained).length) return false;
-  if (item.action === 'back') {
+  if (item.previous) {
     const changed = await db.execute(sql`UPDATE attachments SET sha256 = ${item.sha256}, size = ${item.size} WHERE id = ${item.attachmentId} AND company_id = ${companyId}
-      AND sha256 IS NOT DISTINCT FROM ${item.previousSha} AND size = ${item.previousSize} RETURNING id`);
+      AND sha256 IS NOT DISTINCT FROM ${item.previous.sha256} AND size = ${item.previous.size} RETURNING id`);
     return rowsOf(changed).length === 1;
   }
   if (item.row.company_id !== companyId) return false;
