@@ -108,6 +108,7 @@ export type SubView = {
   limitsUpdatedAt?: string | null;
   /* The share of each limit window, in percent, that task turns may use; null: the whole limit. */
   budget: number | null;
+  turnLimit?: number;
   /* The plans its employees go on to at its limit, in order, each with the model to run there or null for their role's;
      empty for any plan of the company with room. None from an older server. */
   fallbacks?: PlanFallback[];
@@ -337,6 +338,7 @@ export type OrchestratorState = {
   machineDrain?: MachineDrain | null;
   /* Its machine is short of free memory for its program to start; its turns wait and go on by themselves after. */
   memoryWait?: boolean;
+  subscriptionWait?: { label: string; running: number; limit: number } | null;
   reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | null;
   browserError?: string | null;
   busy: boolean;

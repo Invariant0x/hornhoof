@@ -322,8 +322,7 @@ describe('signing in to plans', () => {
   });
 });
 
-/* A plan that does not work yet, as it waits for its machine or its sign-in, or whose sign-in found nodes too old for it,
-   has nothing else to show: its card is one block across, saying what is wrong and where, with what to do and Remove. */
+/* A plan that cannot work yet has an across-card repair block with its own actions. Its turn-limit settings stand beside it. */
 describe('the card of a plan that does not work', () => {
   const [claude, codex, kimi, key] = SUBS as [SubView, SubView, SubView, SubView];
   const UPDATE = 'curl -fsSL https://hq.acme.com/install.sh | bash';
@@ -332,15 +331,43 @@ describe('the card of a plan that does not work', () => {
   const only = (...subs: SubView[]) => ({ 'GET /api/nodes/commands': [200, { commands: [] }] as [number, unknown], 'GET /api/subscriptions': [200, { subscriptions: subs }] as [number, unknown] });
   const THREE = ['blk blk-facts', 'blk blk-run', 'blk blk-side'];
   const blocks = (card: HTMLElement) => [...card.querySelectorAll('.blocks > .blk')].map(b => b.className);
-  const buttons = (part: HTMLElement) => within(part).getAllByRole('button').map(b => b.textContent);
+  const repairSettings = (card: HTMLElement) => card.querySelector('.blk-fix') && card.querySelector('.plan-settings');
+  const buttons = (part: HTMLElement) => {
+    const settings = repairSettings(part);
+    return within(part).getAllByRole('button').filter(button => !settings?.contains(button)).map(button => button.textContent);
+  };
   /* The install command of a plan waiting for its machine, live for 21 more hours, its block at the top closed with Done. */
   const installFor = (sub: SubView) => ({ id: 'c'.repeat(64), kind: 'plans', subscriptionIds: [sub.id], dismissedSubscriptionIds: [sub.id], plans: [sub.label], machine: null, command: COMMAND, expiresAt: new Date(Date.now() + 21 * 3600_000 + 60_000).toISOString() });
   /* What a working plan's card has, and the card of one that does not work leaves out. */
-  const workingParts = (card: HTMLElement) => [
-    ...['Limits', 'Owner and account', 'Settings', 'Machines of this plan'].filter(name => within(card).queryByRole('heading', { name })),
-    ...(within(card).queryByRole('region', { name: 'Agents on it' }) ? ['Agents on it'] : []),
-    ...within(card).queryAllByRole('button', { name: /^(Run a test on |Use .+ for the orchestrator$)/ }).map(b => b.textContent),
-  ];
+  const workingParts = (card: HTMLElement) => {
+    const settings = repairSettings(card);
+    return [
+      ...['Limits', 'Owner and account', 'Settings', 'Machines of this plan'].filter(name => {
+        const heading = within(card).queryByRole('heading', { name });
+        return heading && (name !== 'Settings' || !settings?.contains(heading));
+      }),
+      ...(within(card).queryByRole('region', { name: 'Agents on it' }) ? ['Agents on it'] : []),
+      ...within(card).queryAllByRole('button', { name: /^(Run a test on |Use .+ for the orchestrator$)/ }).map(b => b.textContent),
+    ];
+  };
+
+  it('shows only the turn limit and Save in the separate settings of a plan that needs repair', async () => {
+    mockApi(only(kimi));
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    const card = screen.getByRole('article', { name: 'Kimi, Ivan' });
+    const settings = within(card).getByRole('region', { name: /^Settings$/ });
+    const heading = within(settings).getByRole('heading', { name: /^Settings$/ });
+    const limit = within(settings).getByRole('spinbutton', { name: /^Concurrent turns per machine$/ });
+    const save = within(settings).getByRole('button', { name: /^Save$/ });
+    const form = limit.closest('form')!;
+    expect(card.querySelector('.blk-fix')?.nextElementSibling).toBe(settings);
+    expect([...settings.children]).toEqual([heading, form]);
+    expect([...form.children]).toEqual([limit.closest('.field'), save]);
+    expect([...form.querySelectorAll('input, select, textarea, button')]).toEqual([limit, save]);
+    expect(limit).toHaveValue(4);
+    expect(save).toBeDisabled();
+  });
 
   it('shows a plan waiting for its sign-in as one block across the card: why and where, Sign in and Remove', async () => {
     mockApi(only(codex));

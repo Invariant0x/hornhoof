@@ -1,10 +1,12 @@
-import { sendNext } from './dispatch.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { nextTurn, sendTurn } from './dispatch.js';
 import { workerBudgetUntil, planHeld, type PlanAgent, type Plan, type HeldPlanTurn } from './state.js';
 import { type Turn, type TurnMessage, type Along, type Queued, type Sending } from './turn-types.js';
 import { runsNow, NoSubscription } from './turn-records.js';
 import { modelLimitUntil, resets } from './limits.js';
 import { holdsWork, agentOnNode, liveSubscription, nodeOfAgent, conversationOf, type AgentTarget } from './placement.js';
-import { onAgent } from './line.js';
+import { onAgent, onSubscription } from './line.js';
+import { holdsTurnForRoom, lockTurnLimit } from './subscription-room.js';
 import { TURN_TIMEOUT_MS, INBOX_PROMPT, GONE_ALONG } from './constants.js';
 import { hideCredentialsIn } from '@hornhoof/protocol/redaction';
 import { idOnly, only } from '../../db/selections.js';
@@ -16,10 +18,10 @@ import type { Ctx } from '../../app.js';
 import { forgetPrivateTurn } from '../tools/private-turns.js';
 import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { agents, jobs, tasks } from '../../db/schema.js';
+import { agentEvents, agents, jobs, tasks } from '../../db/schema.js';
 import type { TurnRefusal } from '../terminals/relay.js';
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, typedWentIn, withInputLock } from './decision-context.js';
-import { nodeIdentity, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { builtinOf, nodeIdentity, ownBuiltin, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
 import { holdsBuiltin, holdsMachine, machineInstalls } from '../network/follow.js';
 import { shownAway } from '../nodes/machine-away.js';
@@ -283,26 +285,38 @@ async function insertRunningTurn(
   text: string,
   personId: string | null,
   repeated: RepeatedTurn | null,
+  queuedFrom: string | undefined,
 ): Promise<{ jobId: string; token: string } | null> {
   const [last] = await ctx.db
     .select({ hash: jobs.instructionsHash })
     .from(jobs)
-    .where(and(conversationOf(target.agent.id), eq(jobs.subscriptionId, target.sub.id), isNotNull(jobs.instructionsHash)))
+    .where(and(conversationOf(target.agent.id), eq(jobs.subscriptionId, target.programPlanId), isNotNull(jobs.instructionsHash)))
     .orderBy(desc(jobs.startedAt))
     .limit(1);
   const token = newToken();
   const nodeId = node.kind === 'node' ? node.nodeId : null;
+  const builtinMachine = node.kind === 'builtin' ? node.machine : null;
   const owner = await turnOwner(ctx, personId, repeated);
   /* No turn begins on a machine that installs its build now: asked and written in one transaction, so the word to
      install and this turn never cross. */
   const job = await ctx.db.transaction(async tx => {
-    if (await holdsMachine(tx, nodeId)) return null;
+    if (await holdsMachine(tx, nodeId) || await holdsBuiltin(tx, ctx.config, builtinMachine)) return null;
+    /* The person already started this turn. Count it before another agent can claim a slot. */
+    if (await lockTurnLimit(tx, target.programPlanId) === null) return null;
+    const turns = and(conversationOf(target.agent.id), eq(jobs.status, 'running'));
+    const [running] = await tx.select(idOnly(jobs)).from(jobs)
+      .where(and(turns, or(ne(jobs.prompt, ''), isNotNull(jobs.taskId)))).limit(1);
+    /* A program's queued words can start before the old job's end reaches Hornhoof. */
+    if (running && running.id !== queuedFrom) return null;
+    const ended = await tx.update(jobs).set({ status: 'done', result: '', finishedAt: new Date() })
+      .where(and(turns, eq(jobs.prompt, ''), isNull(jobs.taskId))).returning({ id: jobs.id });
     const [row] = await tx
       .insert(jobs)
       .values({
         companyId: target.agent.companyId,
-        subscriptionId: target.sub.id,
+        subscriptionId: target.programPlanId,
         nodeId,
+        builtinMachine,
         agentId: target.agent.id,
         kind: 'conversation',
         status: 'running',
@@ -314,9 +328,11 @@ async function insertRunningTurn(
         instructionsHash: last ? last.hash : null,
       })
       .returning({ id: jobs.id });
-    return row!;
+    return { jobId: row!.id, ended };
   });
-  return job && { jobId: job.id, token };
+  if (!job) return null;
+  forgetStartupValues(ctx, job.ended);
+  return { jobId: job.jobId, token };
 }
 
 async function appendOpenedWords(
@@ -351,16 +367,7 @@ async function storeTypedTurn(
   const openedQueued: OpenedQueued | null = queued ? { ...queued, repeated: await repeatedTurn(ctx, queued.job, queued.source) } : null;
   /* A machine that installs its build takes no turn, and nothing of what stands there is changed for one. */
   if (node.kind === 'node' && (await machineInstalls(ctx.db, node.nodeId))) return null;
-  /* A turn that only started the program is over once the person types: their turn takes its place. */
-  const started = await ctx.db
-    .update(jobs)
-    .set({ status: 'done', result: '', finishedAt: new Date() })
-    .where(and(conversationOf(agentId), eq(jobs.status, 'running'), eq(jobs.prompt, ''), isNull(jobs.taskId))).returning({ id: jobs.id });
-  forgetStartupValues(ctx, started);
-  const [running] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
-  /* A program's queued turn can start before the old job's end has reached Hornhoof. It holds the line meanwhile. */
-  if (running && running.id !== queuedFrom) return null;
-  const opened = await insertRunningTurn(ctx, node, target, text, personId, openedQueued ? openedQueued.repeated : null);
+  const opened = await insertRunningTurn(ctx, node, target, text, personId, openedQueued ? openedQueued.repeated : null, queuedFrom);
   if (!opened) return null;
   await appendOpenedWords(ctx, target.agent.companyId, agentId, opened.jobId, text, personId, openedQueued);
   await publishWorking(ctx, target.agent.companyId);
@@ -499,6 +506,8 @@ const HELD = 'held';
 async function takeCurrent(tx: Tx, own: { machineId: string | null }, job: Queued, along: readonly Along[], sending: Sending): Promise<{ lines: { companyId: string } | null } | typeof HELD | null> {
   if (await discardStaleTurns(tx, [job, ...along.map(j => ({ ...j, agentId: job.agentId }))])) return null;
   if ((await holdsMachine(tx, sending.nodeId)) || (await holdsBuiltin(tx, own, sending.builtinMachine))) return HELD;
+  const node = sending.nodeId ? nodeIdentity(sending.nodeId) : builtinOf(sending.builtinMachine ?? ownMachine(own));
+  if (await holdsTurnForRoom(tx, sending.subscriptionId, node, ownMachine(own))) return HELD;
   const [row] = await tx
     .update(jobs)
     .set({ ...sending, requestedPrompt: job.prompt, status: 'running', startedAt: new Date() })
@@ -578,15 +587,102 @@ async function dueTurn(ctx: Ctx, agent: PlanAgent & { name: string; switchedOffA
   return null;
 }
 
-/* Sends the agent's oldest waiting turn when none runs and his subscription is online and signed in. */
-export function pump(ctx: Ctx, agentId: string): Promise<void> {
-  return onAgent(ctx, agentId, () => sendNext(ctx, agentId, dispatchQueue));
+/* A node's returned words can enter the queue in the same clock tick as a turn already there. Their stored event
+   sequence keeps that arrival order when the job timestamps match. */
+const firstTurnEvent = sql`(select min(${agentEvents.seq}) from ${agentEvents} where ${agentEvents.jobId} = ${jobs.id})`;
+const queuedConversation = and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued'));
+const turnPriority = sql<number>`case
+  when ${tasks.urgent} or ${tasks.priority} = 'urgent' then 0
+  when ${tasks.priority} = 'high' then 1
+  when ${tasks.priority} = 'low' then 3
+  else 2 end`;
+
+const dispatchInProgress = new AsyncLocalStorage<{ ctx: Ctx; active: boolean }>();
+
+/* Dispatch can enqueue another wake while it holds an agent's line, for example a plan-limit notice. That wake has already
+   been stored. It can wait its turn without making the dispatch await the line it is holding. */
+function runPump(ctx: Ctx, dispatch: () => Promise<void>): Promise<void> {
+  const previous = dispatchInProgress.getStore();
+  if (previous?.ctx !== ctx || !previous.active) return dispatch();
+  void dispatch().catch((error: unknown) => ctx.log.error({ error: loggable(error) }, 'A queued turn could not be sent.'));
+  return Promise.resolve();
 }
 
-/* Every agent with turns waiting, after a machine came back or a subscription changed. */
+type PlanWake = { subscriptionId: string; agentId: string };
+
+/* After a move, the destination compares the agent's turn with the other turns it holds. */
+async function turnOnPlan(ctx: Ctx, agentId: string, subscriptionId: string, after: PlanWake[]) {
+  const turn = await nextTurn(ctx, agentId, subscriptionId, dispatchQueue);
+  if (turn && 'destination' in turn) {
+    after.push({ subscriptionId: turn.destination, agentId });
+    return;
+  }
+  return turn;
+}
+
+async function rankedTurns(ctx: Ctx, subscriptionId: string, requestedAgent: string | undefined, after: PlanWake[]) {
+  const waiting = await ctx.db.selectDistinct({ agentId: agents.id }).from(jobs)
+    .innerJoin(agents, eq(agents.id, jobs.agentId))
+    .where(and(queuedConversation, eq(agents.subscriptionId, subscriptionId), isNull(agents.removedAt)));
+  const ids = new Set(waiting.map(row => row.agentId));
+  if (requestedAgent) ids.add(requestedAgent);
+  const heads: string[] = [];
+  for (const id of ids) {
+    const turn = await onAgent(ctx, id, () => turnOnPlan(ctx, id, subscriptionId, after));
+    if (turn) heads.push(turn.due.id);
+  }
+  if (!heads.length) return [];
+  return ctx.db.select({ agentId: jobs.agentId, id: jobs.id }).from(jobs)
+    .leftJoin(tasks, eq(tasks.id, jobs.taskId))
+    .where(and(queuedConversation, inArray(jobs.id, heads)))
+    .orderBy(turnPriority, asc(jobs.createdAt), firstTurnEvent, asc(jobs.id));
+}
+
+async function pumpRanked(ctx: Ctx, subscriptionId: string, requestedAgent: string | undefined, after: PlanWake[]): Promise<void> {
+  for (const { agentId, id } of await rankedTurns(ctx, subscriptionId, requestedAgent, after)) {
+    if (!agentId) continue;
+    const reconsider = await onAgent(ctx, agentId, async () => {
+      const turn = await turnOnPlan(ctx, agentId, subscriptionId, after);
+      return turn && (turn.due.id !== id || (await sendTurn(ctx, turn, dispatchQueue)) === 'reconsider');
+    });
+    /* Another job became the agent's first in line. Rank it before giving away the place. */
+    if (reconsider) {
+      after.push({ subscriptionId, agentId });
+      return;
+    }
+  }
+}
+
+/* New arrivals and moves visit the shared queue before they can claim a place. */
+function pumpPlan(ctx: Ctx, subscriptionId: string, requestedAgent?: string): Promise<void> {
+  return runPump(ctx, async () => {
+    const after: PlanWake[] = [];
+    await onSubscription(ctx, subscriptionId, async () => {
+      const run = { ctx, active: true };
+      try {
+        await dispatchInProgress.run(run, () => pumpRanked(ctx, subscriptionId, requestedAgent, after));
+      } finally {
+        run.active = false;
+      }
+    });
+    /* Release the source lane before waiting on another plan, which may itself send work back here. */
+    for (const wake of after) await pumpPlan(ctx, wake.subscriptionId, wake.agentId);
+  });
+}
+
+/* The job that freed a place can belong to a plan the agent has since left. Both lines can have work to send. */
+export async function pump(ctx: Ctx, agentId: string, releasedPlan?: string): Promise<void> {
+  const [agent] = await ctx.db.select(only(agents, 'subscriptionId')).from(agents).where(eq(agents.id, agentId));
+  const current = agent?.subscriptionId;
+  if (releasedPlan && releasedPlan !== current) await pumpPlan(ctx, releasedPlan);
+  if (current) await pumpPlan(ctx, current, agentId);
+}
+
+/* Every plan with turns waiting, after a machine came back or a subscription changed. */
 export async function pumpWaiting(ctx: Ctx): Promise<void> {
-  const waiting = await ctx.db.selectDistinct(only(jobs, 'agentId')).from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued')));
-  for (const { agentId } of waiting) if (agentId) await pump(ctx, agentId);
+  const waiting = await ctx.db.selectDistinct(only(agents, 'subscriptionId')).from(jobs)
+    .innerJoin(agents, eq(agents.id, jobs.agentId)).where(and(queuedConversation, isNull(agents.removedAt)));
+  for (const { subscriptionId } of waiting) if (subscriptionId) await pumpPlan(ctx, subscriptionId);
 }
 
 /* The turn that a task's turn marked gone along went out inside: the agent's own turn that started last before it. */
