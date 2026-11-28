@@ -7,3 +7,9 @@ export const NAMED = sql`(EXISTS (SELECT 1 FROM public.attachments a WHERE a.sha
 /* A database a restore set aside, or one made of what a machine uploaded, may be merged back: the files its rows name
    stay while it is there, for at most the 30 days it is kept. */
 export const SET_ASIDE = sql`EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname LIKE 'hornhoof_before_%' OR datname LIKE 'hornhoof_upload_%')`;
+
+/* Retained history may still need its first backup after the last attachment stops naming the file. */
+const PENDING_BACKUP = sql`EXISTS (SELECT 1 FROM net.file_backup_names n WHERE n.sha256 = f.sha256 AND NOT EXISTS
+  (SELECT 1 FROM net.file_backups b WHERE b.sha256 = n.sha256 AND b.kept_at IS NOT NULL AND b.drop_at IS NULL))`;
+
+export const RETAIN_FILE = sql`(${NAMED} OR ${PENDING_BACKUP} OR ${SET_ASIDE})`;

@@ -9,6 +9,7 @@ import { keeperAsker } from '../network/via.js';
 import { DEFAULT_AREA_BYTES } from './area.js';
 import { countedNow, FRESH_MS, keptElsewhere } from './place.js';
 import { type Challenge, Proof, sameMac } from './proof.js';
+import { RETAIN_FILE } from './named.js';
 import { namedUnrecorded, SET_ASIDE } from './sweep.js';
 import { backupView, takeBackupReport, type BackupView } from './backup.js';
 
@@ -98,12 +99,12 @@ export async function fileView(db: Tx, machineId: string, now = new Date(), lead
       ).map(row => ({ sha256: row.sha256, sealedSha256: row.sealed_sha256, sealedSize: Number(row.sealed_size) }))
     : [];
   const { ids, wanted } = await countedNow(db, leader, now);
-  const due = sql`f.drop_at <= ${now.toISOString()}::timestamptz`;
+  const due = sql`(f.drop_at <= ${now.toISOString()}::timestamptz AND NOT ${RETAIN_FILE})`;
   const notPicked = sql`(NOT EXISTS (SELECT 1 FROM net.file_targets t WHERE t.sha256 = c.sha256 AND t.machine_id = ${machineId})
     AND ${keptElsewhere(sql`c.sha256`, machineId, ids)} >= ${Math.max(1, wanted)})`;
   const drop = rowsOf<{ sha256: string }>(
     await db.execute(sql`SELECT c.sha256 FROM net.file_copies c JOIN net.files f ON f.sha256 = c.sha256 WHERE c.machine_id = ${machineId}
-      AND (${due} OR ${notPicked}) ORDER BY c.sha256 LIMIT ${VIEW_FILES}`),
+      AND (${due} OR (f.drop_at IS NULL AND ${notPicked})) ORDER BY c.sha256 LIMIT ${VIEW_FILES}`),
   ).map(row => row.sha256);
   /* A file the leading machine lacks is asked of two machines that keep it and are online, the first by id, not of all. */
   const fresh = sql`${new Date(now.getTime() - FRESH_MS).toISOString()}::timestamptz`;
@@ -177,7 +178,7 @@ export async function takeReport(db: Tx, machineId: string, report: FileReport):
   }
   if (report.dropped.length) {
     await db.execute(sql`DELETE FROM net.file_copies WHERE machine_id = ${machineId} AND sha256 = ANY(${listOf(report.dropped)}::text[])`);
-    await db.execute(sql`DELETE FROM net.files f WHERE f.sha256 = ANY(${listOf(report.dropped)}::text[]) AND f.drop_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256)`);
+    await db.execute(sql`DELETE FROM net.files f WHERE f.sha256 = ANY(${listOf(report.dropped)}::text[]) AND f.drop_at IS NOT NULL AND NOT ${RETAIN_FILE} AND NOT EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256)`);
   }
   const backupUnknown = report.backup ? await takeBackupReport(db, machineId, report.backup) : undefined;
   return { unknown, send, again, prove: await proveOf(db, machineId), ...(backupUnknown ? { backupUnknown } : {}) };

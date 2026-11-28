@@ -107,33 +107,33 @@ export async function bringBack(ctx: Pick<Ctx, 'db' | 'files'>, sha256: string):
   const key = await files.key(db);
   const [record] = rowsOf<{ size: string }>(await db.execute(sql`SELECT size FROM net.files WHERE sha256 = ${sha256} AND drop_at IS NULL`));
   if (record && await live.matches(sha256, key, Number(record.size))) return 'live';
-  const [kept] = rowsOf<{ size: string; sealed_size: string }>(
-    await db.execute(sql`SELECT size, sealed_size FROM net.file_backups WHERE sha256 = ${sha256} AND kept_at IS NOT NULL AND drop_at IS NULL`),
+  const mine = await files.machineId(db);
+  const [kept] = rowsOf<{ size: string; sealed_size: string; machine_id: string | null }>(
+    await db.execute(sql`SELECT size, sealed_size, machine_id FROM net.file_backups WHERE sha256 = ${sha256} AND kept_at IS NOT NULL AND drop_at IS NULL`),
   );
-  if (!kept) {
-    if (!record) return 'gone';
-    const mine = await files.machineId(db);
-    const remote = rowsOf(await db.execute(sql`SELECT 1 FROM net.file_copies WHERE sha256 = ${sha256} AND machine_id IS DISTINCT FROM ${mine} AND verified LIMIT 1`));
-    if (!remote.length) return 'gone';
-    await db.execute(sql`UPDATE net.files SET wanted_at = now() WHERE sha256 = ${sha256}`);
-    return 'waiting';
+  const here = kept && files.backupStore().sealed(sha256);
+  if (here) {
+    try {
+      await live.takeOpened(sha256, here.stream(), key, Number(kept.sealed_size), true);
+      const restored = { sha256, size: Number(kept.size), ...(await live.sealedFacts(sha256)) };
+      await recordFile(db, await sealedAsRecorded(db, live, restored, key), mine);
+      await placeFiles(db, mine, { only: [sha256] });
+      return 'live';
+    } catch (err) {
+      if (!(err instanceof StoreRefused)) throw err;
+    }
   }
-  const here = files.backupStore().sealed(sha256);
-  if (!here) {
+  const peers = await db.execute(sql`UPDATE net.files f SET wanted_at = now() WHERE f.sha256 = ${sha256} AND f.drop_at IS NULL
+    AND EXISTS (SELECT 1 FROM net.file_copies c WHERE c.sha256 = f.sha256 AND c.machine_id IS DISTINCT FROM ${mine} AND c.verified) RETURNING f.sha256`);
+  if (kept && kept.machine_id !== mine) {
     await db.execute(sql`UPDATE net.file_backups SET restore_at = now() WHERE sha256 = ${sha256}`);
     return 'waiting';
   }
-  try {
-    await live.takeOpened(sha256, here.stream(), key, Number(kept.sealed_size), true);
-  } catch (err) {
-    if (err instanceof StoreRefused) return 'refused';
-    throw err;
+  if (rowsOf(peers).length) {
+    if (kept) await db.execute(sql`UPDATE net.file_backups SET kept_at = NULL WHERE sha256 = ${sha256} AND machine_id IS NOT DISTINCT FROM ${mine}`);
+    return 'waiting';
   }
-  const mine = await files.machineId(db);
-  const restored = { sha256, size: Number(kept.size), ...(await live.sealedFacts(sha256)) };
-  await recordFile(db, await sealedAsRecorded(db, live, restored, key), mine);
-  await placeFiles(db, mine, { only: [sha256] });
-  return 'live';
+  return here ? 'refused' : 'gone';
 }
 
 /* Puts one row back as the plan says: again as it was, or back to the bytes it had. A row whose names went meanwhile

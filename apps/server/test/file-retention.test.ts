@@ -7,6 +7,7 @@ import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { agents, attachments, companies, departments, jobs, subscriptions, tasks, testRuns, turns } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
+import { backupRound } from '../src/modules/files/backup.js';
 import { finishMove } from '../src/modules/files/mover.js';
 import { dropDue, markUnused } from '../src/modules/files/sweep.js';
 import { dropOldFiles } from '../src/modules/tasks/attachments.js';
@@ -81,6 +82,8 @@ describe('the store lets go of files by itself', () => {
     /* The bytes no row names wait a day; the content another row still names stays. */
     const store = c.app.ctx.files.store();
     const unnamed = [gone.ofOldTurn, gone.outsideClosedLongAgo, ...goneOfRun].map(row => row.sha256!);
+    // The store round backs up retained versions before retiring their last live copies.
+    await backupRound(c.app.ctx, now);
     expect(await markUnused(c.db, now)).toBe(0);
     expect(await markUnused(c.db, new Date(now.getTime() + DAY - 60_000))).toBe(0);
     expect(await markUnused(c.db, new Date(now.getTime() + DAY + 60_000))).toBe(unnamed.length);

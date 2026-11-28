@@ -109,6 +109,7 @@ export class LeaderFiles {
   private async giveBackup(machine: string, sha256: string): Promise<{ status: 200; length: number; stream(): Readable } | { status: 403 | 404 }> {
     if (!(await backsUpStore(this.db, machine, sha256))) return { status: 403 };
     const sealed = this.store.sealed(sha256) ?? this.backup.sealed(sha256);
+    if (!sealed) await this.db.execute(sql`UPDATE net.files SET wanted_at = now() WHERE sha256 = ${sha256} AND drop_at IS NULL`);
     return sealed ? { status: 200, length: sealed.length, stream: sealed.stream } : { status: 404 };
   }
 

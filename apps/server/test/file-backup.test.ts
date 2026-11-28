@@ -9,6 +9,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { agents, attachments, departments, machines } from '../src/db/schema.js';
 import { backupView, takeBackupReport } from '../src/modules/files/backup.js';
 import { fileStoreState } from '../src/modules/files/copies.js';
+import { fileView, takeReport } from '../src/modules/files/network.js';
 import { machineSeats } from '../src/modules/files/place.js';
 import { dropDue, storeRound } from '../src/modules/files/sweep.js';
 import { BACKUP_FILE_PATH, FILE_PATH, FileHolder, type FileLink } from '../src/modules/keeper/file-holder.js';
@@ -488,7 +489,7 @@ describe('a restore from the store\'s backup', () => {
   });
 });
 
-describe('turn 45 independent review', () => {
+describe('recovering files from verified copies', () => {
   it('restores readable bytes when a live record has lost its file', async () => {
     const s = await stand();
     const at = new Date();
@@ -507,7 +508,7 @@ describe('turn 45 independent review', () => {
     expect(await s.app.ctx.files.bytes(s.db, sha)).toEqual(bytes);
   });
 
-  it('repairs a damaged live file from another live holder when its backup is unavailable', async () => {
+  it.each(['unrecorded', 'missing', 'damaged'])('repairs a damaged live file from another live holder with a %s backup', async condition => {
     const s = await stand();
     const bytes = Buffer.from('another verified holder');
     const row = await s.sent(bytes);
@@ -519,11 +520,14 @@ describe('turn 45 independent review', () => {
     await s.db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id, verified) VALUES (${sha}, ${remote}, true) ON CONFLICT DO NOTHING`);
     await s.db.delete(attachments).where(eq(attachments.id, row.id));
     await s.round(new Date());
-    await s.db.execute(sql`DELETE FROM net.file_backups WHERE sha256 = ${sha}`);
+    if (condition === 'unrecorded') await s.db.execute(sql`DELETE FROM net.file_backups WHERE sha256 = ${sha}`);
+    else if (condition === 'missing') await s.app.ctx.files.backupStore().remove(sha);
+    else writeFileSync(s.app.ctx.files.backupStore().path(sha), 'damaged backup');
     writeFileSync(path, 'damaged');
     const plan = (await s.restore({ attachmentId: row.id, dryRun: true })).json();
     const run = () => s.restore({ attachmentId: row.id, dryRun: false, digest: plan.digest });
     expect((await run()).json()).toMatchObject({ applied: 0, waiting: 1 });
+    expect((await fileView(s.db, remote, new Date(), s.server.id)).want).toContain(sha);
     expect(await s.leader.take(remote, sha, Readable.from([good]))).toBe(201);
     expect((await run()).json()).toMatchObject({ applied: 1 });
     expect(await s.app.ctx.files.bytes(s.db, sha)).toEqual(bytes);
@@ -538,6 +542,32 @@ describe('turn 45 independent review', () => {
     expect(s.live(row.sha256!)).toBe(true);
     await s.round(new Date());
     expect(s.backedUp(row.sha256!)).toBe(true);
+  });
+
+  it('protects the last remote bytes until a retained file reaches backup', async () => {
+    const s = await stand();
+    const remote = await s.worker('one');
+    const row = await s.sent(Buffer.from('remote history'));
+    const sha = row.sha256!;
+    await s.db.delete(attachments).where(eq(attachments.id, row.id));
+    await s.app.ctx.files.store().remove(sha);
+    await s.db.execute(sql`DELETE FROM net.file_copies WHERE sha256 = ${sha}`);
+    await s.db.execute(sql`INSERT INTO net.file_copies (sha256, machine_id, verified) VALUES (${sha}, ${remote}, true)`);
+    await s.db.execute(sql`UPDATE net.files SET drop_at = now() WHERE sha256 = ${sha}`);
+    expect.soft((await fileView(s.db, remote, new Date(Date.now() + 60_000), s.server.id)).drop).not.toContain(sha);
+    await takeReport(s.db, remote, { held: [], dropped: [sha] });
+    expect(rowsOf(await s.db.execute(sql`SELECT 1 FROM net.files WHERE sha256 = ${sha}`))).toHaveLength(1);
+  });
+
+  it('recalls a missing live file when a remote backup holder requests its first copy', async () => {
+    const s = await stand();
+    const remote = await s.worker('one');
+    const row = await s.sent(Buffer.from('pending backup'));
+    await s.round(new Date());
+    await s.app.ctx.files.store().remove(row.sha256!);
+    await s.db.execute(sql`UPDATE net.files SET wanted_at = NULL WHERE sha256 = ${row.sha256}`);
+    expect((await s.leader.give(remote, row.sha256!, true)).status).toBe(404);
+    expect(rowsOf(await s.db.execute(sql`SELECT 1 FROM net.files WHERE sha256 = ${row.sha256} AND wanted_at IS NOT NULL`))).toHaveLength(1);
   });
 
   it('retains an overwritten version that lived entirely between two sweeps', async () => {
@@ -556,7 +586,7 @@ describe('turn 45 independent review', () => {
   });
 });
 
-describe('restore preview on the turn 45 candidate', () => {
+describe('restore preview consistency', () => {
   it('keeps a newer edit made after the owner approved the preview', async () => {
     const s = await stand();
     const start = new Date();
