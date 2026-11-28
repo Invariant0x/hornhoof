@@ -7,7 +7,7 @@ import { NotConfirmed, requestRoute } from '../src/db/confirm.js';
 import { NOT_CONFIRMED, READ_ONLY_MESSAGE, registerErrorHandling } from '../src/errors.js';
 
 /* A route that throws err, and what the log got of it. */
-async function thrown(err: Error) {
+async function thrown(err: Error, readHistory = false, method: 'GET' | 'POST' = 'GET') {
   const lines: string[] = [];
   const stream = new Writable({
     write(chunk, _encoding, done) {
@@ -17,10 +17,11 @@ async function thrown(err: Error) {
   });
   const app = Fastify({ logger: { level: 'warn', stream } });
   registerErrorHandling(app);
-  app.get('/boom', async () => {
+  const path = readHistory ? '/api/agents/:id/events' : '/boom';
+  app.route({ method, url: path, handler: async () => {
     throw err;
-  });
-  const res = await app.inject({ method: 'GET', url: '/boom' });
+  } });
+  const res = await app.inject({ method, url: readHistory ? '/api/agents/orchestrator/events' : '/boom' });
   await app.close();
   return { res, log: lines.join('') };
 }
@@ -53,13 +54,25 @@ describe('an error no route handled', () => {
     expect(log).toContain('errors.test.ts');
   });
 
+  it('describes a timed-out history read without suggesting a change was submitted', async () => {
+    const { res } = await thrown(Object.assign(new Error('transaction timeout'), { code: '25P04' }), true);
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error.reason).toBe('chat_history_unavailable');
+  });
+
+  it('returns a read failure on other GET routes when a database transaction times out', async () => {
+    const { res } = await thrown(Object.assign(new Error('transaction timeout'), { code: '25P04' }));
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error.reason).toBe('read_unavailable');
+  });
+
   it('answers a refused lease as read_only and a lost commit as not_confirmed', async () => {
     const refused = await thrown(new DrizzleQueryError('insert into "tasks"', [], Object.assign(new Error('This machine holds no lease now, so nothing was changed.'), { code: 'HHF01' })));
     expect(refused.res.statusCode).toBe(503);
     expect(refused.res.json()).toEqual({ error: { code: 'unavailable', message: READ_ONLY_MESSAGE, reason: 'read_only' } });
 
     for (const lost of [new NotConfirmed({ message: 'a warning' }), Object.assign(new Error('terminating connection due to administrator command'), { code: '57P01' })]) {
-      const { res, log } = await thrown(lost);
+      const { res, log } = await thrown(lost, false, 'POST');
       expect(res.statusCode).toBe(503);
       expect(res.json()).toEqual({ error: { code: 'unavailable', message: NOT_CONFIRMED, reason: 'not_confirmed' } });
       const [line, ...others] = log.trim().split('\n');

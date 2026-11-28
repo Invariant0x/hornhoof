@@ -1,6 +1,7 @@
 import type { TelegramReply } from '../telegram/api.js';
+import { createHash } from 'node:crypto';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { idOnly, only } from '../../db/selections.js';
 import { Text } from '../tasks/long-text.js';
@@ -13,7 +14,7 @@ import type { Person } from '../../auth/session.js';
 import { agentFor, type AgentRow } from '../agents/find.js';
 import { answerDirectly } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
-import { lastEvents, listEvents } from '../events/store.js';
+import { deliveredMessage, lastEvents, listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
 import { answerBy, answerForAssistant, answerInTelegram, FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, turnPrompt, whoIs, type Standing, type WrittenFrom } from './prompt.js';
@@ -77,7 +78,7 @@ function writtenBy(me: Person, text: string, pictures: MessagePicture[], { teleg
 }
 
 /* from: the machine of the company the person sits at as they write in the window; none through Telegram. */
-type Written = { text: string; task?: z.infer<typeof TaskReference>; pictures: string[]; telegram?: TelegramOrigin; assistant?: AssistantOrigin; from?: WrittenFrom };
+type Written = { chatReceipt?: string | undefined; text: string; task?: z.infer<typeof TaskReference>; pictures: string[]; telegram?: TelegramOrigin; assistant?: AssistantOrigin; from?: WrittenFrom };
 
 /* What the person is to this agent: the company's owner, the CEO's delegate, and whether they run its department, as
    everyone given it does. */
@@ -114,7 +115,8 @@ export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input:
   const words = input.text || pictures.map(p => p.name).join(', ');
   const standing = me.via ? undefined : await standingOf(ctx, me, agent);
   const { actor, turn } = writtenBy(me, words, pictures, { telegram: input.telegram, assistant: input.assistant, standing, from: input.from });
-  const jobId = await queueTaskMessage(ctx, { companyId: me.companyId, agentId: agent.id, task: input.task, actor, text: words }, { companyId: me.companyId, agentId: agent.id, ...turn });
+  const message = { ...turn.message, chatReceipt: input.chatReceipt };
+  const jobId = await queueTaskMessage(ctx, { companyId: me.companyId, agentId: agent.id, task: input.task, actor, text: words }, { companyId: me.companyId, agentId: agent.id, ...turn, message });
   ctx.bus.publish(me.companyId, {
     type: 'pulse',
     from: me.via ? { kind: 'orchestrator' } : { kind: 'person', id: me.id },
@@ -135,6 +137,10 @@ async function answerFromPerson(ctx: Ctx, me: Person, agentId: string, input: Wr
 
 /* Every agent's window: its conversation, what it is doing, writing to it and stopping it. The orchestrator is for people
    who see the whole company; an employee for people who reach its department. */
+function messageReceipt(base: string, me: Person, agentId: string, input: z.infer<typeof MessageBody>): string {
+  return createHash('sha256').update(JSON.stringify([base, me.companyId, me.id, me.via, agentId, input.text, input.task, input.pictures])).digest('hex');
+}
+
 export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
@@ -150,13 +156,23 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { events: found.map(e => maskEvent(viewer, e)), state: { ...state, ...(await terminalRights(ctx, me, agent, state.terminal)) } };
   });
 
-  app.post('/api/agents/:id/messages', async (req, reply) => {
+  async function replyToRepeat(req: FastifyRequest, base: string, reply: FastifyReply): Promise<boolean> {
     const { me, agent } = await agentFor(ctx, req);
-    const { text, task, pictures } = MessageBody.parse(req.body);
+    const receipt = messageReceipt(base, me, agent.id, MessageBody.parse(req.body));
+    const jobId = await deliveredMessage(db, me.companyId, agent.id, receipt);
+    if (!jobId) return false;
+    reply.code(202).send({ jobId });
+    return true;
+  }
+
+  app.post('/api/agents/:id/messages', { config: { replyToRepeat } }, async (req, reply) => {
+    const { me, agent } = await agentFor(ctx, req);
+    const body = MessageBody.parse(req.body);
+    const chatReceipt = req.changeSource ? messageReceipt(req.changeSource.base, me, agent.id, body) : undefined;
     /* The orchestrator is told which machine of the company a person writes from, when they sit at one. */
     const here = !me.via && agent.kind === 'orchestrator' ? await ctx.computer.here(req, me.companyId) : null;
     const from = here ? { machine: here.name, open: (await ctx.computer.view(me, here.id))?.open ?? false } : undefined;
-    const jobId = await writeToAgent(ctx, me, agent, { text, task, pictures, from });
+    const jobId = await writeToAgent(ctx, me, agent, { ...body, from, chatReceipt });
     reply.code(202);
     return { jobId };
   });

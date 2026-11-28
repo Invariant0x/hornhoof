@@ -55,6 +55,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(['program_instances', 'program_deliveries', 'program_operator_cases', 'program_operator_signals'], skip('work')),
   /* An answer a bot still owed when its database was set aside is not sent later, out of its time. */
   telegram_replies: skip('work'),
+  // The current leader polls this bot. An older database may still contain updates it has already delivered.
+  telegram_incoming: skip('work'),
   /* The leader keeps its own last observation of each chat's language. */
   telegram_chat_languages: skip('work'),
   /* What an assistant was told, and what is still being collected for it, is the feed of the database that leads: its

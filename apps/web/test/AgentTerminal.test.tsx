@@ -754,6 +754,22 @@ describe("an agent's live terminal in its window", () => {
     expect(screen.getByText(/a <b>draft<\/b>\s+of two lines/)).toBeInTheDocument();
   });
 
+  it('keeps pending input when an old terminal connection reports ready after reconnect', async () => {
+    open();
+    const old = await socket();
+    old.opened();
+    reconnects(() => {
+      old.ended(4410, 'node_offline');
+      terms[0]!.type('still waiting');
+    });
+    const current = FakeSocket.all[1]!;
+    current.connected();
+    old.ready(true, true);
+    expect(current.sent).toEqual([]);
+    current.ready(true, true);
+    expect(current.sent).toEqual([{ type: 'input', data: 'still waiting' }]);
+  });
+
   it('keeps what the person types while the view connects again, and sends it in order once it is back', async () => {
     open();
     const first = await socket();

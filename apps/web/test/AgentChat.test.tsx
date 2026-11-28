@@ -57,12 +57,12 @@ function open(routes: Record<string, unknown> = {}, org = ORG) {
 }
 
 describe("an agent's window opens as a chat", () => {
-  it('keeps the loaded conversation without a local outage alert when its history refresh fails', async () => {
+  it.each(['starting', 'not_confirmed', 'chat_history_unavailable'])('keeps the loaded conversation when a refresh returns %s', async reason => {
     let fail = false;
     const { container, calls } = open({
       'GET /api/build': [502, { error: { code: 'unavailable', reason: 'starting' } }],
       [`GET ${EVENTS}?last=300`]: () => fail
-        ? [502, { error: { code: 'unavailable', reason: 'starting' } }]
+        ? [503, { error: { code: 'unavailable', reason } }]
         : [200, { events: [], state: READY }],
     });
     await screen.findByRole('log', { name: 'Conversation' });
@@ -280,6 +280,25 @@ describe('the chat', () => {
     expect(state).toHaveTextContent('2 more messages wait their turn');
     await user.click(within(state).getByRole('button', { name: 'Stop' }));
     expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(true);
+  });
+
+  it('reuses the same message id when delivery has not yet been confirmed', async () => {
+    const route = '/api/agents/orchestrator/messages';
+    let attempts = 0;
+    open({ ['POST ' + route]: () => ++attempts === 1
+      ? [409, { error: { code: 'conflict', reason: 'already_done', message: 'Lost answer.' } }]
+      : [202, { jobId: 'j2' }] });
+    const input = await screen.findByRole('textbox', { name: 'Write to the orchestrator' });
+    fireEvent.change(input, { target: { value: 'Please check' } });
+    await act(async () => { fireEvent.keyDown(input, { key: 'Enter' }); });
+    expect(input).toHaveValue('Please check');
+    await act(async () => { fireEvent.keyDown(input, { key: 'Enter' }); });
+    const keys = vi.mocked(fetch).mock.calls.filter(([url]) => url === route)
+      .map(([, request]) => new Headers(request?.headers).get('idempotency-key'));
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
+    expect(input).toHaveValue('');
   });
 
   it('says that an agent with nothing to do sleeps until its next task', async () => {

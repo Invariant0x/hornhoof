@@ -95,6 +95,26 @@ async function respond<T>(path: string, init: RequestInit): Promise<T> {
   return data as T;
 }
 
+/* Older servers use the write warning for timed-out reads. Retrying a GET cannot resubmit a person's action. */
+export const interruptedRead = (err: unknown): boolean => err instanceof ApiFailure && err.status === 503
+  && ['not_confirmed', 'read_unavailable', 'chat_history_unavailable'].includes(err.reason ?? '');
+
+async function read<T>(path: string, init: RequestInit): Promise<T> {
+  try {
+    return await respond<T>(path, init);
+  } catch (err) {
+    if (!interruptedRead(err)) throw err;
+  }
+  await pause(500);
+  init.signal?.throwIfAborted();
+  try {
+    return await respond<T>(path, init);
+  } catch (err) {
+    if (err instanceof ApiFailure && err.reason === 'not_confirmed') throw new ApiFailure(503, 'unavailable', 'The information could not be loaded.', 'read_unavailable');
+    throw err;
+  }
+}
+
 async function respondText(path: string): Promise<string> {
   const res = await fetchOrigin(path);
   if (!res.ok) throw await failed(res.status, await wholeJson(res));
@@ -220,8 +240,8 @@ const pause = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 
 /* A change goes with a request id and is sent again with the same id while the server may still take it, so it is
    applied once however many tries it took. */
-async function change<T>(path: string, init: RequestInit & { headers: Record<string, string> }): Promise<T> {
-  const headers = { ...init.headers, [REQUEST_ID]: newRequestId() };
+async function change<T>(path: string, init: RequestInit & { headers: Record<string, string> }, requestId = newRequestId()): Promise<T> {
+  const headers = { ...init.headers, [REQUEST_ID]: requestId };
   let firstLostAt: number | null = null;
   for (;;) {
     const tried = await tryChange<T>(path, { ...init, headers });
@@ -232,10 +252,10 @@ async function change<T>(path: string, init: RequestInit & { headers: Record<str
   }
 }
 
-function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal, requestId?: string): Promise<T> {
   const headers: Record<string, string> = body === undefined ? {} : { 'content-type': 'application/json' };
   const init = { method, headers, body: body === undefined ? undefined : JSON.stringify(body), ...(signal ? { signal } : {}) };
-  return method === 'GET' ? respond<T>(path, init) : change<T>(path, init);
+  return method === 'GET' ? read<T>(path, init) : change<T>(path, init, requestId);
 }
 
 export const api = {
@@ -246,7 +266,7 @@ export const api = {
   streamBytes: (path: string, signal?: AbortSignal) => respondBytes(path, signal),
   /* signal: stops the ask, as a load given up at its limit does. */
   get: <T>(path: string, signal?: AbortSignal) => request<T>('GET', path, undefined, signal),
-  post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
+  post: <T>(path: string, body?: unknown, requestId?: string) => request<T>('POST', path, body, undefined, requestId),
   put: <T>(path: string, body: unknown) => request<T>('PUT', path, body),
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body),
   del: <T>(path: string) => request<T>('DELETE', path),

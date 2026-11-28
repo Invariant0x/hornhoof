@@ -41,6 +41,7 @@ export const SECRET: Record<string, string[]> = {
   attachments: ['bytes', 'sha256'],
   assistants: ['key_hash', 'wake_secret_enc'],
   telegram_bots: ['token_enc'],
+  telegram_incoming: ['payload_enc'],
   requests: ['text', 'options', 'explained', 'answer', 'link', 'source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification'],
   proposals: ['material_snapshot', 'brief', 'items', 'source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification'],
 };

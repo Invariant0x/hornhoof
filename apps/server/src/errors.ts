@@ -194,6 +194,8 @@ export type ErrorReason =
   | 'read_only'
   | 'not_confirmed'
   | 'already_done'
+  | 'chat_history_unavailable'
+  | 'read_unavailable'
   | 'not_keeper'
   | 'no_machine_id'
   | 'key_changed'
@@ -330,6 +332,11 @@ function fenceAnswer(err: unknown, req: FastifyRequest, reply: FastifyReply): Fa
     return reply.status(refused.status).send(body(refused.code, refused.message, refused.reason));
   }
   if (!notConfirmed(err)) return undefined;
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    req.log.warn({ error: loggable(err), route: req.routeOptions.url }, 'Database read was interrupted.');
+    const why = req.routeOptions.url === '/api/agents/:id/events' ? 'chat_history_unavailable' : 'read_unavailable';
+    return reply.status(503).send(body('unavailable', 'The information could not be loaded.', why));
+  }
   req.log.warn({ error: loggable(err), method: req.method, route: req.routeOptions.url }, 'A commit was not confirmed.');
   return reply.status(503).send(body('unavailable', NOT_CONFIRMED, 'not_confirmed'));
 }

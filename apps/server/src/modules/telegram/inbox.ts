@@ -1,9 +1,12 @@
+import { deliveredMessage } from '../events/store.js';
+import type { FileCheckpoint, PreparedFiles } from './incoming-queue.js';
+import { createHash } from 'node:crypto';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { canContactAgent } from '../../auth/agent-view.js';
 import { personColumns, type Person } from '../../auth/session.js';
 import { isUniqueViolation } from '../../db/errors.js';
-import { agentEvents, agents, people, telegramBots, telegramReplies } from '../../db/schema.js';
+import { agentEvents, agents, people, telegramBots, telegramIncoming, telegramReplies } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { ApiError, loggable } from '../../errors.js';
 import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.js';
@@ -50,8 +53,11 @@ async function awaitAnswer(ctx: Pick<Ctx, 'db'>, bot: Bot, jobId: string, chatId
     .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->'telegram'->>'update' = ${String(update)}`))
     .orderBy(desc(agentEvents.seq))
     .limit(1);
-  await ctx.db.insert(telegramReplies).values({ botId: bot.id, jobId, chatId, afterSeq: said?.seq ?? before, lang })
-    .onConflictDoUpdate({ target: [telegramReplies.botId, telegramReplies.jobId, telegramReplies.chatId], set: { lang } });
+  await ctx.db.transaction(async tx => {
+    await tx.insert(telegramReplies).values({ botId: bot.id, jobId, chatId, afterSeq: said?.seq ?? before, lang })
+      .onConflictDoUpdate({ target: [telegramReplies.botId, telegramReplies.jobId, telegramReplies.chatId], set: { lang } });
+    await tx.delete(telegramIncoming).where(and(eq(telegramIncoming.botId, bot.id), eq(telegramIncoming.updateId, update)));
+  });
 }
 
 /* What a person sends besides words, read for the agent: its notes in place of what cannot go as a file, and the files. */
@@ -96,6 +102,10 @@ export type Transcribe = (bytes: Buffer, name: string) => Promise<string | null>
 
 const megabytes = (bytes: number) => Math.round(bytes / 1024 / 1024);
 
+function permanentFileError(err: unknown): err is TelegramError {
+  return err instanceof TelegramError && err.code !== null && err.code !== 429 && err.code < 500;
+}
+
 /* Brings the files over from Telegram and keeps them for the agent, each in turn. One that does not come is named in the
    words the agent reads, and the person hears why. */
 async function bringFiles(ctx: Ctx, me: Person, agentId: string, came: Came, fetchFile: FetchFile, transcribe: Transcribe, chatId: number, say: Say, words: ReturnType<typeof botWords>) {
@@ -112,7 +122,8 @@ async function bringFiles(ctx: Ctx, me: Person, agentId: string, came: Came, fet
       bytes = await fetchFile(file.file_id);
       if (!bytes.length) throw new Error('The file came empty.');
     } catch (err) {
-      const tooBig = err instanceof TelegramError && /too big/i.test(err.message);
+      if (!permanentFileError(err)) throw err;
+      const tooBig = /too big/i.test(err.message);
       ctx.log.warn({ error: err instanceof TelegramError ? { code: err.code, message: err.message } : loggable(err), agentId }, 'A file sent to a Telegram bot could not be fetched.');
       notes.push(`[${name} did not come${tooBig ? `: Telegram gives a bot files of up to ${megabytes(TELEGRAM_FILE_BYTES)} MB` : ''}.]`);
       await say(chatId, tooBig ? words.fileTooBig(name, megabytes(TELEGRAM_FILE_BYTES)) : words.fileLost(name));
@@ -133,18 +144,18 @@ async function bringFiles(ctx: Ctx, me: Person, agentId: string, came: Came, fet
   return { ids, notes };
 }
 
-function deliveryFailure(ctx: Ctx, err: unknown, agentId: string, words: ReturnType<typeof botWords>, name: string): string {
-  if (err instanceof ApiError && (err.reason === 'agent_not_ready' || err.reason === 'orchestrator_not_ready')) {
-    return err.details?.undelivered === 'machine_offline' ? words.machineOffline(name) : words.notReady(name);
-  }
-  ctx.log.warn({ error: loggable(err), agentId }, 'A message from Telegram did not reach its agent.');
-  return words.failed;
+async function preparedFiles(filesToFetch: Incoming[], checkpoint: FileCheckpoint | undefined, fetch: () => Promise<PreparedFiles>): Promise<PreparedFiles> {
+  if (!filesToFetch.length) return { ids: [], notes: [] };
+  if (checkpoint?.saved) return checkpoint.saved;
+  const files = await fetch();
+  await checkpoint?.keep(files);
+  return files;
 }
 
 /* One message of a bot, or the updates of one album together: a person's words and files in a private chat go to the bot's
    agent as if they wrote and sent them in its window, with their rights; anyone else hears plainly why not. Returns whether
    the message went to the agent. */
-export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | TelegramUpdate[], say: Say, fetchFile: FetchFile, transcribe: Transcribe = async () => null): Promise<boolean> {
+export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | TelegramUpdate[], say: Say, fetchFile: FetchFile, transcribe: Transcribe = async () => null, checkpoint?: FileCheckpoint): Promise<boolean> {
   const all = (Array.isArray(updates) ? updates : [updates]).filter(u => u.message);
   const update = all[0];
   const message = update?.message;
@@ -169,6 +180,12 @@ export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | Tele
     await say(chatId, words.notYours(name));
     return false;
   }
+  const receipt = createHash('sha256').update(JSON.stringify(['telegram', bot.id, chatId, update.update_id])).digest('hex');
+  const prior = await deliveredMessage(ctx.db, me.companyId, agent.id, receipt);
+  if (prior) {
+    await awaitAnswer(ctx, bot, prior, chatId, update.update_id, 0, lang);
+    return true;
+  }
   const came: Came = { notes: [], files: [] };
   for (const m of messages) {
     const one = whatCame(m);
@@ -181,20 +198,15 @@ export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | Tele
     return false;
   }
   const files = came.files.slice(0, PICTURES_PER_MESSAGE);
-  const brought = await bringFiles(ctx, me, agent.id, { ...came, files }, fetchFile, transcribe, chatId, say, words);
+  const brought = await preparedFiles(files, checkpoint, () => bringFiles(ctx, me, agent.id, { ...came, files }, fetchFile, transcribe, chatId, say, words));
   if (came.files.length > files.length) brought.notes.push(`[${came.files.length - files.length} more files of this album did not come: a message carries at most ${PICTURES_PER_MESSAGE}.]`);
   const text = [...said, ...came.notes, ...brought.notes].join('\n\n');
   /* Nothing came but what the person already heard did not. */
   if (!said.length && !came.notes.length && !brought.ids.length) return false;
   const reply = replyTo(messages, chatId);
   const before = await lastSeq(ctx, agent.id);
-  let jobId: string;
-  try {
-    jobId = await writeToAgent(ctx, me, agent, { text, pictures: brought.ids, telegram: { bot: bot.id, chat: chatId, update: update.update_id, lang, ...(reply && { reply }) } });
-  } catch (err) {
-    await say(chatId, deliveryFailure(ctx, err, agent.id, words, name));
-    return false;
-  }
+  const jobId = await writeToAgent(ctx, me, agent, { text, pictures: brought.ids, chatReceipt: receipt,
+    telegram: { bot: bot.id, chat: chatId, update: update.update_id, lang, ...(reply && { reply }) } });
   await awaitAnswer(ctx, bot, jobId, chatId, update.update_id, before, lang);
   return true;
 }

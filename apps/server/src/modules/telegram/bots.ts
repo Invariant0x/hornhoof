@@ -1,6 +1,6 @@
 import type { FailureKind } from '@hornhoof/protocol';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { and, asc, eq, gt, inArray, isNull, lte } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { canContactAgent } from '../../auth/agent-view.js';
 import { personColumns, type Person } from '../../auth/session.js';
@@ -14,6 +14,7 @@ import { attachmentBytesForPerson } from '../tasks/attachments.js';
 import { downloadFile, getUpdates, sendDocument, sendText, sendTyping, splitForTelegram, TelegramError, type TelegramUpdate } from './api.js';
 import { transcribe } from './transcribe.js';
 import { receive } from './inbox.js';
+import { IncomingQueue, keepUpdates } from './incoming-queue.js';
 import { agentName, botWords } from './words.js';
 
 type BotRow = typeof telegramBots.$inferSelect;
@@ -77,6 +78,7 @@ class Listener {
   private readonly abort = new AbortController();
   private readonly token: string;
   private readonly loop: Promise<void>;
+  private readonly incoming: IncomingQueue;
   private readonly unsubscribe: () => void;
   private readonly typing = new Map<string, NodeJS.Timeout>();
   private sending: Promise<void> = Promise.resolve();
@@ -94,6 +96,10 @@ class Listener {
     this.unsubscribe = ctx.bus.subscribe(bot.companyId, m => {
       if (m.type === 'working' || (m.type === 'agent_event' && m.agentId === bot.agentId)) this.answer();
     });
+    this.incoming = new IncomingQueue(ctx.db, ctx.config.secret, bot.id, async (group, checkpoint) => {
+      if (await receive(this.ctx, this.bot, group, this.say, this.fetchFile, this.transcribe, checkpoint)) this.answer();
+    }, err => this.warn(err, 'Telegram input remains queued.'));
+    this.incoming.wake();
     this.loop = this.listen();
     this.answer();
   }
@@ -104,6 +110,7 @@ class Listener {
     this.typing.clear();
     this.unsubscribe();
     await this.loop;
+    await this.incoming.stop();
     await this.sending;
   }
 
@@ -129,13 +136,14 @@ class Listener {
     while (!this.stopped) {
       try {
         const updates = await getUpdates(this.ctx.config.telegramApiUrl, this.token, offset, this.abort.signal);
-        pause = FIRST_PAUSE_MS;
         for (const group of albums(updates)) {
           if (this.stopped) break;
           /* Telegram forgets an update the next call confirms, so the offset moves on only once the update is marked read. */
-          await this.take(group);
+          await keepUpdates(this.ctx.db, this.ctx.config.secret, this.bot.id, group);
+          this.incoming.wake();
           offset = Math.max(offset, group.at(-1)!.update_id + 1);
         }
+        pause = FIRST_PAUSE_MS;
         this.answer(true);
       } catch (err) {
         if (this.stopped) break;
@@ -144,22 +152,6 @@ class Listener {
         await sleep(Math.max(pause, asked), undefined, { signal: this.abort.signal }).catch(() => {});
         pause = Math.min(pause * 2, LONGEST_PAUSE_MS);
       }
-    }
-  }
-
-  /* The update is marked read before it is handled, so a restart never takes it twice; a stop waits for it to be handled. */
-  private async take(group: TelegramUpdate[]): Promise<void> {
-    const first = group[0]!.update_id;
-    const marked = await this.ctx.db
-      .update(telegramBots)
-      .set({ updateOffset: group.at(-1)!.update_id + 1 })
-      .where(and(eq(telegramBots.id, this.bot.id), lte(telegramBots.updateOffset, first)))
-      .returning({ id: telegramBots.id });
-    if (!marked.length) return;
-    try {
-      if (await receive(this.ctx, this.bot, group, this.say, this.fetchFile, this.transcribe)) this.answer();
-    } catch (err) {
-      if (!this.stopped) this.warn(err, 'A message to a Telegram bot could not be handled.');
     }
   }
 

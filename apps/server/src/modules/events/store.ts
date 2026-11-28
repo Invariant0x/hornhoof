@@ -131,6 +131,14 @@ export async function appendOutgoing(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>,
   await appendEvent(ctx, { ...e, kind: 'message', data: { text: e.text }, message: { direction: 'out', from: await agentParty(ctx, e.companyId, e.agentId), to: e.to } });
 }
 
+/* A saved message identifies the job its sender can resume after a lost acknowledgement. */
+export async function deliveredMessage(db: Db, companyId: string, agentId: string, receipt: string): Promise<string | null> {
+  const [event] = await db.select({ jobId: agentEvents.jobId }).from(agentEvents).where(and(
+    eq(agentEvents.companyId, companyId), eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'chatReceipt' = ${receipt}`,
+  )).limit(1);
+  return event?.jobId ?? null;
+}
+
 /* An agent's events after seq, oldest first. A program's evidence is the operator's record, said to nobody. */
 export async function listEvents(db: Db, agentId: string, after: number, limit = 500): Promise<EventView[]> {
   const rows = await db

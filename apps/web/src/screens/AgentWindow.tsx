@@ -1,7 +1,7 @@
 import { nextLevelProgress, type WorldLiveAgent, type WorldLiveSnapshot } from '@hornhoof/protocol/world';
 import { commandBlockOpen } from '../ui/CommandBox';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { api, ApiFailure, isAway } from '../api';
+import { api, ApiFailure, interruptedRead, isAway, newRequestId } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { liveOf } from '../org';
@@ -317,7 +317,7 @@ function chatParts(o: WindowLoadOf): LoadPart[] {
    after the window showed him; before that, the load says it where he will stand. */
 function useWindowLoad(o: WindowLoadOf) {
   const history: LoadPart = { data: o.terminal ? o.state : o.historyIn || null, failure: o.historyFailure, load: () => void o.catchUp() };
-  const refreshFailure = isAway(o.historyFailure) ? o.cardFailure : o.historyFailure ?? o.cardFailure;
+  const refreshFailure = [o.historyFailure, o.cardFailure].find(err => err && !isAway(err) && !interruptedRead(err)) ?? null;
   return { load: useLoad([history, ...(o.terminal ? [] : chatParts(o))]), said: o.failure ?? onTop(o.state, refreshFailure) };
 }
 
@@ -379,8 +379,38 @@ function applyLoadedCard(mounted: boolean, card: AgentCardView | null, save: (c:
   if (mounted && card) save(card);
 }
 
-function readyEvents<T>(mounted: boolean, res: T | null): res is T {
-  return mounted && res !== null;
+function readyEvents<T>(mounted: boolean, res: T | null, signal: AbortSignal): res is T {
+  return mounted && !signal.aborted && res !== null;
+}
+
+function loadRecentEvents(path: string, after: number, signal: AbortSignal) {
+  const query = after === 0 ? `last=${KEEP}` : `after=${after}`;
+  return api.get<{ events: EventView[]; state: OrchestratorState }>(`${path}/events?${query}`, signal);
+}
+
+function submitChatOnEnter(e: KeyboardEvent<HTMLTextAreaElement>, send: () => Promise<void>) {
+  if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+  e.preventDefault();
+  void send();
+}
+
+const deliveryUnknown = (err: ApiFailure) => err.status === 0 || err.reason === 'not_confirmed' || err.reason === 'already_done';
+
+async function postChatMessage(pending: Map<string, string>, path: string, text: string, pictures: string[]) {
+  const payload = pictures.length ? { text, pictures } : { text };
+  const fingerprint = JSON.stringify([path, payload]);
+  const id = pending.get(fingerprint) ?? newRequestId();
+  pending.set(fingerprint, id);
+  try {
+    await api.post(`${path}/messages`, payload, id);
+  } catch (err) {
+    if (err instanceof ApiFailure && deliveryUnknown(err)) {
+      throw new ApiFailure(err.status, err.code, 'Message delivery is not confirmed yet.', 'chat_delivery_unknown');
+    }
+    if (!(err instanceof ApiFailure) || err.status < 500) pending.delete(fingerprint);
+    throw err;
+  }
+  pending.delete(fingerprint);
 }
 
 export function AgentWindow({ me, org, agentId, staff = null, onClose, place, requests = [], onRequestsChanged = () => {} }: Props) {
@@ -407,6 +437,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const [manual, setManual] = useState<boolean | null>(null);
   /* What the person did that failed; and the window's own looks at the agent that failed, his history and his card. */
   const [failure, setFailure] = useState<unknown>(null);
+  const pendingMessages = useRef(new Map<string, string>());
   const [historyFailure, setHistoryFailure] = useState<unknown>(null);
   const [cardFailure, setCardFailure] = useState<unknown>(null);
   /* The department to staff by hand, when the orchestrator could not answer the CEO's "+ Hire". */
@@ -428,6 +459,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const box = useRef<HTMLElement>(null);
   const last = useRef(0);
   const mounted = useRef(true);
+  const historyRequest = useRef(new AbortController());
   const catchUpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* Catch-ups run side by side and can answer out of order; a state older than the one shown is dropped. */
   const catchUps = useRef(0);
@@ -492,12 +524,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* History comes in order, a page at a time, and only it moves the cursor: a live line never skips what came before it. A
      window with no line yet takes the newest ones only. */
   const catchUp = useCallback(async () => {
+    const signal = historyRequest.current.signal;
     try {
       for (;;) {
         const n = ++catchUps.current;
         const fresh = last.current === 0;
-        const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(fresh ? `${path}/events?last=${KEEP}` : `${path}/events?after=${last.current}`);
-        if (!readyEvents(mounted.current, res)) return;
+        const res = await loadRecentEvents(path, last.current, signal);
+        if (!readyEvents(mounted.current, res, signal)) return;
         setHistoryFailure(null);
         merge(res.events);
         if (n > stateFrom.current) {
@@ -512,6 +545,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         }
       }
     } catch (err) {
+      if (signal.aborted) return;
       if (mounted.current) {
         setHistoryFailure(err);
         /* The server no longer lets this person reach the agent: nothing of it stays open, its line to write included. */
@@ -565,15 +599,18 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
 
   useEffect(() => {
     mounted.current = true;
+    const lifetime = new AbortController();
+    historyRequest.current = lifetime;
     void (async () => {
       const history = catchUp();
       loadCard();
       await history;
-      await greet();
+      if (!lifetime.signal.aborted) await greet();
     })();
     const stopPoll = everyVisible(() => void catchUp(), POLL_MS);
     return () => {
       mounted.current = false;
+      lifetime.abort();
       stopPoll();
       if (catchUpTimer.current) clearTimeout(catchUpTimer.current);
       catchUpTimer.current = null;
@@ -663,9 +700,10 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     setText('');
     setFailure(null);
     try {
-      await pictures.deliver(ids => api.post(`${path}/messages`, ids.length ? { text: body, pictures: ids } : { text: body }));
+      await pictures.deliver(ids => postChatMessage(pendingMessages.current, path, body, ids));
       void catchUp();
     } catch (err) {
+      void catchUp();
       /* The person may have started the next message meanwhile; that one stays. */
       setText(now => now || body);
       /* Next to the pictures it is about, which stay. */
@@ -674,11 +712,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     }
   }
 
-  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
-    e.preventDefault();
-    void send();
-  }
+
 
   const hasPictures = pictures.drafts.length > 0;
   useLayoutEffect(() => {
@@ -911,7 +945,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
           <label className="sr" htmlFor={`input-${agentId}`}>
             {placeholder}
           </label>
-          <textarea id={`input-${agentId}`} ref={input} rows={1} value={text} placeholder={placeholder} disabled={!ready} onChange={e => setText(e.target.value)} onKeyDown={onKeyDown} />
+          <textarea id={`input-${agentId}`} ref={input} rows={1} value={text} placeholder={placeholder} disabled={!ready} onChange={e => setText(e.target.value)} onKeyDown={e => submitChatOnEnter(e, send)} />
           <AddPicture id={`picture-${agentId}`} disabled={!ready} onFiles={pictures.add} />
           <button className="chat-send" type="submit" aria-label={t.window.chat.send} title={t.window.chat.send} disabled={!ready || pictures.sending}>
             <svg viewBox="0 0 24 24" aria-hidden="true">

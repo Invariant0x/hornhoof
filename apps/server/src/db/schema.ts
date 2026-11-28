@@ -1029,6 +1029,8 @@ export const agentEvents = pgTable(
     createdAt: createdAt(),
   },
   t => [
+    index('agent_events_visible_history').on(t.agentId, t.seq).where(sql`data->>'operatorEvidenceId' is null`),
+    index('agent_events_chat_receipt').on(sql`(data->>'chatReceipt')`).where(sql`data->>'chatReceipt' is not null`),
     index('agent_events_agent_id_seq').on(t.agentId, t.seq), index('agent_events_job_id').on(t.jobId),
     index('agent_events_program_history').on(t.jobId, t.createdAt).where(sql`${t.kind} in ('program', 'failed')`),
     index('agent_events_silent_job').on(sql`(${t.data}->>'silentJob')`).where(sql`${t.kind} = 'message' and ${t.data} ? 'silentJob'`),
@@ -1073,6 +1075,24 @@ export const telegramChatLanguages = pgTable(
 
 /* A person's message that came through a bot, whose answer goes back to their chat: the turn it went into, the events
    already handled, and the language the bot speaks to them in. */
+/* The next Telegram poll may acknowledge an update once its encrypted input is on disk. */
+export const telegramIncoming = pgTable(
+  'telegram_incoming',
+  {
+    id: id(),
+    botId: uuid('bot_id').notNull().references(() => telegramBots.id, { onDelete: 'cascade' }),
+    updateId: bigint('update_id', { mode: 'number' }).notNull(),
+    chatId: bigint('chat_id', { mode: 'number' }).notNull(),
+    payloadEnc: text('payload_enc').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [
+    unique('telegram_incoming_update').on(t.botId, t.updateId),
+    index('telegram_incoming_chat_order').on(t.botId, t.chatId, t.updateId),
+  ],
+);
+
 export const telegramReplies = pgTable(
   'telegram_replies',
   {
@@ -1406,7 +1426,10 @@ export const taskEvents = pgTable(
     data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
   },
-  t => [index('task_events_task_id').on(t.taskId)],
+  t => [
+    index('task_events_task_id').on(t.taskId),
+    index('task_events_company_rework').on(t.companyId, t.createdAt, t.taskId).where(sql`kind = 'submitted' and data->'candidate'->>'parentId' is not null`),
+  ],
 );
 
 export const GOAL_STATUSES = ['active', 'reached', 'dropped'] as const;

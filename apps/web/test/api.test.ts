@@ -253,3 +253,17 @@ describe('newRequestId', () => {
     expect(ids[0]).not.toBe(ids[1]);
   });
 });
+
+describe('a safe read during a database timeout', () => {
+  it('recovers a lost organization read without telling the person a change was submitted', async () => {
+    const { keys } = fetchAnswering(refused(503, 'not_confirmed'), json(200, { organization: 'ready' }));
+    expect(await settled(api.get('/api/org'))).toEqual({ value: { organization: 'ready' } });
+    expect(keys).toEqual([null, null]);
+  });
+
+  it('stops after one retry and describes only the read that failed', async () => {
+    const { keys } = fetchAnswering(refused(503, 'not_confirmed'));
+    expect(await settled(api.get('/api/org'))).toMatchObject({ failure: { reason: 'read_unavailable' } });
+    expect(keys).toEqual([null, null]);
+  });
+});
