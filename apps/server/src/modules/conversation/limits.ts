@@ -77,3 +77,10 @@ function laterOf(known: Window | undefined, full: Window & { resetsAt: string })
 
 /* Wakes the agent's line once its plan's limit starts over. */
 export const resets = new WeakMap<Ctx, Map<string, { at: string; timer: NodeJS.Timeout }>>();
+
+/* Until when the plan holds this employee's turns back on that model: at its limit, or a worker's past the share set for
+   tasks, by the limits of the model's group where the plan keeps them by group. Heads and the orchestrator keep
+   coordinating work above that share, so it holds none of theirs. */
+export function heldUntil(plan: { limits: Limits | null; limitsUpdatedAt: Date | null; budget: number | null }, kind: string, model: string): string | null {
+  return modelLimitUntil(plan, model) ?? (kind === 'worker' ? budgetUntil(limitsForModel(plan.limits, model), plan.budget, plan.limitsUpdatedAt) : null);
+}

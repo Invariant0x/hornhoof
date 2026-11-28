@@ -1,3 +1,4 @@
+import { fallbackWaitReviews } from '../tasks/plan-wait-review.js';
 import { hasNotebookChanges } from '../notebook/reviews.js';
 import { and, eq, gt, inArray, isNotNull, isNull, notInArray, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -45,7 +46,7 @@ const timed = and(isNotNull(agents.timerMinutes), isNotNull(agents.subscriptionI
 
 /* What a timer for work looks at: a task open in the company that waits for nobody and nothing it named, or a turn that
    failed since the last round. A task that waits on purpose goes on by itself when what it waits for comes. */
-async function workFor(ctx: Ctx, a: AgentRow): Promise<boolean> {
+async function workFor(ctx: Ctx, a: AgentRow, now: Date): Promise<boolean> {
   const open = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, a.companyId), notInArray(tasks.status, ['done', 'cancelled'])));
   for (const task of open) if (!task.externalWait && !(await waitsOnPurpose(ctx, task))) return true;
   const [failed] = await ctx.db
@@ -60,7 +61,8 @@ async function workFor(ctx: Ctx, a: AgentRow): Promise<boolean> {
       ),
     )
     .limit(1);
-  return Boolean(failed) || await hasNotebookChanges(ctx.db, a, a.timerAt);
+  if (failed || await hasNotebookChanges(ctx.db, a, a.timerAt)) return true;
+  return a.roleKey === 'OPS-WATCH' && (await fallbackWaitReviews(ctx.db, a.companyId, { since: a.timerAt }, now).limit(1)).length > 0;
 }
 
 const every = (minutes: number) => (minutes % 60 === 0 ? `${minutes / 60} ${minutes === 60 ? 'hour' : 'hours'}` : `${minutes} minutes`);
@@ -79,7 +81,7 @@ async function queueDueRound(ctx: Ctx, id: string, now: Date): Promise<string | 
     .where(and(eq(jobs.agentId, id), inArray(jobs.status, ['queued', 'running'])))
     .limit(1);
   if (open) return false;
-  if (agent.timerForWork && !(await workFor(ctx, agent))) {
+  if (agent.timerForWork && !(await workFor(ctx, agent, now))) {
     await db.update(agents).set({ timerAt: now, timerNudgedAt: null }).where(eq(agents.id, id));
     return false;
   }

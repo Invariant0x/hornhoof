@@ -1,4 +1,4 @@
-import { limitsForModel, modelsFor } from '@hornhoof/protocol';
+import { modelsFor } from '@hornhoof/protocol';
 import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentSpot } from '../../auth/access.js';
@@ -7,10 +7,11 @@ import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { modelOnPlan, tierIn } from '../agents/role-model.js';
-import { budgetUntil, modelLimitUntil } from '../conversation/limits.js';
+import { heldUntil, modelLimitUntil } from '../conversation/limits.js';
 import { enqueueTurn, insertTurn, pump } from '../conversation/queue.js';
 import { planHeld, planWaitsFor } from '../conversation/state.js';
 import { orchestratorOf } from '../conversation/turn-records.js';
+import { recheckWorkPlans, type AvailableWorkPlan } from '../tasks/plan-waits.js';
 import { repinMoved } from '../tasks/echelons-repin.js';
 import { orchestratorServing, runsTier, servingSubscriptions } from '../tools/staff.js';
 
@@ -25,12 +26,7 @@ type Plan = typeof subscriptions.$inferSelect;
 type Fallback = typeof agentFallbacks.$inferSelect;
 type Target = { plan: Plan; model: string | null };
 
-/* Until when the plan holds this employee's turns back on that model: at its limit, or a worker's past the share set for
-   tasks, by the limits of the model's group where the plan keeps them by group. Heads and the orchestrator keep
-   coordinating work above that share, so it holds none of theirs. */
-export function heldUntil(plan: Pick<Plan, 'limits' | 'limitsUpdatedAt' | 'budget'>, kind: string, model: string): string | null {
-  return modelLimitUntil(plan, model) ?? (kind === 'worker' ? budgetUntil(limitsForModel(plan.limits, model), plan.budget, plan.limitsUpdatedAt) : null);
-}
+export { heldUntil } from '../conversation/limits.js';
 
 /* The model it runs on its own plan: the one it goes back to from a fallback, else the one it runs now. */
 const homeModel = (agent: Agent, kept: Fallback | null): string => (kept ? kept.homeModel : agent.model);
@@ -48,11 +44,13 @@ async function tierOf(ctx: Ctx, agent: Agent) {
   return tierIn(role ?? { tier: 'standard' }, team);
 }
 
+const servingFor = async (ctx: Ctx, agent: Agent) => agent.kind === 'orchestrator' ? orchestratorServing(ctx, agent.companyId) : servingSubscriptions(ctx, agent.companyId, await agentSpot(ctx.db, agent));
+
 /* The plans the employee may go on to from its own, in order: those named for that plan, else every personal plan of the
    company that may serve it, oldest first. An API key is paid by the token, so it takes them only where a person named it.
    Only plans that serve where it works and run its role's strength count. */
 async function fallbacksOf(ctx: Ctx, agent: Agent, home: Plan): Promise<Target[]> {
-  const serving = agent.kind === 'orchestrator' ? await orchestratorServing(ctx, agent.companyId) : await servingSubscriptions(ctx, agent.companyId, await agentSpot(ctx.db, agent));
+  const serving = await servingFor(ctx, agent);
   const tier = await tierOf(ctx, agent);
   const may = new Set(serving.filter(s => tier === null || runsTier(s.provider, tier)).map(s => s.id));
   const named: PlanFallback[] = home.fallbacks.length ? home.fallbacks : serving.filter(s => s.kind === 'personal').map(s => ({ subscription: s.id, model: null }));
@@ -283,12 +281,30 @@ export async function fallBackFrom(ctx: Ctx, planId: string): Promise<void> {
   for (const { id } of on) await pump(ctx, id);
 }
 
+/* Observe the actual assignment, including its current model budget and node. A fallback must still serve this employee. */
+async function assignedWorkPlan(ctx: Ctx, companyId: string, holderId: string): Promise<AvailableWorkPlan | null> {
+  const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, holderId), eq(agents.companyId, companyId), isNull(agents.removedAt)));
+  if (!movable(agent)) return null;
+  const plan = await planOf(ctx, agent.subscriptionId);
+  if (!plan || plan.companyId !== companyId || !(await hasRoom(ctx, agent, plan, agent.model))) return null;
+  if (!(await mayRecheckOn(ctx, agent, plan))) return null;
+  return { id: plan.id, model: agent.model, label: plan.label };
+}
+
+async function mayRecheckOn(ctx: Ctx, agent: Agent, plan: Plan): Promise<boolean> {
+  const [kept] = await ctx.db.select().from(agentFallbacks).where(and(eq(agentFallbacks.agentId, agent.id), eq(agentFallbacks.companyId, agent.companyId), eq(agentFallbacks.subscriptionId, plan.id)));
+  if (!kept) return (await servingFor(ctx, agent)).some(p => p.id === plan.id);
+  const home = await planOf(ctx, kept.homeSubscriptionId);
+  return !!home && home.companyId === agent.companyId && (await fallbacksOf(ctx, agent, home)).some(t => t.plan.id === plan.id);
+}
+
 /* Each round of the reconciler: whoever is on a fallback while its own plan takes its turns again comes back between turns,
    also when the wake set for that was lost with a restart of the server. */
 export async function settleFallbacks(ctx: Ctx): Promise<void> {
   const away = await ctx.db.select({ agentId: agentFallbacks.agentId, kind: agents.kind, model: agentFallbacks.homeModel, home: subscriptions }).from(agentFallbacks)
     .innerJoin(agents, eq(agents.id, agentFallbacks.agentId)).innerJoin(subscriptions, eq(subscriptions.id, agentFallbacks.homeSubscriptionId));
   for (const { agentId, kind, model, home } of away) if (home.removedAt || !heldUntil(home, kind, model)) await pump(ctx, agentId);
+  await recheckWorkPlans(ctx, assignedWorkPlan);
 }
 
 /* The fallback an employee is on, for its card: its own plan and when that plan's hold ends, as far as it is known now. */

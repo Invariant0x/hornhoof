@@ -4,6 +4,7 @@ import type { Db } from '../../db/client.js';
 import { requests, tasks } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { openPersonRequests } from '../tasks/decisions.js';
+import { fallbackWaitReviews } from '../tasks/plan-wait-review.js';
 import { CLOSED } from '../tasks/state.js';
 
 /* The watchdog sees wait facts, never dependency bodies or references outside the task's department, and with each task what
@@ -21,10 +22,13 @@ export async function watchedTasks(db: Db, companyId: string, holders: string[])
   const questions = new Set((await db.select(only(requests, 'taskId')).from(requests)
     .where(and(eq(requests.companyId, companyId), inArray(requests.taskId, held.map(t => t.id)), openPersonRequests()))).map(r => r.taskId));
   const now = Date.now();
+  const reviews = new Map((await fallbackWaitReviews(db, companyId, { holders }, new Date(now))).map(({ taskId, ...assignment }) => [taskId, assignment]));
   return held.map(({ id, departmentId, executorAgentId, after, externalWait, ...task }) => ({ ...task,
     sight: { status: task.status, departmentId, assigneeAgentId: task.holder, executorAgentId },
     waitsFor: prerequisites.filter(p => p.departmentId === departmentId && after.includes(p.id)).map(p => p.number),
-    externalWait: externalWait ? { reason: externalWait.reason, since: externalWait.since, until: externalWait.until } : null,
+    externalWait: externalWait ? { reason: externalWait.reason, since: externalWait.since, until: externalWait.until,
+      ...(externalWait.planAccess && { resumeOnPlan: externalWait.planAccess.required }),
+      ...(reviews.has(id) && { review: reviews.get(id) }) } : null,
     waitingForPerson: questions.has(id) || !!(externalWait && isPersonWait(externalWaitFact(externalWait, now))),
   }));
 }

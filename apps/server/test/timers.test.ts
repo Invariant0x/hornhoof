@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agentChanges, agentEvents, agents, companies, departments, jobs, notebookNotes, requests, tasks } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agentFallbacks, agents, companies, departments, jobs, notebookNotes, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { leadSweeps, minuteRound, timerTick } from '../src/modules/agents/timers.js';
 import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
@@ -123,6 +123,22 @@ describe('timers', () => {
     const [walt] = await db.select().from(agents).where(eq(agents.id, hired.json().hired[0] as string));
     expect([walt!.timerMinutes, walt!.timerOrder, walt!.timerForWork]).toEqual([10, role.timer!.order, true]);
     expect(walt!.timerAt).toEqual(hiredAt);
+  });
+
+  it('schedules one Operations review when an existing work wait meets a fallback assignment', async () => {
+    const { app, db, ceo, wandaId, orchestrator } = await company();
+    await patch(app, ceo, wandaId, { timer: { minutes: 10, order: 'Review changed waits.', forWork: true } });
+    const [watcher] = await db.update(agents).set({ roleKey: 'OPS-WATCH' }).where(eq(agents.id, wandaId)).returning();
+    const at = (minutes: number) => new Date(watcher!.timerAt!.getTime() + minutes * MIN);
+    const [active] = await db.select().from(subscriptions).where(eq(subscriptions.id, orchestrator.subscriptionId!));
+    const [home] = await db.insert(subscriptions).values({ companyId: orchestrator.companyId, label: 'Primary', provider: 'claude', kind: 'personal', status: 'ready', ownerPersonId: active!.ownerPersonId }).returning();
+    await db.insert(tasks).values({ companyId: orchestrator.companyId, number: 802, title: 'Prepare a brief', status: 'working', assigneeAgentId: orchestrator.id,
+      updatedAt: at(-5), externalWait: { reason: 'Wait for plan access', work: true, since: at(-5).toISOString(), until: at(120).toISOString() } });
+    await db.insert(agentFallbacks).values({ agentId: orchestrator.id, companyId: orchestrator.companyId, homeSubscriptionId: home!.id, homeModel: 'standard',
+      subscriptionId: active!.id, createdAt: at(2) });
+    expect(await timerTick(app.ctx, at(10))).toBe(1);
+    await db.update(jobs).set({ status: 'done', finishedAt: at(11) }).where(eq(jobs.agentId, wandaId));
+    expect(await timerTick(app.ctx, at(20))).toBe(0);
   });
 
   it('runs one Operations review for changed notebook rules even in an otherwise quiet company', async () => {
