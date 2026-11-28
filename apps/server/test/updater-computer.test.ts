@@ -394,12 +394,27 @@ describe('updater, the computer', () => {
     expect(answer(s, 'c4')).toMatchObject({ id: 'c4', exit: 124, output: expect.stringContaining('Stopped after 1 seconds.') });
   });
 
+  it('keeps a short successful command out of the stop log', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'receipt', 'printf ready', 60);
+    const r = await runOnce(s, null, env);
+    expect(answer(s, 'receipt')).toMatchObject({ id: 'receipt', exit: 0 });
+    expect(r.out).not.toContain('computer_command_stopped');
+  });
+
   it('stops a running command when the machine owner closes access', async () => {
     const s = stand();
     access(s, later());
     command(s, 'c6', 'apt-get upgrade -y', 60);
     const close = 'if [ -f "$HORNHOOF_COMPUTER_CONTROL_DIR/computer/c6.started" ]; then echo "{}" > "$HORNHOOF_COMPUTER_CONTROL_DIR/computer.json"; fi';
     const r = await runOnce(s, null, { ...env, STUB_COMPUTER_RUNS: '1', STUB_DURING_SLEEP: close });
+    const stops = r.out.split('\n').filter(line => line.includes('computer_command_stopped')).map(line => JSON.parse(line));
+    expect(stops).toEqual([expect.objectContaining({
+      event: 'computer_command_stopped', commandId: 'c6', at: expect.any(String), requestFile: 'present',
+      read: 'ok', access: 'closed', keeper: 'not_confirmed', graceLeft: expect.any(Number),
+    })]);
+    expect(JSON.stringify(stops)).not.toContain('upgrade');
     expect(r.calls).toContain('docker rm -f hornhoof-computer-c6');
     expect(answer(s, 'c6')).toMatchObject({ id: 'c6', exit: 125, output: expect.stringContaining('Stopped: access to the computer was closed.') });
   });
@@ -540,8 +555,8 @@ describe('updater, the computer', () => {
   function onFullVolume(s: Stand) {
     const full = join(s.dir, 'full-volume');
     mkdirSync(full);
-    writeFileSync(join(full, 'mktemp'), '#!/bin/sh\ncase "$*" in "-d .answer."*) exit 1 ;; esac\nexec /usr/bin/mktemp "$@"\n', { mode: 0o755 });
-    return { ...env, PATH: `${full}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` };
+    writeFileSync(join(full, 'mktemp'), '#!/bin/sh\ncase "$*" in "-d .answer."*) exit 1 ;; esac\nexec "$STAND_MKTEMP" "$@"\n', { mode: 0o755 });
+    return { ...env, STAND_MKTEMP: join(STUBS, 'mktemp'), PATH: `${full}:${STUBS}:${dirname(JQ)}:/usr/bin:/bin` };
   }
 
   it('never runs a command a second time when its answer cannot be written', async () => {

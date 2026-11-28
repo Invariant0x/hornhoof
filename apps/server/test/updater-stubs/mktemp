@@ -1,0 +1,4 @@
+#!/bin/sh
+# The updater's temporary output and the test clock share the stand's directory on every host.
+if [ "$#" -eq 0 ]; then set -- "${TMPDIR:?}/out.XXXXXXXX"; fi
+command -p mktemp "$@"

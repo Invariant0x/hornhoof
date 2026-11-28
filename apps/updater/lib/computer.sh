@@ -67,9 +67,22 @@ heartbeats() {
 # while the owner's standing access is open. The keeper's time also closes access if it stops refreshing it.
 computer_open() {
   local until
-  until=$(take "$COMPUTER_CONTROL/computer.json" quiet jq -r '.untilSec // 0' || true)
-  case "$until" in '' | *[!0-9]*) return 1 ;; esac
-  [ "$until" -gt "$(date +%s)" ]
+  if until=$(take "$COMPUTER_CONTROL/computer.json" quiet jq -r '.untilSec // 0'); then
+    read_state=ok
+  else
+    read_state=failed
+  fi
+  case "$until" in '' | *[!0-9]*) access_state=invalid; return 1 ;; esac
+  if [ "$until" -gt "$(date +%s)" ]; then access_state=open; return 0; fi
+  access_state=closed
+  return 1
+}
+
+# Remember the outcome of the actual check so the stop record needs no second read.
+computer_request_present() {
+  if [ -f "$1" ]; then request_state=present; return 0; fi
+  request_state=absent
+  return 1
 }
 
 # Whether a command on the computer is under way: its start marker is there until its answer is.
@@ -112,6 +125,7 @@ computer_answer() {
 # second time, and what still runs of it is stopped.
 computer_runs() (
   local file id started answer request command timeout out name watch code made
+  local request_state read_state access_state keeper_state
   enter_computer_queue "$COMPUTER_CONTROL" || return 0
   for file in ./*.started; do
     [ ! -L "$file" ] && [ -f "$file" ] || continue
@@ -185,11 +199,17 @@ computer_runs() (
         while [ "$i" -lt "$timeout" ]; do
           sleep 1
           [ ! -f "$out.done" ] || exit 0
-          if [ -f "$file" ] && computer_open; then
+          read_state=not_checked
+          access_state=not_checked
+          keeper_state=not_checked
+          if computer_request_present "$file" && computer_open; then
             held=0
-          elif [ -f "$file" ] && [ "$held" -lt "$COMPUTER_KEEPER_GRACE" ] && computer_keeper_stopped; then
+          elif computer_request_present "$file" && [ "$held" -lt "$COMPUTER_KEEPER_GRACE" ] && { keeper_state=not_confirmed; computer_keeper_stopped; }; then
             held=$((held + 1))
           else
+            # Only the validated command id and fixed outcome categories reach the updater log.
+            printf '{"event":"computer_command_stopped","at":"%s","commandId":"%s","requestFile":"%s","read":"%s","access":"%s","keeper":"%s","graceLeft":%d}\n' \
+              "$(date -u +%FT%TZ)" "$id" "$request_state" "$read_state" "$access_state" "$keeper_state" "$((COMPUTER_KEEPER_GRACE - held))" >&3 || true
             touch "$out.closed"
             docker rm -f "$name"
             exit 0
@@ -198,7 +218,7 @@ computer_runs() (
         done
         touch "$out.late"
         docker rm -f "$name"
-      ) > /dev/null 2>&1 &
+      ) 3>&2 > /dev/null 2>&1 &
       watch=$!
       docker start -a "$name" < /dev/null >> "$out" 2>&1 || code=$?
       touch "$out.done"
