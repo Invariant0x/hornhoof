@@ -631,13 +631,13 @@ describe('the sweeps of a leading app', () => {
     vi.useFakeTimers();
     onTestFinished(() => void vi.useRealTimers());
     const started = { entry: 0, tick: 0 };
-    let end: () => void = () => undefined;
+    const ends: (() => void)[] = [];
     const running = (kind: keyof typeof started) => () => {
       started[kind]++;
-      return new Promise<void>(done => (end = done));
+      return new Promise<void>(done => ends.push(done));
     };
     const stalled: number[] = [];
-    return { started, stalled, endSweep: () => end(), ...leadSweeps(running('entry'), running('tick'), EVERY_MS, ticks => stalled.push(ticks)) };
+    return { started, stalled, endSweep: () => ends.at(-1)!(), ends, ...leadSweeps(running('entry'), running('tick'), EVERY_MS, ticks => stalled.push(ticks)) };
   }
   /* Tells whether a promise has ended by now, after everything already due has run. */
   async function ended(promise: Promise<unknown>): Promise<boolean> {
@@ -683,24 +683,39 @@ describe('the sweeps of a leading app', () => {
   });
 
   it('gives up waiting for a round that has not ended after five ticks, says so once, and goes on with the next', async () => {
-    const { started, stalled, endSweep, enter, leave } = sweeps();
+    const { started, stalled, ends, endSweep, enter, leave } = sweeps();
     enter();
     endSweep();
     await vi.advanceTimersByTimeAsync(EVERY_MS);
     expect(started.tick).toBe(1);
-    /* That round never ends. Four ticks find it running and start nothing. */
+    /* Four ticks find the first round running and start nothing. */
     await vi.advanceTimersByTimeAsync(4 * EVERY_MS);
     expect(started.tick).toBe(1);
     expect(stalled).toEqual([]);
     await vi.advanceTimersByTimeAsync(EVERY_MS);
     expect(stalled).toEqual([5]);
     expect(started.tick).toBe(2);
-    /* Leaving waits for the round that runs now, and no longer for the one given up. */
+    /* The new round ends first. The earlier one must also finish before the database is quiet. */
     const leaving = leave();
     expect(await ended(leaving)).toBe(false);
     endSweep();
+    expect(await ended(leaving)).toBe(false);
+    ends[1]!();
     expect(await ended(leaving)).toBe(true);
     expect(stalled).toEqual([5]);
+  });
+
+  it('refuses a drain receipt when an earlier sweep failed, and clears the failure for the next lead stay', async () => {
+    const failed = new Error('sweep failed');
+    const entry = vi.fn<() => Promise<void>>().mockRejectedValueOnce(failed).mockResolvedValue(undefined);
+    const drained = vi.fn();
+    const { enter, leave } = leadSweeps(entry, async () => {}, EVERY_MS, undefined, drained);
+    enter();
+    await expect(leave()).rejects.toThrow('sweep failed');
+    expect(drained).not.toHaveBeenCalled();
+    enter();
+    await leave();
+    expect(drained).toHaveBeenCalledOnce();
   });
 
   it('starts no round once it has left', async () => {

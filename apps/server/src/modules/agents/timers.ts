@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, eq, gt, inArray, isNotNull, isNull, notInArray, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -185,12 +186,19 @@ const PATIENCE_TICKS = 5;
    something that does not answer: stalled hears of it, and the rounds go on without it, so one step that hangs does not
    stop every round after it. Entering waits for no sweep; leaving stops the ticks and waits for what runs, so nothing of
    this writes once the app has left lead. */
-export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void>, everyMs = TICK_MS, stalled: (ticks: number) => void = () => {}): { enter: () => void; leave: () => Promise<void> } {
+export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void>, everyMs = TICK_MS, stalled: (ticks: number) => void = () => {}, drained: (attempt: string) => void = () => {}): { enter: () => void; leave: (attempt?: string) => Promise<void> } {
   let timer: NodeJS.Timeout | null = null;
-  let running: { ended: Promise<void>; ticks: number } | null = null;
+  let running: { ticks: number } | null = null;
+  const pending = new Set<Promise<void>>();
+  let failure: { error: unknown } | null = null;
   const start = (sweep: () => Promise<void>) => {
-    const mine = { ticks: 0, ended: sweep().finally(() => { if (running === mine) running = null; }) };
+    const mine = { ticks: 0 };
     running = mine;
+    const ended = sweep().catch((error: unknown) => { failure ??= { error }; }).finally(() => {
+      pending.delete(ended);
+      if (running === mine) running = null;
+    });
+    pending.add(ended);
   };
   const tick = () => {
     if (running && ++running.ticks < PATIENCE_TICKS) return;
@@ -199,21 +207,38 @@ export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void
   };
   return {
     enter() {
+      failure = null;
       start(entry);
       timer = setInterval(tick, everyMs);
       timer.unref();
     },
-    async leave() {
+    async leave(attempt = randomUUID()) {
       if (timer) clearInterval(timer);
       timer = null;
-      await running?.ended;
+      await Promise.all(pending);
+      if (failure) throw failure.error;
+      drained(attempt);
     },
   };
 }
 
 export function startTimers(app: FastifyInstance, ctx: Ctx): void {
-  const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
+  let failedSinceEntry = false;
+  const failed = (what: string) => (err: unknown) => {
+    failedSinceEntry = true;
+    app.log.error({ error: loggable(err) }, what);
+  };
   const stalled = (ticks: number) => app.log.error(`A round of Hornhoof's minute checks has not ended after ${ticks} more were due: a step of it waits for something that does not answer. The rounds go on without it.`);
-  const { enter, leave } = leadSweeps(() => entrySweeps(ctx, failed), () => minuteRound(ctx, new Date(), failed), TICK_MS, stalled);
-  ctx.mode.whenLead(enter, leave);
+  const { enter, leave } = leadSweeps(() => entrySweeps(ctx, failed), () => minuteRound(ctx, new Date(), failed), TICK_MS, stalled, attempt => {
+    if (failedSinceEntry) throw new Error('A leading sweep failed before the timer drained.');
+    app.log.info({ event: 'lead_sweeps_drained', attempt, pid: process.pid }, 'All leading sweeps finished.');
+  });
+  ctx.mode.whenLead(() => {
+    failedSinceEntry = false;
+    enter();
+  }, () => {
+    const attempt = randomUUID();
+    app.log.info({ event: 'lead_sweeps_stopping', attempt, pid: process.pid }, 'Stopping leading sweeps.');
+    return leave(attempt);
+  });
 }
