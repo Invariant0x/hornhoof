@@ -1,12 +1,12 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { eventually } from '../../../test-support/eventually.mjs';
-import { APP, JQ, killProcessGroup, pidAlive, runOnce, type Stand, stand, startLoop, UPDATER_DIGESTS } from './updater-fixture.js';
+import { APP, JQ, killProcessGroup, pidAlive, runOnce, runUpdaterStep, type Stand, stand, startLoop, UPDATER_DIGESTS } from './updater-fixture.js';
 
 const SLEEP_STUB = fileURLToPath(new URL('./updater-stubs/sleep', import.meta.url));
 const STUBS = fileURLToPath(new URL('./updater-stubs/', import.meta.url));
@@ -399,9 +399,85 @@ describe('updater, the computer', () => {
     expect(r.calls).toContain('docker rm -f hornhoof-computer-c4');
     expect(answer(s, 'c4')).toMatchObject({ id: 'c4', exit: 124, output: expect.stringContaining('Stopped after 1 seconds.') });
     expect(stopEvents(r.out)).toEqual([{
-      event: 'updater_computer_stop', id: 'c4', at: utc(), reason: 'timeout', requestPresent: true,
+      event: 'updater_computer_stop', id: 'c4', at: utc(), reason: 'timeout', requestPresent: true, requestPresentRecheck: null,
       accessRead: 'ok', accessCheck: 'open', keeperRead: 'not_checked', keeperCheck: 'not_checked', graceSecondsRemaining: 120,
     }]);
+  });
+
+  it('enforces the time limit when stderr is closed', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'no-stderr', 'recorded sample', 1);
+    const r = await runUpdaterStep(s, `
+      docker() {
+        if [ "$1" = start ]; then
+          touch "$STUB_STATE/computer-runs"
+          wait "$watch" 2> /dev/null || true
+        else
+          command docker "$@"
+        fi
+      }
+      computer_runs 2>&-
+    `, env);
+    expect(r.code).toBe(0);
+    expect(readFileSync(s.log, 'utf8')).toContain('docker rm -f hornhoof-computer-no-stderr\n');
+    expect(answer(s, 'no-stderr')).toMatchObject({ exit: 124 });
+  });
+
+  it('removes the command and writes its answer before sending an event to a full log pipe', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'slow-log', 'recorded sample', 1);
+    const tools = join(s.dir, 'tools');
+    mkdirSync(tools);
+    writeFileSync(join(tools, 'jq'), `#!/bin/sh
+case "$1:$*" in
+  -cn:*updater_computer_stop*) [ ! -p /dev/fd/1 ] || touch "$STUB_STATE/log-write" ;;
+esac
+exec ${JSON.stringify(JQ)} "$@"
+`, { mode: 0o755 });
+    writeFileSync(join(tools, 'docker'), `#!/bin/sh
+if [ "$*" = 'rm -f hornhoof-computer-slow-log' ]; then
+  for event in "$TMPDIR"/hh-updater-stop.*; do
+    [ ! -s "$event" ] || cat "$event" > "$STUB_STATE/event-at-removal"
+  done
+fi
+exec ${JSON.stringify(join(STUBS, 'docker'))} "$@"
+`, { mode: 0o755 });
+    const pipe = join(s.dir, 'slow-stderr');
+    expect(spawnSync('mkfifo', [pipe]).status).toBe(0);
+    const fd = openSync(pipe, constants.O_RDWR | constants.O_NONBLOCK);
+    const chunk = Buffer.alloc(4096, 'x');
+    let filled = 0;
+    try {
+      for (const fill of [chunk, chunk.subarray(0, 1)]) {
+        try {
+          for (;;) filled += writeSync(fd, fill);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EAGAIN') throw error;
+        }
+      }
+
+      const pending = runUpdaterStep(s, 'computer_runs 2> "$STUB_STATE/slow-stderr"', {
+        ...env, PATH: `${tools}:${STUBS}:/usr/bin:/bin`, STUB_COMPUTER_RUNS: '1',
+      });
+      const answerFile = join(s.computerControl, 'computer', 'slow-log.out.json');
+      await eventually(() => existsSync(answerFile) || existsSync(join(s.dir, 'log-write')));
+      const answeredWithFullPipe = existsSync(answerFile);
+
+      while (filled > 0) filled -= readSync(fd, chunk, 0, Math.min(filled, chunk.length), null);
+      expect((await pending).code).toBe(0);
+      expect(answeredWithFullPipe).toBe(true);
+      expect(readFileSync(s.log, 'utf8')).toContain('docker rm -f hornhoof-computer-slow-log\n');
+      expect(answer(s, 'slow-log')).toMatchObject({ exit: 124 });
+      const written = readSync(fd, chunk, 0, chunk.length, null);
+      const logged = stopEvents(chunk.toString('utf8', 0, written));
+      expect(logged).toEqual([expect.objectContaining({ id: 'slow-log', reason: 'timeout' })]);
+      expect(stopEvents(readFileSync(join(s.dir, 'event-at-removal'), 'utf8'))).toEqual(logged);
+      expect(readdirSync(s.dir).filter(name => name.startsWith('hh-updater-stop.'))).toEqual([]);
+    } finally {
+      closeSync(fd);
+    }
   });
 
   it('stops a running command when the machine owner closes access', async () => {
@@ -413,15 +489,15 @@ describe('updater, the computer', () => {
     expect(r.calls).toContain('docker rm -f hornhoof-computer-c6');
     expect(answer(s, 'c6')).toMatchObject({ id: 'c6', exit: 125, output: expect.stringContaining('Stopped: access to the computer was closed.') });
     expect(stopEvents(r.out)).toEqual([{
-      event: 'updater_computer_stop', id: 'c6', at: utc(), reason: 'closed', requestPresent: true,
+      event: 'updater_computer_stop', id: 'c6', at: utc(), reason: 'closed', requestPresent: true, requestPresentRecheck: true,
       accessRead: 'ok', accessCheck: 'closed', keeperRead: 'ok', keeperCheck: 'not_eligible', graceSecondsRemaining: 120,
     }]);
     expect(r.out).not.toMatch(/recorded private command|recorded private lease/);
   });
 
   it.each([
-    { change: 'printf invalid > "${keeper:?}/computer.json"', requestPresent: true, accessRead: 'failed', accessCheck: 'invalid', keeperRead: 'failed', keeperCheck: 'not_eligible' },
-    { change: 'rm -- "${keeper:?}/computer/diagnose.json"', requestPresent: false, accessRead: 'not_checked', accessCheck: 'not_checked', keeperRead: 'not_checked', keeperCheck: 'not_checked' },
+    { change: 'printf invalid > "${keeper:?}/computer.json"', requestPresent: true, requestPresentRecheck: true, accessRead: 'failed', accessCheck: 'invalid', keeperRead: 'failed', keeperCheck: 'not_eligible' },
+    { change: 'rm -- "${keeper:?}/computer/diagnose.json"', requestPresent: false, requestPresentRecheck: false, accessRead: 'not_checked', accessCheck: 'not_checked', keeperRead: 'not_checked', keeperCheck: 'not_checked' },
   ])('diagnoses a running stop when request presence is $requestPresent and access read is $accessRead', async ({ change, ...decision }) => {
     const s = stand();
     access(s, later());
@@ -431,6 +507,28 @@ describe('updater, the computer', () => {
     expect(r.calls).toContain('docker rm -f hornhoof-computer-diagnose');
     expect(stopEvents(r.out)).toEqual([{
       event: 'updater_computer_stop', id: 'diagnose', at: utc(), reason: 'closed', ...decision, graceSecondsRemaining: 120,
+    }]);
+  });
+
+  it('records the request disappearing between the admission read and the fallback check', async () => {
+    const s = stand();
+    access(s, later());
+    command(s, 'withdrawn', 'recorded sample');
+    const tools = join(s.dir, 'tools');
+    mkdirSync(tools);
+    writeFileSync(join(tools, 'jq'), `#!/bin/sh
+if [ "$*" = '-r .untilSec // 0' ] && [ -e "$STUB_STATE/computer-runs" ]; then
+  rm -- "\${HORNHOOF_COMPUTER_CONTROL_DIR:?}/computer/withdrawn.json"
+  printf '0\\n'
+  exit 0
+fi
+exec ${JSON.stringify(JQ)} "$@"
+`, { mode: 0o755 });
+    const r = await runOnce(s, null, { ...env, PATH: `${tools}:${STUBS}:/usr/bin:/bin`, STUB_COMPUTER_RUNS: '1' });
+    expect(r.calls).toContain('docker rm -f hornhoof-computer-withdrawn');
+    expect(stopEvents(r.out)).toEqual([{
+      event: 'updater_computer_stop', id: 'withdrawn', at: utc(), reason: 'closed', requestPresent: true, requestPresentRecheck: false,
+      accessRead: 'ok', accessCheck: 'closed', keeperRead: 'not_checked', keeperCheck: 'not_checked', graceSecondsRemaining: 120,
     }]);
   });
 
@@ -483,7 +581,7 @@ describe('updater, the computer', () => {
       expect(ranUntil(s)).toBe(3);
       expect(answer(s, 'c11')).toMatchObject({ id: 'c11', exit: 125, output: expect.stringContaining('Stopped: access to the computer was closed.') });
       expect(stopEvents(r.out)).toEqual([{
-        event: 'updater_computer_stop', id: 'c11', at: utc(), reason: 'closed', requestPresent: true,
+        event: 'updater_computer_stop', id: 'c11', at: utc(), reason: 'closed', requestPresent: true, requestPresentRecheck: true,
         accessRead: 'ok', accessCheck: 'closed', keeperRead: 'ok', keeperCheck: 'not_eligible', graceSecondsRemaining: 118,
       }]);
     });
@@ -538,7 +636,7 @@ describe('updater, the computer', () => {
       expect(ranUntil(s)).toBe(121);
       expect(answer(s, 'c12')).toMatchObject({ id: 'c12', exit: 125, output: expect.stringContaining('Stopped: access to the computer was closed.') });
       expect(stopEvents(r.out)).toEqual([{
-        event: 'updater_computer_stop', id: 'c12', at: utc(), reason: 'closed', requestPresent: true,
+        event: 'updater_computer_stop', id: 'c12', at: utc(), reason: 'closed', requestPresent: true, requestPresentRecheck: true,
         accessRead: 'ok', accessCheck: 'closed', keeperRead: 'not_checked', keeperCheck: 'not_checked', graceSecondsRemaining: 0,
       }]);
     }, 60_000);

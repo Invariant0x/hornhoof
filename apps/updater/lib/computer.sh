@@ -99,16 +99,19 @@ computer_keeper_stopped() {
   keeper_check=eligible
 }
 
-# Only categories from the last watch tick. Leave file contents and access values out of the log.
+# Record the final tick in the private stop file before removal. Publishing to stderr happens after the answer.
 computer_stop_event() {
   local at
+  [ -n "$stop_event" ] || return 0
   at=$(date -u '+%Y-%m-%dT%H:%M:%SZ') || return 1
   jq -cn --arg id "$1" --arg at "$at" --arg reason "$2" --argjson requestPresent "$request_present" \
+    --argjson requestPresentRecheck "$request_present_recheck" \
     --arg accessRead "$access_read" --arg accessCheck "$access_check" --arg keeperRead "$keeper_read" --arg keeperCheck "$keeper_check" \
     --argjson graceSecondsRemaining "$((COMPUTER_KEEPER_GRACE - held))" \
     '{event: "updater_computer_stop", id: $id, at: $at, reason: $reason, requestPresent: $requestPresent,
+      requestPresentRecheck: $requestPresentRecheck,
       accessRead: $accessRead, accessCheck: $accessCheck, keeperRead: $keeperRead, keeperCheck: $keeperCheck,
-      graceSecondsRemaining: $graceSecondsRemaining}'
+      graceSecondsRemaining: $graceSecondsRemaining}' > "$stop_event"
 }
 
 computer_answer_json() {
@@ -132,7 +135,7 @@ computer_answer() {
 # second time, and what still runs of it is stopped.
 computer_runs() (
   local file id started answer request command timeout out name watch code made
-  local request_present access_read access_check keeper_read keeper_check
+  local request_present request_present_recheck access_read access_check keeper_read keeper_check stop_event event
   enter_computer_queue "$COMPUTER_CONTROL" || return 0
   for file in ./*.started; do
     [ ! -L "$file" ] && [ -f "$file" ] || continue
@@ -188,6 +191,7 @@ computer_runs() (
     fi
     code=0
     made=1
+    stop_event=$(mktemp "${TMPDIR:-/tmp}/hh-updater-stop.XXXXXX" 2> /dev/null) || stop_event=''
     # Made first and only then started, so the watch can always stop it.
     docker create --rm --name "$name" --privileged --pid=host --network=host --ipc=host --uts=host -v /:/host \
       -v /var/run/docker.sock:/var/run/docker.sock --entrypoint bash "$COMPUTER_IMAGE" -c "$command" > /dev/null 2>> "$out" || made=''
@@ -206,28 +210,30 @@ computer_runs() (
         while [ "$i" -lt "$timeout" ]; do
           sleep 1
           [ ! -f "$out.done" ] || exit 0
+          # Request presence is sampled before reading admission. A skipped fallback recheck is null.
           request_present=false
+          request_present_recheck=null
           access_read=not_checked
           access_check=not_checked
           keeper_read=not_checked
           keeper_check=not_checked
-          if [ -f "$file" ] && computer_open; then
-            request_present=true
+          if [ -f "$file" ] && { request_present=true; computer_open; }; then
             held=0
-          elif [ -f "$file" ] && { request_present=true; [ "$held" -lt "$COMPUTER_KEEPER_GRACE" ]; } && computer_keeper_stopped; then
+          elif { request_present_recheck=false; [ -f "$file" ]; } &&
+            { request_present_recheck=true; [ "$held" -lt "$COMPUTER_KEEPER_GRACE" ]; } && computer_keeper_stopped; then
             held=$((held + 1))
           else
             touch "$out.closed"
-            computer_stop_event "$id" closed >&3 || true
+            computer_stop_event "$id" closed || true
             docker rm -f "$name"
             exit 0
           fi
           i=$((i + 1))
         done
         touch "$out.late"
-        computer_stop_event "$id" timeout >&3 || true
+        computer_stop_event "$id" timeout || true
         docker rm -f "$name"
-      ) 3>&2 > /dev/null 2>&1 &
+      ) > /dev/null 2>&1 &
       watch=$!
       docker start -a "$name" < /dev/null >> "$out" 2>&1 || code=$?
       touch "$out.done"
@@ -244,6 +250,11 @@ computer_runs() (
     # The mark goes only once the answer is in place: a command whose answer could not be written never runs again.
     if [ ! -f "$file" ] || computer_answer "$id" "$code" "$out"; then rm -f -- "${started:?}"; fi
     rm -f -- "${out:?}" "${out:?}.done" "${out:?}.late" "${out:?}.closed"
+    if [ -n "$stop_event" ]; then
+      IFS= read -r event < "$stop_event" || event=''
+      rm -f -- "${stop_event:?}" || true
+      if [ -n "$event" ]; then (printf '%s\n' "$event" >&2) || true; fi
+    fi
   done
 )
 
