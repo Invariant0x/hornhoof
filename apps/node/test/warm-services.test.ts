@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WARM_SERVICES, type WarmServices as Declaration } from '../src/warm-declaration.js';
@@ -57,6 +57,17 @@ function machine(options: Partial<ConstructorParameters<typeof WarmServices>[0]>
 const signal = () => new AbortController().signal;
 
 describe('warm test services (#2091)', () => {
+  it.skipIf(process.getuid?.() !== 0)('runs with a separate job uid and keeps supervisor records private', async () => {
+    const repo = repository();
+    chmodSync(repo.dir, 0o755);
+    const m = machine({ user: { uid: 1000, gid: 1000 } });
+    const piece = await m.warm.pieceFor(repo.server, [...VITEST, 'test/a.test.ts'], 'lease-uid', AbortSignal.timeout(8000));
+    expect(piece?.env.FAKE_PIECE).toBeTruthy();
+    expect(statSync(m.state()).uid).toBe(1000);
+    expect(statSync(join(dirname(m.state()), 'service.json')).mode & 0o077).toBe(0);
+    await piece?.drop();
+  });
+
   it('gives two runs at once their own pieces of one service it starts once', async () => {
     const repo = repository(), m = machine();
     const [one, two] = await Promise.all([

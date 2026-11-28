@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chownSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, matchesGlob, relative, resolve, sep } from 'node:path';
 import type { Command } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
@@ -192,15 +192,30 @@ export class WarmServices {
       if (user && user.uid !== process.getuid?.()) chownSync(state, user.uid, user.gid);
     }
     const record = join(home, `service.${process.pid}.json`);
-    writeFileSync(record, JSON.stringify({ service, repository }));
+    writeFileSync(record, JSON.stringify({ service, repository }), { mode: 0o600 });
     renameSync(record, join(home, 'service.json'));
+    this.allowStateAccess(home);
     return { service, home, state, repository };
+  }
+
+  private allowStateAccess(home: string): void {
+    const user = this.options.user;
+    const owner = process.getuid?.();
+    if (!user || owner === undefined || user.uid === owner) return;
+    // Older nodes created the record with the default file mode.
+    chmodSync(join(home, 'service.json'), 0o600);
+    for (const dir of [this.options.root, home]) {
+      chownSync(dir, owner, user.gid);
+      chmodSync(dir, 0o710);
+    }
   }
 
   private read(home: string): Kept | null {
     try {
       const { service, repository } = JSON.parse(readFileSync(join(home, 'service.json'), 'utf8')) as Pick<Kept, 'service' | 'repository'>;
-      return existsSync(repository) ? { service, home, state: join(home, 'service'), repository } : null;
+      if (!existsSync(repository)) return null;
+      this.allowStateAccess(home);
+      return { service, home, state: join(home, 'service'), repository };
     } catch { return null; }
   }
 
