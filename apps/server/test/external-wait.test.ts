@@ -203,6 +203,22 @@ describe('external task wait', () => {
     expect(response.json().requests).toMatchObject([{ ownerPersonId: owner!.id, kind: 'question' }]);
   });
 
+  it('records a subscription-only wait through the task tool', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const client = await c.tools();
+    const nextCheck = new Date(c.ctx.clock() + 86_400_000).toISOString();
+    const input = { task: task.number, work: 'Prepare the approved brief', nextCheck, resumeOnPlan: 'any_eligible' };
+    const res = await client.callTool({ name: 'track_work', arguments: input });
+    expect(res.isError).toBeFalsy();
+    expect((await c.read(task.id)).externalWait).toMatchObject({ work: true, planAccess: { holderId: c.worker.id, required: 'any_eligible' } });
+    for (const change of [{ employee: c.peer.id }, { resumeOnPlan: '00000000-0000-4000-8000-000000000001' }]) {
+      expect((await client.callTool({ name: 'track_work', arguments: { ...input, ...change } })).isError).toBe(true);
+    }
+    expect((await client.callTool({ name: 'track_work', arguments: { ...input, resumeOnPlan: c.sub.id.toUpperCase() } })).isError).toBeFalsy();
+    expect((await c.read(task.id)).externalWait?.planAccess?.required).toBe(c.sub.id);
+  });
+
   it('rejects work as a human wait and records an active operation with its next check', async () => {
     const c = await fixture();
     const task = await c.task();

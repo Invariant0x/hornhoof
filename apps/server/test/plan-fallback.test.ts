@@ -1,8 +1,11 @@
+import { watchedTasks } from '../src/modules/tools/watch-tasks.js';
+import { checkExternalWaits } from '../src/modules/tasks/external-wait.js';
 import type { Limits } from '@hornhoof/protocol';
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agentChanges, agents, jobs, machines, nodes, subscriptions, tasks } from '../src/db/schema.js';
+import { agentChanges, agents, jobs, machines, nodes, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
+import { settleFallbacks } from '../src/modules/subscriptions/fallback.js';
 import { pump } from '../src/modules/conversation/queue.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -55,6 +58,92 @@ async function atWork() {
 }
 
 describe('a plan at its limit', () => {
+  it('rechecks a subscription-only task on its active fallback before the deadline, once', async () => {
+    const c = await atWork();
+    await c.db.update(subscriptions).set({ fallbacks: [{ subscription: c.spare.id, model: null }] }).where(eq(subscriptions.id, c.sub.id));
+    await c.fail(c.first.id, usageLimit);
+    expect((await c.agentOf(c.agent.id)).subscriptionId).toBe(c.spare.id);
+    const now = new Date();
+    const wait = { work: true as const, reason: 'Prepare the approved brief', since: now.toISOString(),
+      until: new Date(now.getTime() + 24 * HOUR).toISOString(), planAccess: { holderId: c.agent.id, required: 'any_eligible' } };
+    await c.db.update(tasks).set({ externalWait: wait }).where(eq(tasks.id, c.task.id));
+    await Promise.all([settleFallbacks(c.ctx), settleFallbacks(c.ctx)]);
+    const read = async () => (await c.db.select().from(tasks).where(eq(tasks.id, c.task.id)))[0]!;
+    expect((await read()).externalWait).toBeNull();
+    const version = (await read()).version;
+    await settleFallbacks(c.ctx);
+    expect((await read()).version).toBe(version);
+    const log = await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, c.task.id));
+    expect(log.filter(event => event.data?.resumedOnPlan === c.spare.id)).toHaveLength(1);
+  });
+
+  it('preserves a required plan past its review deadline and surfaces the reason to Operations', async () => {
+    const c = await atWork();
+    await c.db.update(subscriptions).set({ fallbacks: [{ subscription: c.spare.id, model: null }] }).where(eq(subscriptions.id, c.sub.id));
+    await c.fail(c.first.id, usageLimit);
+    const wait = { work: true as const, reason: 'Run the required independent check', since: new Date(Date.now() - HOUR).toISOString(),
+      until: new Date(Date.now() - MIN).toISOString(), planAccess: { holderId: c.agent.id, required: c.sub.id } };
+    await c.db.update(tasks).set({ externalWait: wait }).where(eq(tasks.id, c.task.id));
+    await checkExternalWaits(c.ctx);
+    await settleFallbacks(c.ctx);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, c.task.id)))[0]!.externalWait).toEqual(wait);
+    expect((await watchedTasks(c.db, c.companyId, [c.agent.id])).find(t => t.number === c.task.number)?.externalWait).toMatchObject({
+      resumeOnPlan: c.sub.id, review: { primary: c.sub.id, active: c.spare.id },
+    });
+    await c.limits(c.sub.id, { status: 'allowed', windows: [] });
+    await c.done((await c.runningOf(c.agent.id))!.id);
+    await settleFallbacks(c.ctx);
+    expect((await c.agentOf(c.agent.id)).subscriptionId).toBe(c.sub.id);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, c.task.id)))[0]!.externalWait).toBeNull();
+  });
+
+  it('reviews an unclassified work wait on fallback without clearing it or changing another company', async () => {
+    const c = await atWork();
+    await c.fail(c.first.id, usageLimit);
+    const wait = { work: true as const, reason: 'Owner asked to wait for confirmation', since: new Date().toISOString(),
+      until: new Date(Date.now() + HOUR).toISOString() };
+    await c.db.update(tasks).set({ externalWait: wait }).where(eq(tasks.id, c.task.id));
+    await settleFallbacks(c.ctx);
+    const watched = await watchedTasks(c.db, c.companyId, [c.agent.id]);
+    expect(watched.find(t => t.number === c.task.number)?.externalWait).toMatchObject({ reason: wait.reason, review: { primary: c.sub.id, active: c.spare.id } });
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, c.task.id)))[0]!.externalWait).toEqual(wait);
+    expect(await watchedTasks(c.db, '00000000-0000-4000-8000-000000000001', [c.agent.id])).toEqual([]);
+  });
+
+  it('keeps separate pauses, prerequisites and human decisions when the subscription is ready', async () => {
+    const c = await atWork();
+    const wait = { work: true as const, reason: 'Continue the accepted step', since: new Date().toISOString(), until: new Date(Date.now()+HOUR).toISOString(),
+      planAccess: { holderId: c.agent.id, required: 'any_eligible' } };
+    const [dep] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 851, title: 'Prerequisite' }).returning();
+    const read = async () => (await c.db.select().from(tasks).where(eq(tasks.id, c.task.id)))[0]!;
+    await c.db.update(tasks).set({ externalWait: wait, after: [dep!.id] }).where(eq(tasks.id, c.task.id));
+    await settleFallbacks(c.ctx);
+    expect((await read()).externalWait).toEqual(wait);
+    const paused = { root: c.task.id, by: { agentId: c.head.id }, at: new Date().toISOString(), reason: 'Owner stop' };
+    await c.db.update(tasks).set({ after: [], paused }).where(eq(tasks.id, c.task.id));
+    await settleFallbacks(c.ctx);
+    expect(await read()).toMatchObject({ externalWait: wait, paused });
+    await c.db.update(tasks).set({ paused: null, status: 'waiting' }).where(eq(tasks.id, c.task.id));
+    await settleFallbacks(c.ctx);
+    expect((await read()).externalWait).toEqual(wait);
+    await c.db.update(tasks).set({ status: 'working' }).where(eq(tasks.id, c.task.id));
+    await c.db.insert(requests).values({ companyId: c.companyId, taskId: c.task.id, agentId: c.agent.id, kind: 'question', text: 'May the final action go ahead?' });
+    await settleFallbacks(c.ctx);
+    expect((await read()).externalWait).toEqual(wait);
+  });
+
+  it('keeps a resource wait while the assigned fallback exceeds its own task budget', async () => {
+    const c = await atWork();
+    await c.fail(c.first.id, usageLimit);
+    await c.db.update(subscriptions).set({ budget: 20, limitsUpdatedAt: new Date(), limits: { status: 'allowed',
+      windows: [{ name: 'seven_day', utilization: 0.6, resetsAt: new Date(Date.now() + HOUR).toISOString() }] } }).where(eq(subscriptions.id, c.spare.id));
+    const wait = { work: true as const, reason: 'Prepare review', since: new Date().toISOString(), until: new Date(Date.now() + HOUR).toISOString(),
+      planAccess: { holderId: c.agent.id, required: 'any_eligible' } };
+    await c.db.update(tasks).set({ externalWait: wait }).where(eq(tasks.id, c.task.id));
+    await settleFallbacks(c.ctx);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, c.task.id)))[0]!.externalWait).toEqual(wait);
+  });
+
   it('moves everyone on it to a fallback with room at once, with their tasks, and their waiting turn goes out there', async () => {
     const c = await atWork();
     await c.db.update(agents).set({ model: 'claude-opus-5-5' }).where(eq(agents.id, c.orchestrator.id));

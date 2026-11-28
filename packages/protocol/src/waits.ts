@@ -7,7 +7,11 @@ export const WaitOnInput = z.discriminatedUnion('kind', [
 type WaitOn = z.infer<typeof WaitOnInput>;
 export type RecordedWaitOn = WaitOn & { name?: string };
 /* operation: what the wait's accountable record keeps it by, the same across a restart. run: the one run whose end ends it. */
-export type ExternalWait = { reason: string; since: string; until: string; on?: RecordedWaitOn; operation?: string; run?: string; work?: true };
+/* A named plan is a requirement for this step. Any eligible plan permits an already authorized step on a fallback. */
+export const WorkPlanRequirement = z.union([z.literal('any_eligible'), z.uuid()]);
+export type WorkPlanRequirement = z.infer<typeof WorkPlanRequirement>;
+export type WorkPlanAccess = { holderId: string; required: WorkPlanRequirement };
+export type ExternalWait = { reason: string; since: string; until: string; on?: RecordedWaitOn; operation?: string; run?: string; work?: true; planAccess?: WorkPlanAccess };
 
 const moment = z.iso.datetime({ offset: true });
 const reference = z.string().trim().min(1).max(200);

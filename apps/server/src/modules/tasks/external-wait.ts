@@ -1,10 +1,10 @@
 import { expireWait, markRecord } from './wait-expiry.js';
 import { randomUUID } from 'node:crypto';
-import { WaitOnInput, WaitPlan, type WaitOwnerBinding } from '@hornhoof/protocol/waits';
+import { WaitOnInput, WaitPlan, type WaitOwnerBinding, type WorkPlanRequirement } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
-import { and, desc, eq, gt, gte, inArray, isNotNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentEvents, agents, jobs, pendingWakes, tasks, testRuns, type ExternalWait } from '../../db/schema.js';
+import { agentEvents, agents, jobs, pendingWakes, tasks, testRuns, subscriptions, type ExternalWait } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { loadTask, refuse, type Moved, type Task, type Tx } from './state.js';
@@ -130,8 +130,21 @@ async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: WaitA
   return { task: row, wakes: [] };
 }
 
+async function planCondition(ctx: Ctx, task: Task, holderId: string, required?: WorkPlanRequirement, employee?: string) {
+  if (required === undefined) return {};
+  if (employee || task.externalWait?.on || task.externalWait?.run) throw refuse(400, 'task_invalid', 'Resolve the other wait before tracking subscription access as the sole condition.');
+  if (required !== 'any_eligible') {
+    const [known] = await ctx.db.select(idOnly(subscriptions)).from(subscriptions).where(and(
+      eq(subscriptions.id, required), eq(subscriptions.companyId, task.companyId), isNull(subscriptions.removedAt),
+    ));
+    if (!known) throw refuse(400, 'task_invalid', 'Name an active subscription of this company.');
+    return { planAccess: { holderId, required: known.id } };
+  }
+  return { planAccess: { holderId, required } };
+}
+
 /* A scheduled observation of active work uses the existing durable check timer. */
-export async function trackWork(ctx: Ctx, agentId: string, taskId: string, reason: string, nextCheck: string, employee?: string): Promise<Moved> {
+export async function trackWork(ctx: Ctx, agentId: string, taskId: string, reason: string, nextCheck: string, employee?: string, resumeOnPlan?: WorkPlanRequirement): Promise<Moved> {
   const moved = await onAgent(ctx, agentId, async () => {
     const task = await loadTask(ctx.db, taskId);
     requireHolder(task, agentId);
@@ -140,7 +153,8 @@ export async function trackWork(ctx: Ctx, agentId: string, taskId: string, reaso
     const until = new Date(nextCheck);
     if (until.getTime() <= now) throw refuse(400, 'task_invalid', 'Set the next check in the future.');
     const on = await checkedWaitTarget(ctx, task.companyId, agentId, employee ? { kind: 'employee', employee } : undefined);
-    const externalWait: ExternalWait = { reason, since: new Date(now).toISOString(), until: until.toISOString(), work: true, ...withOn(on) };
+    const condition = await planCondition(ctx, task, agentId, resumeOnPlan, employee);
+    const externalWait: ExternalWait = { reason, since: new Date(now).toISOString(), until: until.toISOString(), work: true, ...withOn(on), ...condition };
     const notice = await requestedWaitNotice(ctx, { ...task, externalWait }, agentId);
     const actor = { agentId };
     const row = await move(ctx, task, { status: task.status === 'open' ? 'working' : task.status, externalWait, silent: 0 }, {
@@ -370,6 +384,7 @@ export async function endWaitForRun(tx: Tx, taskId: string, agentId: string, run
 export async function checkExternalWaits(ctx: Ctx, now = new Date()): Promise<number> {
   const due = await ctx.db.select().from(tasks).where(and(
     isNotNull(tasks.externalWait),
+    sql`${tasks.externalWait}->'planAccess' IS NULL`,
     lte(sql<string>`${tasks.externalWait}->>'until'`, now.toISOString()),
     notInArray(tasks.status, ['done', 'cancelled']),
   ));
