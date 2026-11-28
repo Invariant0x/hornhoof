@@ -379,9 +379,22 @@ function applyLoadedCard(mounted: boolean, card: AgentCardView | null, save: (c:
   if (mounted && card) save(card);
 }
 
-function readyEvents<T>(mounted: boolean, res: T | null): res is T {
-  return mounted && res !== null;
+function readyEvents<T>(mounted: boolean, res: T | null, signal: AbortSignal): res is T {
+  return mounted && !signal.aborted && res !== null;
 }
+
+function loadRecentEvents(path: string, after: number, signal: AbortSignal) {
+  const query = after === 0 ? `last=${KEEP}` : `after=${after}`;
+  return api.get<{ events: EventView[]; state: OrchestratorState }>(`${path}/events?${query}`, signal);
+}
+
+function submitChatOnEnter(e: KeyboardEvent<HTMLTextAreaElement>, send: () => Promise<void>) {
+  if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+  e.preventDefault();
+  void send();
+}
+
+const deliveryUnknown = (err: ApiFailure) => err.status === 0 || err.reason === 'not_confirmed' || err.reason === 'already_done';
 
 async function postChatMessage(pending: Map<string, string>, path: string, text: string, pictures: string[]) {
   const payload = pictures.length ? { text, pictures } : { text };
@@ -391,7 +404,7 @@ async function postChatMessage(pending: Map<string, string>, path: string, text:
   try {
     await api.post(`${path}/messages`, payload, id);
   } catch (err) {
-    if (err instanceof ApiFailure && (err.status === 0 || err.reason === 'not_confirmed' || err.reason === 'already_done')) {
+    if (err instanceof ApiFailure && deliveryUnknown(err)) {
       throw new ApiFailure(err.status, err.code, 'Message delivery is not confirmed yet.', 'chat_delivery_unknown');
     }
     if (!(err instanceof ApiFailure) || err.status < 500) pending.delete(fingerprint);
@@ -446,7 +459,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const box = useRef<HTMLElement>(null);
   const last = useRef(0);
   const mounted = useRef(true);
-  const historyRequest = useRef<AbortController | null>(null);
+  const historyRequest = useRef(new AbortController());
   const catchUpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* Catch-ups run side by side and can answer out of order; a state older than the one shown is dropped. */
   const catchUps = useRef(0);
@@ -511,13 +524,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* History comes in order, a page at a time, and only it moves the cursor: a live line never skips what came before it. A
      window with no line yet takes the newest ones only. */
   const catchUp = useCallback(async () => {
-    const signal = historyRequest.current?.signal;
+    const signal = historyRequest.current.signal;
     try {
       for (;;) {
         const n = ++catchUps.current;
         const fresh = last.current === 0;
-        const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(fresh ? `${path}/events?last=${KEEP}` : `${path}/events?after=${last.current}`, signal);
-        if (signal?.aborted || !readyEvents(mounted.current, res)) return;
+        const res = await loadRecentEvents(path, last.current, signal);
+        if (!readyEvents(mounted.current, res, signal)) return;
         setHistoryFailure(null);
         merge(res.events);
         if (n > stateFrom.current) {
@@ -532,7 +545,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         }
       }
     } catch (err) {
-      if (signal?.aborted) return;
+      if (signal.aborted) return;
       if (mounted.current) {
         setHistoryFailure(err);
         /* The server no longer lets this person reach the agent: nothing of it stays open, its line to write included. */
@@ -699,11 +712,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     }
   }
 
-  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
-    e.preventDefault();
-    void send();
-  }
+
 
   const hasPictures = pictures.drafts.length > 0;
   useLayoutEffect(() => {
@@ -936,7 +945,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
           <label className="sr" htmlFor={`input-${agentId}`}>
             {placeholder}
           </label>
-          <textarea id={`input-${agentId}`} ref={input} rows={1} value={text} placeholder={placeholder} disabled={!ready} onChange={e => setText(e.target.value)} onKeyDown={onKeyDown} />
+          <textarea id={`input-${agentId}`} ref={input} rows={1} value={text} placeholder={placeholder} disabled={!ready} onChange={e => setText(e.target.value)} onKeyDown={e => submitChatOnEnter(e, send)} />
           <AddPicture id={`picture-${agentId}`} disabled={!ready} onFiles={pictures.add} />
           <button className="chat-send" type="submit" aria-label={t.window.chat.send} title={t.window.chat.send} disabled={!ready || pictures.sending}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
