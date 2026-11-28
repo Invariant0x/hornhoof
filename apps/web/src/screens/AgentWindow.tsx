@@ -1,7 +1,7 @@
 import { nextLevelProgress, type WorldLiveAgent, type WorldLiveSnapshot } from '@hornhoof/protocol/world';
 import { commandBlockOpen } from '../ui/CommandBox';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { api, ApiFailure, isAway, newRequestId } from '../api';
+import { api, ApiFailure, interruptedRead, isAway, newRequestId } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { liveOf } from '../org';
@@ -317,8 +317,7 @@ function chatParts(o: WindowLoadOf): LoadPart[] {
    after the window showed him; before that, the load says it where he will stand. */
 function useWindowLoad(o: WindowLoadOf) {
   const history: LoadPart = { data: o.terminal ? o.state : o.historyIn || null, failure: o.historyFailure, load: () => void o.catchUp() };
-  const transientRead = o.historyFailure instanceof ApiFailure && ['not_confirmed', 'chat_history_unavailable'].includes(o.historyFailure.reason ?? '');
-  const refreshFailure = isAway(o.historyFailure) || transientRead ? o.cardFailure : o.historyFailure ?? o.cardFailure;
+  const refreshFailure = [o.historyFailure, o.cardFailure].find(err => err && !isAway(err) && !interruptedRead(err)) ?? null;
   return { load: useLoad([history, ...(o.terminal ? [] : chatParts(o))]), said: o.failure ?? onTop(o.state, refreshFailure) };
 }
 
@@ -382,6 +381,23 @@ function applyLoadedCard(mounted: boolean, card: AgentCardView | null, save: (c:
 
 function readyEvents<T>(mounted: boolean, res: T | null): res is T {
   return mounted && res !== null;
+}
+
+async function postChatMessage(pending: Map<string, string>, path: string, text: string, pictures: string[]) {
+  const payload = pictures.length ? { text, pictures } : { text };
+  const fingerprint = JSON.stringify([path, payload]);
+  const id = pending.get(fingerprint) ?? newRequestId();
+  pending.set(fingerprint, id);
+  try {
+    await api.post(`${path}/messages`, payload, id);
+  } catch (err) {
+    if (err instanceof ApiFailure && (err.status === 0 || err.reason === 'not_confirmed' || err.reason === 'already_done')) {
+      throw new ApiFailure(err.status, err.code, 'Message delivery is not confirmed yet.', 'chat_delivery_unknown');
+    }
+    if (!(err instanceof ApiFailure) || err.status < 500) pending.delete(fingerprint);
+    throw err;
+  }
+  pending.delete(fingerprint);
 }
 
 export function AgentWindow({ me, org, agentId, staff = null, onClose, place, requests = [], onRequestsChanged = () => {} }: Props) {
@@ -665,25 +681,10 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     setText('');
     setFailure(null);
     try {
-      await pictures.deliver(async ids => {
-        const payload = ids.length ? { text: body, pictures: ids } : { text: body };
-        const fingerprint = JSON.stringify([path, payload]);
-        const id = pendingMessages.current.get(fingerprint) ?? newRequestId();
-        pendingMessages.current.set(fingerprint, id);
-        try {
-          await api.post(`${path}/messages`, payload, id);
-        } catch (err) {
-          if (err instanceof ApiFailure && (err.status === 0 || err.reason === 'already_done' || err.reason === 'not_confirmed')) {
-            void catchUp();
-            throw new ApiFailure(err.status, err.code, err.message, 'chat_delivery_unknown');
-          }
-          pendingMessages.current.delete(fingerprint);
-          throw err;
-        }
-        pendingMessages.current.delete(fingerprint);
-      });
+      await pictures.deliver(ids => postChatMessage(pendingMessages.current, path, body, ids));
       void catchUp();
     } catch (err) {
+      void catchUp();
       /* The person may have started the next message meanwhile; that one stays. */
       setText(now => now || body);
       /* Next to the pictures it is about, which stay. */

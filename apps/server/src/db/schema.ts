@@ -1408,7 +1408,10 @@ export const taskEvents = pgTable(
     data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
   },
-  t => [index('task_events_task_id').on(t.taskId)],
+  t => [
+    index('task_events_task_id').on(t.taskId),
+    index('task_events_company_rework').on(t.companyId, t.createdAt, t.taskId).where(sql`kind = 'submitted' and data->'candidate'->>'parentId' is not null`),
+  ],
 );
 
 export const GOAL_STATUSES = ['active', 'reached', 'dropped'] as const;

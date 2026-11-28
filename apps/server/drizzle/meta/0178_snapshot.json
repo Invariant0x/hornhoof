@@ -1,6 +1,6 @@
 {
-  "id": "a308ee04-d7fd-4162-b4a9-b237cbb1a351",
-  "prevId": "7dd1d327-ad14-4c14-92e2-3f0acee25b5c",
+  "id": "37dc7776-514f-4b4a-a50d-847cacc4fc79",
+  "prevId": "06d9946c-02ff-474b-ac18-aba58322e0e0",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -211,6 +211,44 @@
         }
       },
       "indexes": {
+        "agent_events_visible_history": {
+          "name": "agent_events_visible_history",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "data->>'operatorEvidenceId' is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_chat_receipt": {
+          "name": "agent_events_chat_receipt",
+          "columns": [
+            {
+              "expression": "(data->>'chatReceipt')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "data->>'chatReceipt' is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "agent_events_agent_id_seq": {
           "name": "agent_events_agent_id_seq",
           "columns": [
@@ -5452,6 +5490,34 @@
           "method": "btree",
           "with": {}
         },
+        "jobs_subscription_running_turns": {
+          "name": "jobs_subscription_running_turns",
+          "columns": [
+            {
+              "expression": "subscription_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "node_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "builtin_machine",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"jobs\".\"kind\" = 'conversation' and \"jobs\".\"status\" = 'running'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "jobs_conversation_activity": {
           "name": "jobs_conversation_activity",
           "columns": [
@@ -5584,34 +5650,6 @@
           ],
           "isUnique": false,
           "where": "\"jobs\".\"kind\" = 'conversation' and \"jobs\".\"status\" = 'obsolete'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "jobs_subscription_running_turns": {
-          "name": "jobs_subscription_running_turns",
-          "columns": [
-            {
-              "expression": "subscription_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "node_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "builtin_machine",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"jobs\".\"kind\" = 'conversation' and \"jobs\".\"status\" = 'running'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -11890,6 +11928,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "turn_limit": {
+          "name": "turn_limit",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 4
+        },
         "models": {
           "name": "models",
           "type": "jsonb",
@@ -11940,13 +11985,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "turn_limit": {
-          "name": "turn_limit",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 4
         }
       },
       "indexes": {
@@ -12099,6 +12137,34 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "task_events_company_rework": {
+          "name": "task_events_company_rework",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "kind = 'submitted' and data->'candidate'->>'parentId' is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}

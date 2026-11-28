@@ -78,7 +78,7 @@ function writtenBy(me: Person, text: string, pictures: MessagePicture[], { teleg
 }
 
 /* from: the machine of the company the person sits at as they write in the window; none through Telegram. */
-type Written = { chatReceipt?: string; text: string; task?: z.infer<typeof TaskReference>; pictures: string[]; telegram?: TelegramOrigin; assistant?: AssistantOrigin; from?: WrittenFrom };
+type Written = { chatReceipt?: string | undefined; text: string; task?: z.infer<typeof TaskReference>; pictures: string[]; telegram?: TelegramOrigin; assistant?: AssistantOrigin; from?: WrittenFrom };
 
 /* What the person is to this agent: the company's owner, the CEO's delegate, and whether they run its department, as
    everyone given it does. */
@@ -115,7 +115,7 @@ export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input:
   const words = input.text || pictures.map(p => p.name).join(', ');
   const standing = me.via ? undefined : await standingOf(ctx, me, agent);
   const { actor, turn } = writtenBy(me, words, pictures, { telegram: input.telegram, assistant: input.assistant, standing, from: input.from });
-  const message = input.chatReceipt ? { ...turn.message, chatReceipt: input.chatReceipt } : turn.message;
+  const message = { ...turn.message, chatReceipt: input.chatReceipt };
   const jobId = await queueTaskMessage(ctx, { companyId: me.companyId, agentId: agent.id, task: input.task, actor, text: words }, { companyId: me.companyId, agentId: agent.id, ...turn, message });
   ctx.bus.publish(me.companyId, {
     type: 'pulse',
@@ -174,7 +174,7 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* The orchestrator is told which machine of the company a person writes from, when they sit at one. */
     const here = !me.via && agent.kind === 'orchestrator' ? await ctx.computer.here(req, me.companyId) : null;
     const from = here ? { machine: here.name, open: (await ctx.computer.view(me, here.id))?.open ?? false } : undefined;
-    const jobId = await writeToAgent(ctx, me, agent, { ...body, from, ...(chatReceipt ? { chatReceipt } : {}) });
+    const jobId = await writeToAgent(ctx, me, agent, { ...body, from, chatReceipt });
     reply.code(202);
     return { jobId };
   });

@@ -1219,6 +1219,13 @@
       "when": 1795873541636,
       "tag": "0177_chat_history_and_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 175,
+      "version": "7",
+      "when": 1795874987712,
+      "tag": "0178_org_rework_reads",
+      "breakpoints": true
     }
   ]
 }

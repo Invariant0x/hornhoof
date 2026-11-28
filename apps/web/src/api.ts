@@ -95,6 +95,25 @@ async function respond<T>(path: string, init: RequestInit): Promise<T> {
   return data as T;
 }
 
+/* Older servers use the write warning for timed-out reads. Retrying a GET cannot resubmit a person's action. */
+export const interruptedRead = (err: unknown): boolean => err instanceof ApiFailure && err.status === 503
+  && ['not_confirmed', 'read_unavailable', 'chat_history_unavailable'].includes(err.reason ?? '');
+
+async function read<T>(path: string, init: RequestInit): Promise<T> {
+  try {
+    return await respond<T>(path, init);
+  } catch (err) {
+    if (!interruptedRead(err)) throw err;
+  }
+  await pause(500);
+  try {
+    return await respond<T>(path, init);
+  } catch (err) {
+    if (err instanceof ApiFailure && err.reason === 'not_confirmed') throw new ApiFailure(503, 'unavailable', 'The information could not be loaded.', 'read_unavailable');
+    throw err;
+  }
+}
+
 async function respondText(path: string): Promise<string> {
   const res = await fetchOrigin(path);
   if (!res.ok) throw await failed(res.status, await wholeJson(res));
@@ -235,7 +254,7 @@ async function change<T>(path: string, init: RequestInit & { headers: Record<str
 function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal, requestId?: string): Promise<T> {
   const headers: Record<string, string> = body === undefined ? {} : { 'content-type': 'application/json' };
   const init = { method, headers, body: body === undefined ? undefined : JSON.stringify(body), ...(signal ? { signal } : {}) };
-  return method === 'GET' ? respond<T>(path, init) : change<T>(path, init, requestId);
+  return method === 'GET' ? read<T>(path, init) : change<T>(path, init, requestId);
 }
 
 export const api = {
