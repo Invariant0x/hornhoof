@@ -215,7 +215,7 @@ describe('AgentWindow', () => {
 
   it('shows that he works and stops him on Esc', async () => {
     const { calls } = await act(async () => open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/agents/orchestrator/stop': [202] }));
-    expect(screen.getByRole('status', { name: 'Agent state' })).toHaveTextContent('Working on it');
+    expect(await screen.findByRole('status', { name: 'Agent state' })).toHaveTextContent('Working on it');
     expect(screen.getByText('2 more messages wait their turn')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(true);

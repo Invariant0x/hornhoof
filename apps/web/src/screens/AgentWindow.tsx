@@ -446,6 +446,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const box = useRef<HTMLElement>(null);
   const last = useRef(0);
   const mounted = useRef(true);
+  const historyRequest = useRef<AbortController | null>(null);
   const catchUpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* Catch-ups run side by side and can answer out of order; a state older than the one shown is dropped. */
   const catchUps = useRef(0);
@@ -510,12 +511,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* History comes in order, a page at a time, and only it moves the cursor: a live line never skips what came before it. A
      window with no line yet takes the newest ones only. */
   const catchUp = useCallback(async () => {
+    const signal = historyRequest.current?.signal;
     try {
       for (;;) {
         const n = ++catchUps.current;
         const fresh = last.current === 0;
-        const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(fresh ? `${path}/events?last=${KEEP}` : `${path}/events?after=${last.current}`);
-        if (!readyEvents(mounted.current, res)) return;
+        const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(fresh ? `${path}/events?last=${KEEP}` : `${path}/events?after=${last.current}`, signal);
+        if (signal?.aborted || !readyEvents(mounted.current, res)) return;
         setHistoryFailure(null);
         merge(res.events);
         if (n > stateFrom.current) {
@@ -530,6 +532,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         }
       }
     } catch (err) {
+      if (signal?.aborted) return;
       if (mounted.current) {
         setHistoryFailure(err);
         /* The server no longer lets this person reach the agent: nothing of it stays open, its line to write included. */
@@ -583,15 +586,18 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
 
   useEffect(() => {
     mounted.current = true;
+    const lifetime = new AbortController();
+    historyRequest.current = lifetime;
     void (async () => {
       const history = catchUp();
       loadCard();
       await history;
-      await greet();
+      if (!lifetime.signal.aborted) await greet();
     })();
     const stopPoll = everyVisible(() => void catchUp(), POLL_MS);
     return () => {
       mounted.current = false;
+      lifetime.abort();
       stopPoll();
       if (catchUpTimer.current) clearTimeout(catchUpTimer.current);
       catchUpTimer.current = null;

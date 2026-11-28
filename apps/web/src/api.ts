@@ -106,6 +106,7 @@ async function read<T>(path: string, init: RequestInit): Promise<T> {
     if (!interruptedRead(err)) throw err;
   }
   await pause(500);
+  init.signal?.throwIfAborted();
   try {
     return await respond<T>(path, init);
   } catch (err) {
