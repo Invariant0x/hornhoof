@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, eq, gt, inArray, isNotNull, isNull, notInArray, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -180,16 +181,29 @@ async function entrySweeps(ctx: Ctx, failed: (what: string) => (err: unknown) =>
 /* How many ticks in a row may find the same sweep still running before it is taken for one that will never end. */
 const PATIENCE_TICKS = 5;
 
-/* A leading app's sweeps, one at a time: those of the way in, then a round on each tick. A tick that finds a sweep still
+/* A leading app's sweeps: those of the way in, then a round on each tick. A tick that finds a sweep still
    running is dropped, since the next one does what it would have. A sweep that five ticks in a row find running waits for
    something that does not answer: stalled hears of it, and the rounds go on without it, so one step that hangs does not
-   stop every round after it. Entering waits for no sweep; leaving stops the ticks and waits for what runs, so nothing of
-   this writes once the app has left lead. */
+   stop every round after it. Leaving stops the ticks and waits for every started sweep, including the ones overtaken. */
 export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void>, everyMs = TICK_MS, stalled: (ticks: number) => void = () => {}): { enter: () => void; leave: () => Promise<void> } {
   let timer: NodeJS.Timeout | null = null;
-  let running: { ended: Promise<void>; ticks: number } | null = null;
+  let running: { ticks: number } | null = null;
+  let failure: { error: unknown } | undefined;
+  const active = new Set<Promise<void>>();
+  const settle = async (sweep: () => Promise<void>) => {
+    try {
+      await sweep();
+    } catch (error) {
+      failure ??= { error };
+    }
+  };
   const start = (sweep: () => Promise<void>) => {
-    const mine = { ticks: 0, ended: sweep().finally(() => { if (running === mine) running = null; }) };
+    const mine = { ticks: 0 };
+    const ended = settle(sweep).finally(() => {
+      active.delete(ended);
+      if (running === mine) running = null;
+    });
+    active.add(ended);
     running = mine;
   };
   const tick = () => {
@@ -199,6 +213,7 @@ export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void
   };
   return {
     enter() {
+      failure = undefined;
       start(entry);
       timer = setInterval(tick, everyMs);
       timer.unref();
@@ -206,7 +221,8 @@ export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void
     async leave() {
       if (timer) clearInterval(timer);
       timer = null;
-      await running?.ended;
+      await Promise.all(active);
+      if (failure) throw failure.error;
     },
   };
 }
@@ -214,6 +230,25 @@ export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void
 export function startTimers(app: FastifyInstance, ctx: Ctx): void {
   const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
   const stalled = (ticks: number) => app.log.error(`A round of Hornhoof's minute checks has not ended after ${ticks} more were due: a step of it waits for something that does not answer. The rounds go on without it.`);
-  const { enter, leave } = leadSweeps(() => entrySweeps(ctx, failed), () => minuteRound(ctx, new Date(), failed), TICK_MS, stalled);
-  ctx.mode.whenLead(enter, leave);
+  /* Steps report errors and let the rest of the sweep finish. Keep that behavior and report the sweep's outcome at the end. */
+  const runSweep = async (sweep: (report: typeof failed) => Promise<void>) => {
+    let failure: { error: unknown } | undefined;
+    try {
+      await sweep(what => error => {
+        failure ??= { error };
+        failed(what)(error);
+      });
+    } catch (error) {
+      failed('timer sweep failed')(error);
+      throw error;
+    }
+    if (failure) throw failure.error;
+  };
+  const { enter, leave } = leadSweeps(() => runSweep(report => entrySweeps(ctx, report)), () => runSweep(report => minuteRound(ctx, new Date(), report)), TICK_MS, stalled);
+  ctx.mode.whenLead(enter, async () => {
+    const attempt = { attemptId: randomUUID(), processId: process.pid };
+    app.log.info({ ...attempt, event: 'timer_sweeps_drain_started' }, 'Waiting for the timer sweeps to finish.');
+    await leave();
+    app.log.info({ ...attempt, event: 'timer_sweeps_drained' }, 'All timer sweeps have finished successfully.');
+  });
 }

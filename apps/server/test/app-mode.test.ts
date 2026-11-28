@@ -9,6 +9,7 @@ import { agents, nodes, sessions, subscriptions } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import type { AgentSql } from '../src/db/agent-sql.js';
 import { idOnly } from '../src/db/selections.js';
+import { startTimers } from '../src/modules/agents/timers.js';
 import { agentSqlFollowsMode, AppMode, modeGate, refusalOf, whileLeading } from '../src/modules/keeper/app-mode.js';
 import { NODE_STALE_MS } from '../src/modules/nodes/nodes.js';
 import { freshState, KEEPER_FILE, readKeeperState, writeKeeperState, type KeeperState, type Mode } from '../src/modules/keeper/state.js';
@@ -37,6 +38,49 @@ function gate() {
   const opened = new Promise<void>(done => (open = done));
   return { opened, open };
 }
+
+describe('timer shutdown evidence', () => {
+  async function timerMode() {
+    const records: { event?: string; attemptId?: string; processId?: number; msg?: string }[] = [];
+    const { app, db } = await testApp({}, { stream: { write: line => { records.push(JSON.parse(line)); } } });
+    const dir = folder();
+    const { mode } = modeIn(dir);
+    startTimers(app, { ...app.ctx, mode });
+    onTestFinished(() => mode.stop());
+    const switchTo = (next: Mode) => {
+      writeKeeperState(dir, stateOf(next));
+      return mode.check();
+    };
+    return { db, mode, records, switchTo };
+  }
+
+  it('logs matching start and completion events with a fresh attempt ID for each drain', async () => {
+    const { mode, records, switchTo } = await timerMode();
+    await switchTo('lead');
+    await switchTo('read');
+    await switchTo('lead');
+    await mode.stop();
+    const events = records.filter(({ event }) => event?.startsWith('timer_sweeps_drain'));
+    expect(events.map(({ event }) => event)).toEqual([
+      'timer_sweeps_drain_started', 'timer_sweeps_drained', 'timer_sweeps_drain_started', 'timer_sweeps_drained',
+    ]);
+    const [first, firstDone, second, secondDone] = events;
+    expect(first).toMatchObject({ attemptId: expect.any(String), processId: process.pid });
+    expect(firstDone).toMatchObject({ attemptId: first!.attemptId, processId: process.pid });
+    expect(second).toMatchObject({ attemptId: expect.any(String), processId: process.pid });
+    expect(secondDone).toMatchObject({ attemptId: second!.attemptId, processId: process.pid });
+    expect(second!.attemptId).not.toBe(first!.attemptId);
+  });
+
+  it('logs the drain start but omits completion after a timer step reports an error', async () => {
+    const { db, mode, records, switchTo } = await timerMode();
+    vi.spyOn(db, 'update').mockImplementationOnce(() => { throw new Error('test database error'); });
+    await switchTo('lead');
+    await mode.stop();
+    expect(records).toContainEqual(expect.objectContaining({ msg: 'ending the node connections of the last run failed' }));
+    expect(records.filter(({ event }) => event?.startsWith('timer_sweeps_drain')).map(({ event }) => event)).toEqual(['timer_sweeps_drain_started']);
+  });
+});
 
 describe('the keeper file', () => {
   it('is written whole and read back', () => {
