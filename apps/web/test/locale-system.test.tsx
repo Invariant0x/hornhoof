@@ -130,9 +130,11 @@ describe('the page in a language', () => {
     expect(screen.getByTestId('language')).toHaveTextContent('en');
     const russian = LANGUAGES.find(choice => choice.id === 'ru')!;
     act(() => screen.getByRole('button', { name: russian.name }).click());
-    await waitFor(() => expect(screen.getByTestId('language')).toHaveTextContent('ru'));
+    await waitFor(() => {
+      expect(screen.getByTestId('language')).toHaveTextContent('ru');
+      expect(document.documentElement.lang).toBe('ru');
+    });
     expect(localStorage.getItem('hh-lang')).toBe('ru');
-    expect(document.documentElement.lang).toBe('ru');
   });
 
   it('reads a right-to-left language right to left, on the root and for what a widget needs', async () => {
