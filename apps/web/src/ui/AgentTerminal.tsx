@@ -313,7 +313,9 @@ function connectView(term: Terminal, path: string, setUp: (up: boolean, asleep?:
     const view: View = { term, send, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, session, hold, ready, refused };
     const ws = new WebSocket(viewUrl(path, view.asked));
     connection.socket = ws;
-    ws.onmessage = e => received(view, JSON.parse(String(e.data)) as Frame);
+    ws.onmessage = e => {
+      if (!ended && connection.socket === ws && ws.readyState === 1) received(view, JSON.parse(String(e.data)) as Frame);
+    };
     ws.onclose = e => {
       clearHold(hold);
       if (ended || connection.socket !== ws) return;

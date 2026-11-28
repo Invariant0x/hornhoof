@@ -19,6 +19,8 @@ declare module 'fastify' {
   interface FastifyContextConfig {
     /* The route acts outside the database before it writes a row, so its first step commits before it acts. */
     startsFirst?: boolean;
+    /* An authenticated route may return a result that its own committed data proves. */
+    replyToRepeat?: (req: FastifyRequest, base: string, reply: FastifyReply) => Promise<boolean>;
   }
 }
 
@@ -36,11 +38,12 @@ function requestId(req: FastifyRequest): string | null {
 
 /* A page's answer can carry a session cookie, an invite link or an install command, and is shaped by who asks, so none is
    kept: a change already listed answers that it was done, and the person reloads to see it. */
-async function sourceOf(db: Db, req: FastifyRequest, id: string, signedIn: SignedIn): Promise<Source> {
+async function sourceOf(db: Db, req: FastifyRequest, id: string, signedIn: SignedIn, reply: FastifyReply): Promise<Source | null> {
   const base = webSource(id);
   const before = await outsideSources(() => listed(db, base));
   if (before) {
     await touch(db, before.first);
+    if (await req.routeOptions.config.replyToRepeat?.(req, base, reply)) return null;
     throw new ApiError(409, 'conflict', ALREADY_DONE, 'already_done');
   }
   const source = openSource(base);
@@ -61,10 +64,11 @@ type SignedIn = (req: FastifyRequest) => Promise<unknown>;
    the source it came in. */
 export function registerRequestSources(app: FastifyInstance, db: Db, signedIn: SignedIn = req => requirePerson(req, db)): void {
   app.decorateRequest('changeSource', null);
-  app.addHook('preHandler', (req: FastifyRequest, _reply: FastifyReply, done: (err?: Error) => void) => {
+  app.addHook('preHandler', (req: FastifyRequest, reply: FastifyReply, done: (err?: Error) => void) => {
     const id = requestId(req);
     if (!id) return done();
-    sourceOf(db, req, id, signedIn).then(source => {
+    sourceOf(db, req, id, signedIn, reply).then(source => {
+      if (!source) return;
       req.changeSource = source;
       sources.run(source, () => done());
     }, done);

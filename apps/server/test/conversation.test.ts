@@ -997,6 +997,20 @@ describe("an employee's conversation", () => {
     expect(await builtin.next()).toEqual({ type: 'job.cancel', jobId: run.jobId });
   });
 
+  it('returns the recorded chat delivery when the first answer was lost', async () => {
+    const { app, ceo, bruno, builtin } = await withEmployee();
+    const id = randomUUID();
+    const send = (text: string) => app.inject({ method: 'POST', url: `/api/agents/${bruno.id}/messages`, headers: { 'idempotency-key': id }, ...as(ceo), payload: { text } });
+    const first = await send('One message');
+    expect(first.statusCode).toBe(202);
+    expect((await nextRun(builtin)).jobId).toBe(first.json().jobId);
+    const replay = await send('One message');
+    expect(replay.statusCode).toBe(202);
+    expect(replay.json()).toEqual(first.json());
+    expect((await send('Different words')).statusCode).toBe(409);
+    expect(builtin.queued()).toBe(0);
+  });
+
   it('stops an employee once when the page sends the stop again', async () => {
     const { app, ceo, builtin, bruno } = await withEmployee();
     await sayTo(app, ceo, bruno.id, 'Write a long essay');

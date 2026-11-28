@@ -1029,6 +1029,8 @@ export const agentEvents = pgTable(
     createdAt: createdAt(),
   },
   t => [
+    index('agent_events_visible_history').on(t.agentId, t.seq).where(sql`data->>'operatorEvidenceId' is null`),
+    index('agent_events_chat_receipt').on(sql`(data->>'chatReceipt')`).where(sql`data->>'chatReceipt' is not null`),
     index('agent_events_agent_id_seq').on(t.agentId, t.seq), index('agent_events_job_id').on(t.jobId),
     index('agent_events_program_history').on(t.jobId, t.createdAt).where(sql`${t.kind} in ('program', 'failed')`),
     index('agent_events_silent_job').on(sql`(${t.data}->>'silentJob')`).where(sql`${t.kind} = 'message' and ${t.data} ? 'silentJob'`),

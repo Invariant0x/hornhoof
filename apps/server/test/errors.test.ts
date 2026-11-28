@@ -7,7 +7,7 @@ import { NotConfirmed, requestRoute } from '../src/db/confirm.js';
 import { NOT_CONFIRMED, READ_ONLY_MESSAGE, registerErrorHandling } from '../src/errors.js';
 
 /* A route that throws err, and what the log got of it. */
-async function thrown(err: Error) {
+async function thrown(err: Error, readHistory = false) {
   const lines: string[] = [];
   const stream = new Writable({
     write(chunk, _encoding, done) {
@@ -17,10 +17,11 @@ async function thrown(err: Error) {
   });
   const app = Fastify({ logger: { level: 'warn', stream } });
   registerErrorHandling(app);
-  app.get('/boom', async () => {
+  const path = readHistory ? '/api/agents/:id/events' : '/boom';
+  app.get(path, async () => {
     throw err;
   });
-  const res = await app.inject({ method: 'GET', url: '/boom' });
+  const res = await app.inject({ method: 'GET', url: readHistory ? '/api/agents/orchestrator/events' : '/boom' });
   await app.close();
   return { res, log: lines.join('') };
 }
@@ -51,6 +52,12 @@ describe('an error no route handled', () => {
     expect(res.statusCode).toBe(500);
     expect(log).toContain('The disk is full at /data.');
     expect(log).toContain('errors.test.ts');
+  });
+
+  it('describes a timed-out history read without suggesting a change was submitted', async () => {
+    const { res } = await thrown(Object.assign(new Error('transaction timeout'), { code: '25P04' }), true);
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error.reason).toBe('chat_history_unavailable');
   });
 
   it('answers a refused lease as read_only and a lost commit as not_confirmed', async () => {

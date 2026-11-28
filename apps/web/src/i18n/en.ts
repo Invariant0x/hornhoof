@@ -3126,6 +3126,8 @@ export const en = {
     maintenance: 'Hornhoof is installing an update and takes no changes until it ends. Try again in a few minutes.',
     read_only: 'Hornhoof only reads on this machine now, so nothing was changed.',
     not_confirmed: 'Hornhoof could not confirm this change. It may be saved; look before you try again.',
+    chat_delivery_unknown: 'Message delivery is not confirmed yet.',
+    chat_history_unavailable: 'The conversation could not be loaded.',
     already_done: 'This change was already sent, and Hornhoof made it or began to make it, but its answer was lost. Reload the page to see what is there.',
     starting: 'Hornhoof is starting. Try again in a few seconds.',
     command_active: 'There is an active command for this place. Use it or wait until it expires.',
