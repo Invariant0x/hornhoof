@@ -45,6 +45,10 @@ describe('updater, the computer', () => {
     return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
   };
   const later = () => NOW_SEC + 3600;
+  const stopEvents = (out: string) => out.split('\n')
+    .filter(line => line.startsWith('{"event":"updater_computer_stop",'))
+    .map(line => JSON.parse(line));
+  const utc = () => expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
 
   function legacyQueueOwner(s: Stand, uid: string) {
     const tools = join(s.dir, 'queue-owner');
@@ -358,6 +362,7 @@ describe('updater, the computer', () => {
     expect(made).toBeGreaterThanOrEqual(0);
     expect(r.calls.indexOf('docker start -a hornhoof-computer-c1')).toBeGreaterThan(made);
     expect(answer(s, 'c1')).toEqual({ id: 'c1', exit: 3, output: 'ran: uname -a\n' });
+    expect(stopEvents(r.out)).toEqual([]);
     expect(existsSync(join(s.computerControl, 'computer', 'c1.started'))).toBe(false);
     /* An answered command does not run again: the stub's log keeps the first run only. */
     expect((await runOnce(s, null, env)).calls.filter(c => c.startsWith('docker start'))).toHaveLength(1);
@@ -378,6 +383,7 @@ describe('updater, the computer', () => {
     expect(raced.calls).toContain('docker rm -f hornhoof-computer-c8');
     expect(raced.calls.filter(c => c.startsWith('docker start'))).toEqual([]);
     expect(answer(u, 'c8')).toMatchObject({ exit: 125, output: expect.stringContaining('Stopped: access to the computer was closed.') });
+    expect(stopEvents(raced.out)).toEqual([]);
     const t = stand();
     writeFileSync(join(t.control, 'computer.json'), JSON.stringify({ untilSec: later() }));
     command(t, 'c3', 'uname -a');
@@ -392,16 +398,40 @@ describe('updater, the computer', () => {
     const r = await runOnce(s, null, { ...env, STUB_COMPUTER_RUNS: '1' });
     expect(r.calls).toContain('docker rm -f hornhoof-computer-c4');
     expect(answer(s, 'c4')).toMatchObject({ id: 'c4', exit: 124, output: expect.stringContaining('Stopped after 1 seconds.') });
+    expect(stopEvents(r.out)).toEqual([{
+      event: 'updater_computer_stop', id: 'c4', at: utc(), reason: 'timeout', requestPresent: true,
+      accessRead: 'ok', accessCheck: 'open', keeperRead: 'not_checked', keeperCheck: 'not_checked', graceSecondsRemaining: 120,
+    }]);
   });
 
   it('stops a running command when the machine owner closes access', async () => {
     const s = stand();
     access(s, later());
-    command(s, 'c6', 'apt-get upgrade -y', 60);
-    const close = 'if [ -f "$HORNHOOF_COMPUTER_CONTROL_DIR/computer/c6.started" ]; then echo "{}" > "$HORNHOOF_COMPUTER_CONTROL_DIR/computer.json"; fi';
+    command(s, 'c6', 'recorded private command', 60);
+    const close = `if [ -f "$HORNHOOF_COMPUTER_CONTROL_DIR/computer/c6.started" ]; then echo '{"private":"recorded private lease"}' > "$HORNHOOF_COMPUTER_CONTROL_DIR/computer.json"; fi`;
     const r = await runOnce(s, null, { ...env, STUB_COMPUTER_RUNS: '1', STUB_DURING_SLEEP: close });
     expect(r.calls).toContain('docker rm -f hornhoof-computer-c6');
     expect(answer(s, 'c6')).toMatchObject({ id: 'c6', exit: 125, output: expect.stringContaining('Stopped: access to the computer was closed.') });
+    expect(stopEvents(r.out)).toEqual([{
+      event: 'updater_computer_stop', id: 'c6', at: utc(), reason: 'closed', requestPresent: true,
+      accessRead: 'ok', accessCheck: 'closed', keeperRead: 'ok', keeperCheck: 'not_eligible', graceSecondsRemaining: 120,
+    }]);
+    expect(r.out).not.toMatch(/recorded private command|recorded private lease/);
+  });
+
+  it.each([
+    { change: 'printf invalid > "${keeper:?}/computer.json"', requestPresent: true, accessRead: 'failed', accessCheck: 'invalid', keeperRead: 'failed', keeperCheck: 'not_eligible' },
+    { change: 'rm -- "${keeper:?}/computer/diagnose.json"', requestPresent: false, accessRead: 'not_checked', accessCheck: 'not_checked', keeperRead: 'not_checked', keeperCheck: 'not_checked' },
+  ])('diagnoses a running stop when request presence is $requestPresent and access read is $accessRead', async ({ change, ...decision }) => {
+    const s = stand();
+    access(s, later());
+    command(s, 'diagnose', 'recorded sample');
+    const stopped = `keeper="$HORNHOOF_COMPUTER_CONTROL_DIR"; if [ -e "$STUB_STATE/computer-runs" ] && [ ! -e "$STUB_STATE/changed" ]; then ${change}; touch "$STUB_STATE/changed"; fi`;
+    const r = await runOnce(s, null, { ...env, STUB_COMPUTER_RUNS: '1', STUB_DURING_SLEEP: stopped });
+    expect(r.calls).toContain('docker rm -f hornhoof-computer-diagnose');
+    expect(stopEvents(r.out)).toEqual([{
+      event: 'updater_computer_stop', id: 'diagnose', at: utc(), reason: 'closed', ...decision, graceSecondsRemaining: 120,
+    }]);
   });
 
   /* A command that recreates the machine's keeper, as an installer run on it does, stops the keeper that carried it, and
@@ -441,6 +471,7 @@ describe('updater, the computer', () => {
       const r = await runOnce(s, null, { ...env, STUB_COMPUTER_RUNS: '1', STUB_DURING_SLEEP: keepers(s, 'c10', { 1: STOPPED, 40: open }, 45) });
       expect(r.calls).not.toContain('docker rm -f hornhoof-computer-c10');
       expect(answer(s, 'c10')).toEqual({ id: 'c10', exit: 0, output: 'ran: bash install.sh\n' });
+      expect(stopEvents(r.out)).toEqual([]);
     });
 
     it('stops the command at once when a keeper that runs says access is closed', async () => {
@@ -451,6 +482,10 @@ describe('updater, the computer', () => {
       expect(r.calls).toContain('docker rm -f hornhoof-computer-c11');
       expect(ranUntil(s)).toBe(3);
       expect(answer(s, 'c11')).toMatchObject({ id: 'c11', exit: 125, output: expect.stringContaining('Stopped: access to the computer was closed.') });
+      expect(stopEvents(r.out)).toEqual([{
+        event: 'updater_computer_stop', id: 'c11', at: utc(), reason: 'closed', requestPresent: true,
+        accessRead: 'ok', accessCheck: 'closed', keeperRead: 'ok', keeperCheck: 'not_eligible', graceSecondsRemaining: 118,
+      }]);
     });
 
     it('stops the command at once on a keeper that closes access with no word of stopping, as ever', async () => {
@@ -502,6 +537,10 @@ describe('updater, the computer', () => {
       /* The second the keeper stopped, then the two minutes it had to come back. */
       expect(ranUntil(s)).toBe(121);
       expect(answer(s, 'c12')).toMatchObject({ id: 'c12', exit: 125, output: expect.stringContaining('Stopped: access to the computer was closed.') });
+      expect(stopEvents(r.out)).toEqual([{
+        event: 'updater_computer_stop', id: 'c12', at: utc(), reason: 'closed', requestPresent: true,
+        accessRead: 'ok', accessCheck: 'closed', keeperRead: 'not_checked', keeperCheck: 'not_checked', graceSecondsRemaining: 0,
+      }]);
     }, 60_000);
 
     it('starts no command while its keeper is stopped', async () => {

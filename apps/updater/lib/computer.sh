@@ -67,9 +67,13 @@ heartbeats() {
 # while the owner's standing access is open. The keeper's time also closes access if it stops refreshing it.
 computer_open() {
   local until
-  until=$(take "$COMPUTER_CONTROL/computer.json" quiet jq -r '.untilSec // 0' || true)
+  access_read=ok
+  until=$(take "$COMPUTER_CONTROL/computer.json" quiet jq -r '.untilSec // 0') || access_read=failed
+  access_check=invalid
   case "$until" in '' | *[!0-9]*) return 1 ;; esac
-  [ "$until" -gt "$(date +%s)" ]
+  access_check=closed
+  [ "$until" -gt "$(date +%s)" ] || return 1
+  access_check=open
 }
 
 # Whether a command on the computer is under way: its start marker is there until its answer is.
@@ -84,11 +88,27 @@ computer_busy() {
 # Whether access was closed by a keeper as it stopped, and no keeper has said anything since: such a keeper hears no close.
 # Access for a time that had ended by then holds nothing: the keeper says when it ends in accessUntil.
 computer_keeper_stopped() {
-  local now
+  local now stopped
   now=$(date +%s)
+  keeper_read=ok
   # shellcheck disable=SC2016 # $now is jq's, given with --argjson.
-  [ "$(take "$COMPUTER_CONTROL/computer.json" quiet jq -r --argjson now "$now" \
-    '.stopped == true and (if has("accessUntil") then ((.accessUntil | type) == "number" and .accessUntil > $now) else true end)' || true)" = true ]
+  stopped=$(take "$COMPUTER_CONTROL/computer.json" quiet jq -r --argjson now "$now" \
+    '.stopped == true and (if has("accessUntil") then ((.accessUntil | type) == "number" and .accessUntil > $now) else true end)') || keeper_read=failed
+  keeper_check=not_eligible
+  [ "$stopped" = true ] || return 1
+  keeper_check=eligible
+}
+
+# Only categories from the last watch tick. Leave file contents and access values out of the log.
+computer_stop_event() {
+  local at
+  at=$(date -u '+%Y-%m-%dT%H:%M:%SZ') || return 1
+  jq -cn --arg id "$1" --arg at "$at" --arg reason "$2" --argjson requestPresent "$request_present" \
+    --arg accessRead "$access_read" --arg accessCheck "$access_check" --arg keeperRead "$keeper_read" --arg keeperCheck "$keeper_check" \
+    --argjson graceSecondsRemaining "$((COMPUTER_KEEPER_GRACE - held))" \
+    '{event: "updater_computer_stop", id: $id, at: $at, reason: $reason, requestPresent: $requestPresent,
+      accessRead: $accessRead, accessCheck: $accessCheck, keeperRead: $keeperRead, keeperCheck: $keeperCheck,
+      graceSecondsRemaining: $graceSecondsRemaining}'
 }
 
 computer_answer_json() {
@@ -112,6 +132,7 @@ computer_answer() {
 # second time, and what still runs of it is stopped.
 computer_runs() (
   local file id started answer request command timeout out name watch code made
+  local request_present access_read access_check keeper_read keeper_check
   enter_computer_queue "$COMPUTER_CONTROL" || return 0
   for file in ./*.started; do
     [ ! -L "$file" ] && [ -f "$file" ] || continue
@@ -185,20 +206,28 @@ computer_runs() (
         while [ "$i" -lt "$timeout" ]; do
           sleep 1
           [ ! -f "$out.done" ] || exit 0
+          request_present=false
+          access_read=not_checked
+          access_check=not_checked
+          keeper_read=not_checked
+          keeper_check=not_checked
           if [ -f "$file" ] && computer_open; then
+            request_present=true
             held=0
-          elif [ -f "$file" ] && [ "$held" -lt "$COMPUTER_KEEPER_GRACE" ] && computer_keeper_stopped; then
+          elif [ -f "$file" ] && { request_present=true; [ "$held" -lt "$COMPUTER_KEEPER_GRACE" ]; } && computer_keeper_stopped; then
             held=$((held + 1))
           else
             touch "$out.closed"
+            computer_stop_event "$id" closed >&3 || true
             docker rm -f "$name"
             exit 0
           fi
           i=$((i + 1))
         done
         touch "$out.late"
+        computer_stop_event "$id" timeout >&3 || true
         docker rm -f "$name"
-      ) > /dev/null 2>&1 &
+      ) 3>&2 > /dev/null 2>&1 &
       watch=$!
       docker start -a "$name" < /dev/null >> "$out" 2>&1 || code=$?
       touch "$out.done"
