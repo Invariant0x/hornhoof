@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { PGlite } from '@electric-sql/pglite';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, people, telegramBots, telegramReplies } from '../src/db/schema.js';
@@ -373,15 +373,50 @@ describe('a message through the bot', () => {
     expect(run.prompt).toContain("This is Wes writing to you directly in Telegram. Wes is the CEO's delegate and responsible for your department.");
   });
 
-  it('names the offline machine when it cannot take a Telegram message', async () => {
-    const { app, ceo, owner, tg, builtin } = await company();
+  it('recovers the original Telegram job after a saved message loses its acknowledgement', async () => {
+    const { app, db, ceo, owner, tg, builtin } = await company();
+    await setTelegram(app, ceo, owner.id, '@Ivan_K');
+    await connectBot(app, ceo, 'orchestrator', TOKEN);
+    const update = tg.write(TOKEN, IVAN, 'Deliver this only once.');
+    const run = await nextOf(builtin, 'job.run');
+    await until(async () => (await db.select().from(telegramReplies)).some(r => r.jobId === run.jobId));
+    const [bot] = await db.select().from(telegramBots);
+    const repeated = { update_id: update, message: { message_id: 1, date: 1, chat: { id: IVAN.id, type: 'private' as const }, from: { ...IVAN, is_bot: false }, text: 'Deliver this only once.' } };
+    const { receive } = await import('../src/modules/telegram/inbox.js');
+    await receive(app.ctx, bot!, repeated, async () => {}, async () => Buffer.alloc(0));
+    const events = (await db.select().from(agentEvents)).filter(e => (e.data as { telegram?: { update: number } }).telegram?.update === update);
+    expect(events.map(e => e.jobId)).toEqual([run.jobId]);
+    expect((await db.select().from(telegramReplies)).map(r => r.jobId)).toEqual([run.jobId]);
+  });
+
+  it('keeps an offline message across a restart and delivers it once when the node reconnects', async () => {
+    const { app, db, ceo, owner, tg, builtin, settings } = await company();
     await setTelegram(app, ceo, owner.id, '@Ivan_K');
     await connectBot(app, ceo, 'orchestrator', TOKEN);
     builtin.close();
     await until(async () => (await state(app, ceo)).reason === 'machine_offline');
-    tg.write(TOKEN, IVAN, 'Hello.');
-    await until(() => tg.sent.length > 0);
-    expect(tg.sent[0]!.text).toContain('offline');
+    const update = tg.write(TOKEN, IVAN, 'Keep this message until I reconnect.');
+    await until(async () => (await db.select().from(telegramBots))[0]!.updateOffset === update + 1);
+    await expect.poll(async () => {
+      if (tg.sent.some(m => /write.*again|offline|did not go through/i.test(m.text))) return 'discarded';
+      const rows = await db.execute(sql`SELECT attempts, payload_enc FROM telegram_incoming WHERE update_id = ${update}`);
+      const row = (rows as { rows: { attempts: number; payload_enc: string }[] }).rows[0];
+      return row && row.attempts > 0 && !row.payload_enc.includes('Keep this message') ? 'stored' : 'waiting';
+    }, { timeout: 10_000 }).toBe('stored');
+    await app.close();
+    expect(tg.sent.map(m => m.text)).not.toContainEqual(expect.stringMatching(/write.*again|offline|did not go through/i));
+    const { $client } = db as unknown as { $client: PGlite };
+    const reopened = await appOn($client, settings);
+    const url = await listen(reopened.app);
+    const node = await connectNode(url, NODE_KEY);
+    node.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
+    await expect.poll(() => node.queued(), { timeout: 10_000 }).toBeGreaterThan(0);
+    const run = await nextOf(node, 'job.run');
+    expect(run.prompt).toContain('Keep this message until I reconnect.');
+    const events = (await db.select().from(agentEvents)).filter(e => (e.data as {telegram?: {update: number}}).telegram?.update === update);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.jobId).toBe(run.jobId);
+    node.close();
   });
 
   it.each([

@@ -1075,6 +1075,24 @@ export const telegramChatLanguages = pgTable(
 
 /* A person's message that came through a bot, whose answer goes back to their chat: the turn it went into, the events
    already handled, and the language the bot speaks to them in. */
+/* The next Telegram poll may acknowledge an update once its encrypted input is on disk. */
+export const telegramIncoming = pgTable(
+  'telegram_incoming',
+  {
+    id: id(),
+    botId: uuid('bot_id').notNull().references(() => telegramBots.id, { onDelete: 'cascade' }),
+    updateId: bigint('update_id', { mode: 'number' }).notNull(),
+    chatId: bigint('chat_id', { mode: 'number' }).notNull(),
+    payloadEnc: text('payload_enc').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [
+    unique('telegram_incoming_update').on(t.botId, t.updateId),
+    index('telegram_incoming_chat_order').on(t.botId, t.chatId, t.updateId),
+  ],
+);
+
 export const telegramReplies = pgTable(
   'telegram_replies',
   {

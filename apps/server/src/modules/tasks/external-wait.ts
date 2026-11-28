@@ -222,6 +222,11 @@ export async function sendTaskMessage(ctx: Ctx, input: TaskMessage, turn: Messag
    input lock holds the recipient's words in line, so a repeat comes after them. Words whose turn never went out, failed or
    dropped as stale before it started, did not reach the recipient, and go again. */
 async function sentBefore(ctx: Ctx, agentId: string, message: TurnMessage, taskId: string | null): Promise<string | null> {
+  if (message.chatReceipt) {
+    const [kept] = await ctx.db.select(only(agentEvents, 'jobId')).from(agentEvents)
+      .where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'chatReceipt' = ${message.chatReceipt}`)).limit(1);
+    return kept?.jobId ?? null;
+  }
   if (!message.by || !message.byTurn) return null;
   const [sender] = await ctx.db.select(only(jobs, 'startedAt')).from(jobs).where(eq(jobs.id, message.byTurn));
   if (!sender?.startedAt) return null;
