@@ -40,19 +40,64 @@ function gate() {
 }
 
 describe('timer shutdown evidence', () => {
-  async function timerMode() {
+  async function timerMode(beforeTimers: (mode: AppMode) => void = () => {}) {
     const records: { event?: string; attemptId?: string; processId?: number; msg?: string }[] = [];
     const { app, db } = await testApp({}, { stream: { write: line => { records.push(JSON.parse(line)); } } });
     const dir = folder();
     const { mode } = modeIn(dir);
+    beforeTimers(mode);
     startTimers(app, { ...app.ctx, mode });
     onTestFinished(() => mode.stop());
     const switchTo = (next: Mode) => {
       writeKeeperState(dir, stateOf(next));
       return mode.check();
     };
-    return { db, mode, records, switchTo };
+    return { db, mode, records, switchTo, githubLimits: app.ctx.githubLimits };
   }
+
+  it('stops scheduling timer rounds while an earlier exit hook is still running', async () => {
+    const leaving = gate();
+    const { mode, switchTo, githubLimits } = await timerMode(mode => {
+      mode.whenLead(() => {}, () => leaving.opened);
+    });
+    const expired = vi.spyOn(githubLimits, 'expire');
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    await switchTo('lead');
+    const stopped = mode.stop();
+    try {
+      expect(mode.current()).toBe('off');
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(expired).not.toHaveBeenCalled();
+    } finally {
+      leaving.open();
+      await stopped;
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the old timer stopped while quick re-entry waits for the previous exit', async () => {
+    const leaving = gate();
+    const { mode, switchTo, githubLimits } = await timerMode(mode => {
+      mode.whenLead(() => {}, () => leaving.opened);
+    });
+    const expired = vi.spyOn(githubLimits, 'expire');
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    await switchTo('lead');
+    const off = switchTo('read');
+    const back = switchTo('lead');
+    try {
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(expired).not.toHaveBeenCalled();
+      leaving.open();
+      await Promise.all([off, back]);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(expired).toHaveBeenCalled();
+    } finally {
+      leaving.open();
+      await mode.stop();
+      vi.useRealTimers();
+    }
+  });
 
   it('logs matching start and completion events with a fresh attempt ID for each drain', async () => {
     const { mode, records, switchTo } = await timerMode();

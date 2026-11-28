@@ -330,19 +330,22 @@ async function batchEnded(ctx: Ctx, batch: string, task: Task): Promise<void> {
 }
 
 /* A call job can end before its batch is delivered, including across a server restart. */
-export async function retryCallBatches(ctx: Ctx): Promise<void> {
+export async function retryCallBatches(ctx: Ctx, { failOnDeliveryError = false }: { failOnDeliveryError?: boolean } = {}): Promise<void> {
   const peer = alias(oneShotCalls, 'batch_peer');
   const active = ctx.db.select({ id: peer.id }).from(peer).innerJoin(jobs, eq(jobs.id, peer.jobId))
     .where(and(eq(peer.batch, oneShotCalls.batch), inArray(jobs.status, ['queued', 'running'])));
   const batches = await ctx.db.selectDistinct({ batch: oneShotCalls.batch, task: tasks }).from(oneShotCalls)
     .innerJoin(tasks, eq(tasks.id, oneShotCalls.taskId)).where(and(eq(oneShotCalls.told, false), notExists(active)));
+  let failure: { error: unknown } | undefined;
   for (const { batch, task } of batches) {
     try {
       await batchEnded(ctx, batch, task);
     } catch (err) {
       ctx.log.error({ error: loggable(err), batch }, 'A one-shot batch could not be delivered.');
+      if (failOnDeliveryError) failure ??= { error: err };
     }
   }
+  if (failure) throw failure.error;
 }
 
 /* How a batch goes, or every batch on a task, for the agent who started it or anyone on the task. */

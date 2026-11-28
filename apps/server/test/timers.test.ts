@@ -667,6 +667,41 @@ describe('the sweeps of a leading app', () => {
     expect(await ended(leaving)).toBe(true);
   });
 
+  it.each(['entry', 'round'])('waits for a %s sweep that asks to leave as it starts', async kind => {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    const sweep = deferred();
+    let leaving!: Promise<void>;
+    const asksToLeave = vi.fn(() => {
+      leaving = leave();
+      return sweep.promise;
+    });
+    const round = vi.fn(kind === 'round' ? asksToLeave : async () => {});
+    const { enter, leave } = leadSweeps(kind === 'entry' ? asksToLeave : async () => {}, round, EVERY_MS);
+    enter();
+    if (kind === 'round') await vi.advanceTimersByTimeAsync(EVERY_MS);
+    expect(await ended(leaving)).toBe(false);
+    await vi.advanceTimersByTimeAsync(5 * EVERY_MS);
+    expect(round).toHaveBeenCalledTimes(kind === 'round' ? 1 : 0);
+    sweep.resolve();
+    await leaving;
+  });
+
+  it('does not start a replacement if the stall handler asks to leave', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    const entry = deferred();
+    const round = vi.fn(async () => {});
+    let leaving!: Promise<void>;
+    const { enter, leave } = leadSweeps(() => entry.promise, round, EVERY_MS, () => { leaving = leave(); });
+    enter();
+    await vi.advanceTimersByTimeAsync(5 * EVERY_MS);
+    expect(await ended(leaving)).toBe(false);
+    expect(round).not.toHaveBeenCalled();
+    entry.resolve();
+    await leaving;
+  });
+
   it('starts no round over the sweeps of the way in', async () => {
     const { started, endSweep, enter, leave } = sweeps();
     enter();
@@ -708,7 +743,9 @@ describe('the sweeps of a leading app', () => {
     const leaving = leave();
     expect(await ended(leaving)).toBe(false);
     endSweep(1);
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * EVERY_MS);
     expect(await ended(leaving)).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
     endSweep();
     expect(await ended(leaving)).toBe(true);
     expect(stalled).toEqual([5]);

@@ -1,9 +1,11 @@
 import type { ServerMessage } from '@hornhoof/protocol';
 import { and, asc, eq, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { jobs, oneShotCalls, taskEvents, taskRoutes, tasks } from '../src/db/schema.js';
+import { startTimers } from '../src/modules/agents/timers.js';
 import { callEnded, retryCallBatches, startCalls } from '../src/modules/calls/calls.js';
+import { AppMode } from '../src/modules/keeper/app-mode.js';
 import { keepWakes } from '../src/modules/tasks/outbox.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
@@ -67,7 +69,7 @@ describe('one-shot calls', () => {
     ]);
   });
 
-  it('leaves a batch unclaimed if its durable wake fails and delivers it on retry', async () => {
+  it('leaves a batch unclaimed and withholds timer drain success when its durable wake fails, then retries', async () => {
     const c = await company();
     const mac = await c.machine(c.ceo, 'dev-mac');
     const call = await callerOn(c, c.bruno, mac);
@@ -75,11 +77,22 @@ describe('one-shot calls', () => {
     const { jobId } = await nextOf(mac.node, 'job.run');
     await c.db.update(jobs).set({ status: 'done', result: 'All clear.' }).where(eq(jobs.id, jobId));
     await c.db.execute(sql.raw("ALTER TABLE pending_wakes ADD CONSTRAINT reject_calls_wake CHECK (why <> 'calls')"));
+    const info = vi.spyOn(c.app.log, 'info');
+    const mode = new AppMode({ dir: '', fromKeeper: false, log: () => {} });
+    startTimers(c.app, { ...c.app.ctx, mode });
     try {
       await callEnded(c.app.ctx, jobId);
+      await retryCallBatches(c.app.ctx);
+      mode.start();
+      await mode.settled();
+      await mode.stop();
       expect((await c.db.select().from(oneShotCalls).where(eq(oneShotCalls.jobId, jobId)))[0]!.told).toBe(false);
       expect(await c.wokeWith(c.bruno.id)).toBeNull();
+      expect(info).toHaveBeenCalledWith(expect.objectContaining({ event: 'timer_sweeps_drain_started' }), expect.any(String));
+      expect(info).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'timer_sweeps_drained' }), expect.any(String));
     } finally {
+      await mode.stop();
+      info.mockRestore();
       await c.db.execute(sql.raw('ALTER TABLE pending_wakes DROP CONSTRAINT reject_calls_wake'));
     }
     await retryCallBatches(c.app.ctx);

@@ -134,7 +134,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
   await Promise.all([
     timerTick(ctx, now, failed('timer round failed')).catch(failed('timer tick failed')),
     wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
-    retryCallBatches(ctx).catch(failed('recovering one-shot call batches failed')),
+    retryCallBatches(ctx, { failOnDeliveryError: true }).catch(failed('recovering one-shot call batches failed')),
     reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
     releaseRound(ctx).catch(failed('closing turns by the tags of their releases failed')),
     releaseCiRound(ctx).catch(failed('recording the releases that wait for CI failed')),
@@ -173,7 +173,7 @@ async function entrySweeps(ctx: Ctx, failed: (what: string) => (err: unknown) =>
   await checkOperatorHealth(ctx).catch(failed('restoring program operator cases failed'));
   await Promise.all([
     wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
-    retryCallBatches(ctx).catch(failed('recovering one-shot call batches failed')),
+    retryCallBatches(ctx, { failOnDeliveryError: true }).catch(failed('recovering one-shot call batches failed')),
     dropOldFiles(ctx, new Date()).catch(failed('removing the files of old turns failed')),
   ]);
 }
@@ -181,48 +181,79 @@ async function entrySweeps(ctx: Ctx, failed: (what: string) => (err: unknown) =>
 /* How many ticks in a row may find the same sweep still running before it is taken for one that will never end. */
 const PATIENCE_TICKS = 5;
 
+/* Track every started sweep through the drain, even if it stops being the one the next tick watches. */
+function sweepDrain() {
+  let failure: { error: unknown } | undefined;
+  const active = new Set<Promise<void>>();
+  return {
+    resetFailure() { failure = undefined; },
+    track(sweep: () => Promise<void>, finished: () => void) {
+      let finish!: () => void;
+      const ended = new Promise<void>(resolve => { finish = resolve; });
+      /* A sweep can ask to leave synchronously, so it must already be tracked when it starts. */
+      active.add(ended);
+      const run = async () => {
+        try {
+          await sweep();
+        } catch (error) {
+          failure ??= { error };
+        }
+        active.delete(ended);
+        finished();
+        finish();
+      };
+      void run();
+    },
+    async wait() {
+      await Promise.all(active);
+      if (failure) throw failure.error;
+    },
+  };
+}
+
 /* A leading app's sweeps: those of the way in, then a round on each tick. A tick that finds a sweep still
    running is dropped, since the next one does what it would have. A sweep that five ticks in a row find running waits for
    something that does not answer: stalled hears of it, and the rounds go on without it, so one step that hangs does not
    stop every round after it. Leaving stops the ticks and waits for every started sweep, including the ones overtaken. */
-export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void>, everyMs = TICK_MS, stalled: (ticks: number) => void = () => {}): { enter: () => void; leave: () => Promise<void> } {
-  let timer: NodeJS.Timeout | null = null;
+export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void>, everyMs = TICK_MS, stalled: (ticks: number) => void = () => {}): {
+  enter: () => void;
+  stopScheduling: () => void;
+  leave: () => Promise<void>;
+} {
+  const drain = sweepDrain();
+  let timer: NodeJS.Timeout | undefined;
+  let scheduling = false;
   let running: { ticks: number } | null = null;
-  let failure: { error: unknown } | undefined;
-  const active = new Set<Promise<void>>();
-  const settle = async (sweep: () => Promise<void>) => {
-    try {
-      await sweep();
-    } catch (error) {
-      failure ??= { error };
-    }
-  };
   const start = (sweep: () => Promise<void>) => {
     const mine = { ticks: 0 };
-    const ended = settle(sweep).finally(() => {
-      active.delete(ended);
+    running = mine;
+    drain.track(sweep, () => {
       if (running === mine) running = null;
     });
-    active.add(ended);
-    running = mine;
   };
   const tick = () => {
     if (running && ++running.ticks < PATIENCE_TICKS) return;
     if (running) stalled(running.ticks);
-    start(round);
+    if (scheduling) start(round);
+  };
+  const stopScheduling = () => {
+    scheduling = false;
+    clearInterval(timer);
+    timer = undefined;
   };
   return {
     enter() {
-      failure = undefined;
+      drain.resetFailure();
+      scheduling = true;
       start(entry);
+      if (!scheduling) return;
       timer = setInterval(tick, everyMs);
       timer.unref();
     },
-    async leave() {
-      if (timer) clearInterval(timer);
-      timer = null;
-      await Promise.all(active);
-      if (failure) throw failure.error;
+    stopScheduling,
+    leave() {
+      stopScheduling();
+      return drain.wait();
     },
   };
 }
@@ -244,7 +275,8 @@ export function startTimers(app: FastifyInstance, ctx: Ctx): void {
     }
     if (failure) throw failure.error;
   };
-  const { enter, leave } = leadSweeps(() => runSweep(report => entrySweeps(ctx, report)), () => runSweep(report => minuteRound(ctx, new Date(), report)), TICK_MS, stalled);
+  const { enter, stopScheduling, leave } = leadSweeps(() => runSweep(report => entrySweeps(ctx, report)), () => runSweep(report => minuteRound(ctx, new Date(), report)), TICK_MS, stalled);
+  ctx.mode.whenLeaving(stopScheduling);
   ctx.mode.whenLead(enter, async () => {
     const attempt = { attemptId: randomUUID(), processId: process.pid };
     app.log.info({ ...attempt, event: 'timer_sweeps_drain_started' }, 'Waiting for the timer sweeps to finish.');
