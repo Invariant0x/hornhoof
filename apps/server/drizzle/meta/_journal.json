@@ -1198,6 +1198,13 @@
       "when": 1795631214986,
       "tag": "0172_hot_query_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "7",
+      "when": 1795700686897,
+      "tag": "0175_subscription_turn_limit",
+      "breakpoints": true
     }
   ]
 }

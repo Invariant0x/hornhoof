@@ -2,6 +2,7 @@ import type { DispatchQueue } from './queue.js';
 import { turnOperatorDeliveries, failedTurnDelivery, heldByOperator } from './deliveries.js';
 import { queuedSession, withOriginal, freshConversation, forgetFresh } from './sessions.js';
 import { type Along } from './turn-types.js';
+import { turnPlacement } from './subscription-room.js';
 import { placement, isLeader, liveSubscription, conversationOf } from './placement.js';
 import { WORKER_COMPACT_WINDOW, FULL_COMPACT_WINDOW, NOTHING_UNREAD } from './constants.js';
 import { idOnly } from '../../db/selections.js';
@@ -9,7 +10,7 @@ import { effortsOf, modelsFor } from '@hornhoof/protocol';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { agents, jobs } from '../../db/schema.js';
+import { agents, jobs, type subscriptions } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { turnsHeld } from '../updates/drain.js';
 import { ownMachine } from '../nodes/hub.js';
@@ -26,8 +27,17 @@ import { repositoryScope } from '../testruns/describe.js';
 import { cancelUnsentDelivery } from '../program-operator/deliveries.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { claimMail, inboxChanged, mailShown, mailSummary, mailWentOut, unreadMail } from './inbox.js';
-export async function sendNext(ctx: Ctx, agentId: string, queue: DispatchQueue): Promise<void> {
-  const { waitsForWords, waitsForRetry, dueTurn, inboxTurnDue, heldBack, goingAlong, ALONG, take, HELD, wentOutWithWords, wentOut } = queue;
+
+type ReadyTurn = {
+  agent: typeof agents.$inferSelect;
+  sub: typeof subscriptions.$inferSelect;
+  due: NonNullable<Awaited<ReturnType<DispatchQueue['dueTurn']>>>;
+  mail: Awaited<ReturnType<typeof unreadMail>>;
+};
+
+/* Find the same job the agent would send, so the shared queue can rank that job. */
+export async function nextTurn(ctx: Ctx, agentId: string, planId: string, queue: DispatchQueue): Promise<ReadyTurn | { destination: string } | undefined> {
+  const { waitsForWords, waitsForRetry, dueTurn, inboxTurnDue, heldBack } = queue;
   const { db } = ctx;
   const [running] = await db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   if (running || await waitsForWords(ctx, agentId)) return;
@@ -36,6 +46,7 @@ export async function sendNext(ctx: Ctx, agentId: string, queue: DispatchQueue):
   await ctx.conversationEffects.beforeDispatch(ctx, agentId);
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready') return;
+  if (sub.id !== planId) return { destination: sub.id };
   const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
   if (!agent || !(await placement(ctx, agent, sub))) return;
   if (await heldByOperator(ctx, agent)) return;
@@ -43,18 +54,25 @@ export async function sendNext(ctx: Ctx, agentId: string, queue: DispatchQueue):
   if (agent.kind !== 'orchestrator' && turnsHeld(ctx, agent.companyId)) return;
   if (await waitsForRetry(ctx, agentId)) return;
   const due = await dueTurn(ctx, agent, sub);
-  if (!due) return (await inboxTurnDue(ctx, agent)) ? sendNext(ctx, agentId, queue) : undefined;
-  if (await heldBack(ctx, due)) return sendNext(ctx, agentId, queue);
+  if (!due) return (await inboxTurnDue(ctx, agent)) ? nextTurn(ctx, agentId, planId, queue) : undefined;
+  if (await heldBack(ctx, due)) return nextTurn(ctx, agentId, planId, queue);
   /* The turn that takes the inbox asks what is unread in it when it goes, or goes nowhere when nothing is. */
-  let mail = due.inboxWake ? await unreadMail(db, agentId) : [];
+  const mail = due.inboxWake ? await unreadMail(db, agentId) : [];
   if (due.inboxWake && !mail.length) {
     await db.update(jobs).set({ status: 'done', result: NOTHING_UNREAD, finishedAt: new Date() }).where(and(eq(jobs.id, due.id), eq(jobs.status, 'queued')));
-    return sendNext(ctx, agentId, queue);
+    return nextTurn(ctx, agentId, planId, queue);
   }
+  return { agent, sub, due, mail };
+}
+
+export async function sendTurn(ctx: Ctx, { agent, sub, due, mail }: ReadyTurn, queue: DispatchQueue): Promise<'reconsider' | void> {
+  const { heldBack, goingAlong, ALONG, take, HELD, wentOutWithWords, wentOut } = queue;
+  const { db } = ctx;
+  const agentId = agent.id;
   const job = due.inboxWake ? { ...due, prompt: mailSummary(mail) } : due;
   const at = await repoAt(ctx, await turnPlaces(db, agent, job.taskId));
   const repo = at?.repo ?? null;
-  const place = await placement(ctx, agent, sub);
+  const place = await turnPlacement(ctx, agent, sub);
   if (!place) return;
   /* A machine that installs its build takes no turn now; the turn waits and goes out by itself when the machine is done.
      Asked here, before the turn's words are put together, and once more when the turn is taken. Nor does the machine
@@ -94,7 +112,7 @@ export async function sendNext(ctx: Ctx, agentId: string, queue: DispatchQueue):
   /* The machine of the built-in node it goes to is written with it, so that node alone may answer for it. */
   const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, builtinMachine: place.builtinMachine, prompt, sessionId, toolTokenHash: hashToken(token), instructionsHash: runHash });
   if (taken === HELD) return;
-  if (!taken) return sendNext(ctx, agentId, queue);
+  if (!taken) return 'reconsider';
   await claimMail(db, agentId, mail, job);
   wentOutWithWords(ctx, agentId, job);
   /* The agent stays on this machine from now on. */
