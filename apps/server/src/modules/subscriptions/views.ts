@@ -1,12 +1,13 @@
 import { apiEndpoint, currentLimits, modelsFor, type Account, type ApiEndpoint, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { agents, departments, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type PlanFallback, type Provider, type SUBSCRIPTION_STATUSES, type TARGET_KINDS } from '../../db/schema.js';
+import { agents, departments, machines, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type PlanFallback, type Provider, type SUBSCRIPTION_STATUSES, type TARGET_KINDS } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { WHOLE_COMPANY } from '../people/views.js';
 import { deptName } from '../departments/templates.js';
 import { nodeIdentity, ownBuiltin, type NodeIdentity, type NodeHub } from '../nodes/hub.js';
-import { planNodes, type NodeRow } from '../nodes/nodes.js';
+import { planHostContacts } from '../nodes/machine-contact.js';
+import { isBuiltinHost, planNodes, type NodeRow } from '../nodes/nodes.js';
 
 /* listed: a personal plan whose owner has several departments; the name lists them. */
 export type Place = { kind: 'company' | 'department' | 'listed'; id: string | null; name: string };
@@ -22,7 +23,7 @@ export type SubView = {
   owner: { id: string; name: string };
   place: Place;
   /* The machines the plan runs on, oldest first, with its state on each. */
-  machines: { id: string; hostname: string; status: NodeStatus; online: boolean }[];
+  machines: { id: string; hostname: string; status: NodeStatus; online: boolean; hostOnline?: boolean; hostLastSeenAt?: string | null }[];
   limits: Limits | null;
   limitsUpdatedAt: string | null;
   budget: number | null;
@@ -62,10 +63,16 @@ export function agreed(accounts: Account[]): { tier: string | null; differ: bool
 
 /* Whether a node is connected; asked of 'builtin', whether any machine's built-in node is, which is where an API key's
    work runs. */
-type IsOnline = (node: NodeIdentity | 'builtin') => boolean;
+type LocalHost = { key: string; networkId: string | null };
+type IsOnline = ((node: NodeIdentity | 'builtin') => boolean) & { localHostConnected?: (host: LocalHost) => boolean };
 
-export const onlineIn = (hub: Pick<NodeHub, 'isOnline' | 'builtins'>, config: { machineId: string | null }): IsOnline => node =>
-  node === 'builtin' ? hub.isOnline(ownBuiltin(config)) || hub.builtins().length > 0 : hub.isOnline(node);
+export const onlineIn = (hub: Pick<NodeHub, 'isOnline' | 'builtins'>, config: { machineId: string | null; hostId?: string | null }): IsOnline => {
+  const own = ownBuiltin(config);
+  return Object.assign(
+    (node: NodeIdentity | 'builtin') => node === 'builtin' ? hub.isOnline(own) || hub.builtins().length > 0 : hub.isOnline(node),
+    { localHostConnected: (host: LocalHost) => hub.isOnline(own) && isBuiltinHost(host, config.hostId ?? null, config.machineId) },
+  );
+};
 
 /* Never selects secret_enc, so it cannot leak into a response. */
 const columns = {
@@ -139,6 +146,21 @@ function accountViews(mine: NodeRow[], accountOf: Map<string, Account | null>, v
    for its program's first setup, else the first. */
 const shownNode = <T extends { status: string }>(up: T[]): T | undefined => up.find(n => n.status === 'ready') ?? up.find(n => n.status === 'needs_setup') ?? up[0];
 
+function connectionView(n: NodeRow, online: boolean, contact?: { online: boolean; lastSeenAt: Date | null }) {
+  return { id: n.machineId, hostname: n.hostname, status: n.status, online,
+    ...(contact && { hostOnline: contact.online, hostLastSeenAt: contact.lastSeenAt?.toISOString() ?? null }) };
+}
+
+async function planConnections(db: Db, allNodes: NodeRow[], isOnline: IsOnline, viewer: Viewer | null) {
+  const told = allNodes.length ? await db.select({ id: nodes.id, account: nodes.account, machineId: machines.id, key: machines.machineKey,
+    networkId: machines.networkId, reportAt: machines.reportAt, machineOwnerId: machines.personId })
+    .from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(inArray(nodes.id, allNodes.map(n => n.id))) : [];
+  const visibleHosts = told.filter(n => viewer?.scopeKind === 'company' || viewer?.id === n.machineOwnerId);
+  const contacts = await planHostContacts(db, visibleHosts, isOnline, isOnline.localHostConnected);
+  const connections = new Map(allNodes.map(n => [n.id, connectionView(n, isOnline(nodeIdentity(n.id)), contacts.get(n.machineId))]));
+  return { connections, accountOf: new Map(told.map(n => [n.id, n.account])) };
+}
+
 export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: Viewer | null = null): Promise<SubView[]> {
   const live = isNull(subscriptions.removedAt);
   const companyId = viewer?.companyId;
@@ -160,13 +182,12 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
   const orderedDepts = deptRows.map(d => d.id);
   const [orchestrator] = await db.select(only(agents, 'subscriptionId')).from(agents).where(and(eq(agents.kind, 'orchestrator'), companyId ? eq(agents.companyId, companyId) : undefined));
   const allNodes = await planNodes(db, rows.filter(r => r.kind === 'personal').map(r => r.id));
-  const told = allNodes.length ? await db.select({ id: nodes.id, account: nodes.account }).from(nodes).where(inArray(nodes.id, allNodes.map(n => n.id))) : [];
-  const accountOf = new Map(told.map(n => [n.id, n.account]));
+  const { accountOf, connections } = await planConnections(db, allNodes, isOnline, viewer);
   return rows.map(r => {
     const mine = allNodes.filter(n => n.subscriptionId === r.id);
     /* A plan's state is of one machine online, else what the plan was last. So it never shows signed in on one machine and
        online on another, which can take no turn. */
-    const up = mine.filter(n => isOnline(nodeIdentity(n.id)));
+    const up = mine.filter(n => connections.get(n.id)!.online);
     const shown = shownNode(up);
     return {
       id: r.id,
@@ -178,7 +199,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
       last4: r.last4,
       owner: { id: r.ownerId, name: r.ownerName },
       place: subscriptionPlace(r, ownerDepartments(r.ownerId, access, orderedDepts, teamDept), depts, teamDept),
-      machines: mine.map(n => ({ id: n.machineId, hostname: n.hostname, status: n.status, online: isOnline(nodeIdentity(n.id)) })),
+      machines: mine.map(n => connections.get(n.id)!),
       limits: currentLimits(r.limits ?? null, r.limitsUpdatedAt),
       limitsUpdatedAt: r.limitsUpdatedAt?.toISOString() ?? null,
       budget: r.budget,

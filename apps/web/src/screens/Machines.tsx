@@ -225,7 +225,7 @@ function machineColumns(t: Messages, language: Language, priority: boolean): Tab
 function machineFilters(t: Messages): FilterGroup<MachineRow>[] {
   const groups: FilterGroup<MachineRow>[] = [
     providerFilter(t.tables.provider, m => m.plans.map(p => p.provider)),
-    { key: 'status', label: t.tables.status, values: m => [m.online ? 'online' : 'offline'], text: value => value === 'online' ? t.machines.online : t.cards.offline },
+    { key: 'status', label: t.tables.status, values: m => [m.online ? 'online' : 'offline'], text: value => value === 'online' ? t.machines.online : t.machines.noConnection },
     { key: 'tests', label: t.tables.testFilters, values: m => m.lendsTests ? ['lent'] : [], text: () => t.tables.lentFilter, single: true },
   ];
   return groups.map(group => ({ ...group, all: t.tables.all }));
@@ -746,7 +746,7 @@ function SystemBlock({ row, editable, controls }: { row: MachineRow; editable: b
   return (
     <CardBlock title={t.cards.systemBlock}>
       {facts.length > 0 && <Facts items={facts} />}
-      <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
+      <ProgramVersions id={row.id} online={row.programsOnline ?? row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
       {row.access && <MachineAccessBlock view={row.access} onChanged={() => void controls.refresh()} />}
     </CardBlock>
   );
@@ -764,7 +764,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
   const picking = controls.picking === row.id;
   return (
     <CardFrame label={row.hostname} accent={row.server}
-      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OffChecks row={row} /><OtherBuild row={row} /><BrowserIssue row={row} /><CheckIssue row={row} /><LowDisk row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
+      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OffChecks row={row} /><OtherBuild row={row} /><BrowserIssue row={row} /><CheckIssue row={row} /><LowDisk row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.machines.noConnection}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
       extra={m && (core ? <CoreCommand machine={m} shown={core} controls={controls} /> : <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />)}>
       <section className="blk blk-facts">
         <h4>{t.cards.aboutMachine}</h4>

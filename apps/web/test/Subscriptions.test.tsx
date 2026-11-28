@@ -38,7 +38,7 @@ describe('Subscriptions', () => {
     const machines = plan.querySelector('.plist')!;
     expect.soft(machines.textContent).toContain(localState);
     expect(machines.textContent).toContain(language === 'en' ? 'laptopIvan, waiting for the login' : 'laptopIvan, ждет входа');
-    expect(machines.textContent).toContain(language === 'en' ? 'towerIvan, offline' : 'towerIvan, не в сети');
+    expect(machines.textContent).toContain(language === 'en' ? 'towerIvan, subscription disconnected' : 'towerIvan, нет связи с подпиской');
     const login = rowOf('Codex');
     expect(login.querySelector('.blk-fix')?.textContent).toContain(language === 'en' ? 'On dev-laptop. Only Ivan can sign in.' : 'На dev-laptop. Войти может только владелец: Ivan.');
     const waiting = rowOf('Kimi');
@@ -64,12 +64,35 @@ describe('Subscriptions', () => {
     expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain(fix);
   });
 
+  it.each([
+    [null, 'No recorded contact with node-a.'],
+    ['2026-11-24T16:12:00Z', 'Last contact with node-a:'],
+  ])('shows recorded host contact independently of stale quota data (%s)', async (hostLastSeenAt, expected) => {
+    const machines = [{ id: 'm1', hostname: 'node-a', status: 'ready', online: false, hostOnline: false, hostLastSeenAt }];
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }], 'GET /api/machines': [200, { machines: [] }],
+      'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, provider: 'antigravity', label: 'Antigravity', status: 'ready', online: false, machines }] }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    expect(rowOf('Antigravity')).toHaveTextContent(expected!);
+  });
+
+  it('distinguishes a connected host from a disconnected subscription on its card', async () => {
+    const machines = [{ id: 'm1', hostname: 'node-a', status: 'needs_login', online: false, hostOnline: true }];
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }], 'GET /api/machines': [200, { machines: [] }],
+      'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, provider: 'antigravity', label: 'Antigravity', status: 'needs_login', online: false, machines }] }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    expect(rowOf('Antigravity')).toHaveTextContent('node-a is connected to Hornhoof');
+    expect(rowOf('Antigravity')).toHaveTextContent('Subscription disconnected');
+    expect(rowOf('Antigravity')).not.toHaveTextContent('machine is offline');
+  });
+
   it('names the machine that waits for the first setup when that machine is offline', async () => {
     const machines = [{ ...MACHINE, id: 'm2', hostname: 'node-b', status: 'needs_login' as const }, { ...MACHINE, hostname: 'node-a', status: 'needs_setup' as const, online: false }];
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines }] }] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain('It needs its first setup on node-a, and the machine is offline.');
+    expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain('Setup can be checked when the subscription reconnects on node-a.');
   });
 
   it('names the machine online that waits for the first setup before one offline', async () => {
@@ -208,7 +231,7 @@ describe('Subscriptions', () => {
     render(<Subscriptions me={ME} />);
     await openAll();
     const machines = within(within(rowOf('Claude')).getByRole('list', { name: 'Machines of Claude' })).getAllByRole('listitem');
-    expect(machines.map(m => m.textContent)).toEqual(['dev-laptopIvan, ready', 'dev-notebookIvan, waiting for the login', 'work-towerIvan, offline']);
+    expect(machines.map(m => m.textContent)).toEqual(['dev-laptopIvan, ready', 'dev-notebookIvan, waiting for the login', 'work-towerIvan, subscription disconnected']);
   });
 
   it("shows each window of a plan's limits as a bar with its share and when it resets", async () => {
@@ -401,11 +424,11 @@ describe('Subscriptions', () => {
     expect(within(rowOf('Anthropic key ending 9f3a')).getByText('Built-in node offline')).toBeInTheDocument();
   });
 
-  it('says Machine offline when the node is not connected', async () => {
+  it('says Subscription disconnected when the node is not connected', async () => {
     mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, online: false }] }], 'GET /api/machines': [200, { machines: [] }] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    expect(within(rowOf('Claude')).getByText('Machine offline')).toBeInTheDocument();
+    expect(within(rowOf('Claude')).getByText('Subscription disconnected')).toBeInTheDocument();
     expect(within(rowOf('Claude')).queryByRole('button', { name: /Run a test/ })).not.toBeInTheDocument();
   });
 
@@ -413,18 +436,18 @@ describe('Subscriptions', () => {
     [
       'en',
       'Not on this plan',
-      'Machine offline',
-      'On workstation-eu. Its agents wait until the machine is back online.',
-      'Machine offline, last data from 05:22 PM',
-      'Machine offline, no limit data yet',
+      'Subscription disconnected',
+      'Waiting for the subscription to reconnect on workstation-eu.',
+      'Subscription disconnected, last data from 05:22 PM',
+      'Subscription disconnected, no limit data yet',
     ],
     [
       'ru',
       'Нет у этого тарифа',
-      'Машина не в сети',
-      'На workstation-eu. Ее агенты ждут, пока машина снова подключится.',
-      'Машина не в сети, последние данные от 17:22',
-      'Машина не в сети, данных о лимитах еще не было',
+      'Нет связи с подпиской',
+      'Ожидается подключение подписки на workstation-eu.',
+      'Нет связи с подпиской, последние данные от 17:22',
+      'Нет связи с подпиской, данных о лимитах еще не было',
     ],
   ] as const)('says in %s when a machine is offline instead of Unknown, and Not on this plan for a complete single-window Claude plan', async (language, notOnPlan, offlineState, offlineLine, offlineWithData, offlineNoData) => {
     localStorage.setItem('hh-lang', language);

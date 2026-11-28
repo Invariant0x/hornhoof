@@ -265,7 +265,7 @@ describe('Machines', () => {
     const box = await openCard('build-box');
     expect(within(box).getByText('Last seen 5 minutes ago')).toBeInTheDocument();
     expect(fact(box, 'System')).toBe('Linux, x86_64');
-    expect(within(box).getByText('Not known while the machine is offline.')).toBeInTheDocument();
+    expect(within(box).getByText('No recent resource readings.')).toBeInTheDocument();
     expect(within(box).queryByText('No plan')).not.toBeInTheDocument();
     const own = card('Built-in node');
     expect(meter(own, 'Processor').querySelector('.g-f')?.textContent).toBe('4 cores');
@@ -672,7 +672,7 @@ describe('Machines', () => {
     expect(within(mac).getByText('Docker на этом Mac настроен меньше самого Mac, поэтому Hornhoof использует только часть.')).toBeInTheDocument();
     expect(meter(mac, 'Диск').textContent).toBe('Диск120ГБ свободноиз 460 ГБ');
     expect(within(mac).getByRole('region', { name: 'Что сейчас идет на dev-laptop' })).toHaveTextContent('Тесты задачи 12, часть 1 из 2');
-    expect(within(card('build-box')).getByText('Неизвестно, пока машина не в сети.')).toBeInTheDocument();
+    expect(within(card('build-box')).getByText('Свежих данных о ресурсах нет.')).toBeInTheDocument();
     expect(meter(card('Встроенная нода'), 'Процессор').querySelector('.g-f')).toHaveTextContent('4 ядра');
     expect(within(screen.getByRole('group', { name: 'Тесты' })).getByRole('button', { name: /^Отдана под тесты/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Подключить машину' })).toBeInTheDocument();
@@ -1195,7 +1195,7 @@ describe('Machines', () => {
     expect(screen.getByText('Showing 2 of 3')).toBeInTheDocument();
     await userEvent.click(within(provider).getByRole('button', { name: /Kimi.*1/ }));
     expect(screen.getByText('Showing 3 of 3')).toBeInTheDocument();
-    await userEvent.click(within(screen.getByRole('group', { name: 'Status' })).getByRole('button', { name: /^Offline/ }));
+    await userEvent.click(within(screen.getByRole('group', { name: 'Status' })).getByRole('button', { name: /^No current connection/ }));
     expect(screen.getByText('Showing 1 of 3')).toBeInTheDocument();
     await userEvent.click(within(screen.getByRole('group', { name: 'Tests' })).getByRole('button', { name: /^Lent to test runs/ }));
     expect(screen.getByText('Showing 0 of 3')).toBeInTheDocument();
@@ -1480,7 +1480,7 @@ describe('the filter groups and search of Machines (#1020)', () => {
     const t = { en, ru }[language];
     const cases = [
       [t.tables.provider, /^Codex/, 1],
-      [t.tables.status, new RegExp(`^${t.cards.offline}`), 1],
+      [t.tables.status, new RegExp(`^${t.machines.noConnection}`), 1],
       [t.tables.testFilters, new RegExp(`^${t.tables.lentFilter}`), 1],
     ] as const;
 

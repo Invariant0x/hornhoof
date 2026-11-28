@@ -386,9 +386,9 @@ describe('the card of a plan that does not work', () => {
   });
 
   it.each([
-    ['en', 'It needs a sign-in on dev-laptop, and the machine is offline.', 'Remove'],
-    ['ru', 'Нужен вход на dev-laptop, а машина не в сети.', 'Удалить'],
-  ])('says in %s that a plan waiting for its sign-in has its machine offline, with Remove alone', async (language, words, remove) => {
+    ['en', 'Sign-in can be checked when the subscription reconnects on dev-laptop.', 'Remove'],
+    ['ru', 'Вход можно проверить, когда подписка снова подключится на dev-laptop.', 'Удалить'],
+  ])('says in %s that sign-in can be checked after the subscription reconnects, with Remove alone', async (language, words, remove) => {
     localStorage.setItem('hh-lang', language);
     mockApi(only({ ...codex, online: false, machines: [{ ...codex.machines[0]!, online: false }] }));
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
